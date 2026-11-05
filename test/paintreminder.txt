@@ -1,0 +1,42 @@
+        /// <summary>提醒卡：整块色块淡入，文字稍后上浮淡入；退场整层淡出，露出下面的普通卡片。</summary>
+        private void PaintReminder(Graphics g, double t, bool quiet)
+        {
+            if (remindEvent == null) return;
+            bool alert = remindEvent.source == "alert";
+            if (alert) { PaintOffAlert(g, t, quiet); return; }
+            bool meeting = Reminders.IsMeeting(remindEvent);
+            var fixedSched = FixedOf(remindEvent);
+            // 四类配色互不混淆：会议=橙黄、日程=主题色、固定日程=各自选的配色；
+            // 但都要先贴合当前主题的明暗，否则在深色主题上会突然跳出一张浅色卡。
+            Color a, b;
+            Color styleInk;
+            if (meeting)
+            {
+                a = Color.FromArgb(244, 145, 53); b = Color.FromArgb(255, 205, 105);
+                styleInk = Color.FromArgb(52, 30, 15);
+            }
+            else
+            {
+                string styleId = fixedSched != null && !string.IsNullOrWhiteSpace(fixedSched.styleId)
+                    ? fixedSched.styleId : ReminderStyles.Follow;
+                ReminderStyles.Resolve(styleId, theme, out a, out b, out styleInk);
+            }
+            if (meeting) ReminderStyles.FitToTheme(theme, ref a, ref b, ref styleInk);
+
+            double exit = t - RemindInMs - RemindHoldMs;
+            int seam = collapsed ? S(37) : S(64);
+            // 色块整块铺满：入场淡入由外层负责，不再左右扫，字就不会被切一半
+            using (var brush = new SolidBrush(a)) g.FillRectangle(brush, 0, 0, Width, Height);
+            using (var brush = new SolidBrush(b)) g.FillRectangle(brush, 0, seam, Width, Height - seam);
+            PaintAtmosphere(g, meeting ? Color.FromArgb(255, 238, 188) : a, t / 1000.0, true);
+
+            // 文字比色块晚一点出现，并且从下往上浮 7 DIP，衔接才连得上
+            double p = quiet ? 1 : Clamp01((t - 200) / 320);
+            if (p <= 0) { DrawDismissButton(g, styleInk, 0); return; }
+            var saved = g.Save();
+            g.TranslateTransform(0, (float)((1 - EaseOutCubic(p)) * S(7)));
+            DrawReminderContent(g, meeting, fixedSched != null ? fixedSched.name : null, styleInk, p);
+            g.Restore(saved);
+            if (!quiet) DrawDismissButton(g, styleInk, p);
+            else DrawDismissButton(g, styleInk, 1);
+        }

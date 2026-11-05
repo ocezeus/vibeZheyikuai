@@ -1,0 +1,53 @@
+{
+  "version":1,
+  "mode":"flex",
+  "startTime":"09:00",
+  "endTime":"18:00",
+  "flexMinutes":630,
+  "lunchDeduct":false,
+  "lunchStart":"11:50",
+  "lunchEnd":"13:30",
+  "workdays":[
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    false
+  ],
+  "exceptions":[
+    
+  ],
+  "lark":{
+    "enabled":true,
+    "chatId":"oc_3508a40a0597d97e5c177dbfa1926a00",
+    "botName":"HRAT考勤大王",
+    "pollMinutes":5,
+    "command":"lark-cli"
+  },
+  "ui":{
+    "x":-1,
+    "y":260,
+    "docked":true,
+    "edge":"right",
+    "opacity":94,
+    "accent":"#4C8DFF",
+    "theme":"midnight",
+    "alwaysOnTop":true,
+    "autoCollapseSeconds":20,
+    "showLunch":true
+  },
+  "calendarEnabled":true,
+  "calendarLeadMinutes":3,
+  "calendarPollMinutes":15,
+  "events":[
+    {
+      "id":"local:386a2a5809e94a83b7ceb9c1b99ab48f",
+      "title":"测试一下",
+      "start":"2026-11-04 11:34",
+      "source":"local",
+      "leadMinutes":0
+    }
+  ]
+}

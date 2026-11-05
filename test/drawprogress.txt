@@ -1,0 +1,57 @@
+        /// <summary>进度条：走过的一段带发光，最后半小时整条变彩色。</summary>
+        private void DrawProgress(Graphics g, int x, int y, int width, int height, bool glowOn)
+        {
+            using (var path = RoundPath(new Rectangle(x, y, width, height), height / 2))
+            using (var brush = new SolidBrush(theme.track))
+                g.FillPath(brush, path);
+
+            int filled = (int)(width * Math.Max(0, Math.Min(1, status.progress)));
+            if (filled < height) return;
+            var bar = new Rectangle(x, y, filled, height);
+            bool hot = HotBar(MinutesToOffWork());
+
+            // 外发光：两圈比条子大一点的同色圆角矩形，越靠外越淡，前缘像在发亮
+            if (glowOn && filled > height * 2)
+            {
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    int grow = (int)Math.Round(height * (pass == 0 ? 2.2f : 1.1f));
+                    int alpha = pass == 0 ? (hot ? 46 : 26) : (hot ? 90 : 48);
+                    var halo = new Rectangle(x - grow, y - grow, filled + grow * 2, height + grow * 2);
+                    using (var gp = RoundPath(halo, halo.Height / 2))
+                    using (var br = new SolidBrush(Color.FromArgb(alpha, status.accent)))
+                        g.FillPath(br, gp);
+                }
+            }
+
+            using (var path = RoundPath(bar, height / 2))
+            {
+                if (hot)
+                {
+                    // 彩色：整条轨道从左到右 绿→黄→橙→粉，走到哪段都是该有的颜色
+                    using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, width), height),
+                        Color.FromArgb(46, 212, 122), Color.FromArgb(255, 92, 122), 0f))
+                    {
+                        var blend = new ColorBlend();
+                        blend.Colors = new Color[]
+                        {
+                            Color.FromArgb(46, 212, 122), Color.FromArgb(255, 214, 61),
+                            Color.FromArgb(255, 138, 61), Color.FromArgb(255, 92, 122)
+                        };
+                        blend.Positions = new float[] { 0f, 0.42f, 0.74f, 1f };
+                        brush.InterpolationColors = blend;
+                        g.FillPath(brush, path);
+                    }
+                }
+                else
+                {
+                    using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), height),
+                        MixColor(status.accent, theme.bgBottom, 0.22), status.accent, 0f))
+                        g.FillPath(brush, path);
+                }
+                // 上面压一道高光，条子才有厚度
+                using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(2, height)),
+                    Color.FromArgb(90, Color.White), Color.FromArgb(0, Color.White), 90f))
+                    g.FillPath(brush, path);
+            }
+        }

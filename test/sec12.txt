@@ -1,0 +1,72 @@
+        // ---- 12. 提醒出场：两张色块先后落定，退场时下面的先走 ----
+        {
+            var s = new Settings();
+            s.ui.theme = "midnight";
+            s.ui.edge = "free";
+            s.ui.reducedMotion = false;
+            s.ui.reminderHoldSeconds = 5;
+            Func<double, bool, Bitmap> shot = delegate(double ms, bool exiting)
+            {
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "collapsed", false);
+                    Set(form, "reminding", true);
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(420, 282);
+                    var ev = new ReminderEvent();
+                    ev.title = "需求对齐会"; ev.place = "位置 A"; ev.source = "meeting";
+                    Set(form, "remindEvent", ev);
+                    Call(form, "Recompute");
+                    if (exiting)
+                    {
+                        Set(form, "remindAt", DateTime.Now.AddMilliseconds(-6000));
+                        Set(form, "remindExiting", true);
+                        Set(form, "remindExitAt", DateTime.Now.AddMilliseconds(-ms));
+                    }
+                    else Set(form, "remindAt", DateTime.Now.AddMilliseconds(-ms));
+                    var bmp = new Bitmap(420, 282);
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                    Set(form, "reminding", false);
+                    Set(form, "remindExiting", false);
+                    Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                    return bmp;
+                }
+            };
+            // 150% 下分界线在 96px：上块盖 0..96，下块盖 96..282
+            Color bandA, bandB, plainA, plainB;
+            using (var b0 = shot(0, false))
+            {
+                plainA = b0.GetPixel(300, 20);
+                plainB = b0.GetPixel(300, 200);
+            }
+            using (var early = shot(120, false))
+            using (var landed = shot(560, false))
+            {
+                Color nearSeamEarly = early.GetPixel(300, 90);
+                bool moved = Distance(nearSeamEarly, plainA) < 30
+                          && Distance(landed.GetPixel(300, 90), plainA) > 40;
+                Ok("上面的色块是落下来的（不是一下子出现）", moved,
+                    "接缝上方 120ms=" + fmt(nearSeamEarly) + " 560ms=" + fmt(landed.GetPixel(300, 90)));
+                Ok("两块都到齐后整张卡都是色块", Distance(landed.GetPixel(300, 6), plainA) > 25
+                    && Distance(landed.GetPixel(300, 260), plainB) > 25, "");
+                bandA = landed.GetPixel(300, 6);
+                bandB = landed.GetPixel(300, 260);
+            }
+            // 退场：先收字，然后下面的色块先抽走，上面的后走
+            using (var e1 = shot(320, true))
+            using (var e2 = shot(760, true))
+            {
+                Color underSeam = e1.GetPixel(300, 108);
+                bool bottomGone = Distance(underSeam, plainB) < 45;
+                bool topStill = Distance(e1.GetPixel(300, 20), plainA) > 20;
+                bool topGone = Distance(e2.GetPixel(300, 20), plainA) < 45;
+                Ok("退场时下面的先走、上面的还在", bottomGone && topStill,
+                    "接缝下 " + fmt(underSeam) + " 顶部 " + fmt(e1.GetPixel(300, 20)));
+                Ok("最后整张卡回到普通卡片", topGone, fmt(e2.GetPixel(300, 20)) + " / " + fmt(plainA));
+            }
+            Ok("两块色块颜色不同", Distance(bandA, bandB) > 20, fmt(bandA) + " / " + fmt(bandB));
+        }
+

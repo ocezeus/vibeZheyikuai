@@ -1,0 +1,15 @@
+﻿# 构建产物
+dist/
+preview-run/
+
+# 生成的分帧图 / 截图产物
+frames-preview/
+frames3/
+test/visual/
+
+# 编译出的可执行文件
+*.exe
+
+# 临时文件
+*.log
+*.tmp

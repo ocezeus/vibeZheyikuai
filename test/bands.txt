@@ -1,0 +1,24 @@
+            double exit = t - RemindInMs - RemindHoldMs;
+            int seam = collapsed ? S(37) : S(64);
+            // 两张卡叠上来：上面的色块先从上往下落定，下面的色块再从下往上顶上来；
+            // 退场反过来——下面先抽走，上面再走。quiet 时直接到位。
+            double pa, pb;
+            if (quiet)
+            {
+                pa = 1; pb = 1;
+            }
+            else
+            {
+                pa = Clamp01(Math.Min(EaseOutCubic(Clamp01(t / 300.0)), 1 - EaseInCubic(Clamp01((exit - 330) / 280.0))));
+                pb = Clamp01(Math.Min(EaseOutCubic(Clamp01((t - 210) / 300.0)), 1 - EaseInCubic(Clamp01((exit - 130) / 280.0))));
+            }
+            if (pa > 0)
+            {
+                int offA = (int)Math.Round((1 - pa) * -seam);
+                using (var brush = new SolidBrush(a)) g.FillRectangle(brush, 0, offA, Width, seam);
+            }
+            if (pb > 0)
+            {
+                int offB = (int)Math.Round((1 - pb) * (Height - seam));
+                using (var brush = new SolidBrush(b)) g.FillRectangle(brush, 0, seam + offB, Width, Height - seam);
+            }
