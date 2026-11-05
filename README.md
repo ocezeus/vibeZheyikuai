@@ -300,7 +300,7 @@ lark-cli auth login --scope "im:message.send_as_user"
 .\package.ps1            # 编译 + 打包，产物在 dist\下班倒计时-v1.3.zip
 ```
 
-压缩包里就 6 个文件（约 53 KB），发给别人后：
+压缩包里就 6 个文件加一个 `fonts\` 空目录（约 82 KB），发给别人后：
 
 | 文件 | 作用 |
 |---|---|
