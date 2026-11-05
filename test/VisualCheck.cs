@@ -9,7 +9,8 @@ class VisualCheck {
  static void Set(object o,string name,object value){o.GetType().GetField(name,F).SetValue(o,value);}
  static object Call(object o,string name,params object[] args){return o.GetType().GetMethod(name,F).Invoke(o,args);}
  [STAThread] static void Main(){
-  Application.EnableVisualStyles();
+        // 探针只读配置，绝不回写用户自己的设置
+        Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
   string dir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"visual");Directory.CreateDirectory(dir);
   int cases=0;
   foreach(float dpi in new float[]{96,144,192})
@@ -60,6 +61,6 @@ class VisualCheck {
    }
    dialog.Close();
   }
-  Console.WriteLine("PASS: "+cases+" rendering cases at 100/150/200%; effects, long text, quiet mode and transition boundaries.");
+  Console.WriteLine("PASS: "+cases+" rendering cases at 100/150/200%; layered alpha, text metrics, quiet mode and transition boundaries.");
  }
 }

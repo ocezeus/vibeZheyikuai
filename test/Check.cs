@@ -75,6 +75,8 @@ class Check
     [STAThread]
     static int Main()
     {
+        // 探针只读配置，绝不回写用户自己的设置
+        Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         try
         {
             return RunAll();
@@ -1126,15 +1128,39 @@ class Check
             Ok("两块色块颜色不同", Distance(bandA, bandB) > 20, fmt(bandA) + " / " + fmt(bandB));
 
             // 圆角是像素 alpha 收的边：角上应该半透明，中间完全不透明
-            using (var b = shot(2000, false))
+            using (var form = new WidgetForm(new SettingsStore(), s))
             {
-                Color corner = b.GetPixel(1, 1);
-                Color mid = b.GetPixel(210, 140);
-                Ok("圆角是抗锯齿的（不是硬边）", corner.A > 0 && corner.A < 250, "角上 alpha=" + corner.A);
+                Set(form, "scale", 1.5f);
+                Set(form, "collapsed", false);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Call(form, "Recompute");
+                using (var canvas = new Bitmap(420, 282))
+                using (var g = Graphics.FromImage(canvas))
+                    Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                var frame = (Bitmap)Get(form, "frame");
+                // 沿对角线扫一圈，弧线上一定有几个像素是「半透明」的——那才是抗锯齿
+                int partial = 0, hard = 0;
+                for (int yy = 0; yy < 40; yy++)
+                for (int xx = 0; xx < 40; xx++)
+                {
+                    int a = frame.GetPixel(xx, yy).A;
+                    if (a > 8 && a < 248) partial++;
+                }
+                for (int i = 0; i < 0; i++)
+                {
+                    int a = frame.GetPixel(i, i).A;
+                    if (a > 8 && a < 248) partial++;
+                }
+                Color corner = frame.GetPixel(0, 0);
+                if (corner.A > 250) hard++;
+                Color mid = frame.GetPixel(210, 140);
+                Ok("圆角是抗锯齿的（不是硬边）", partial >= 3 && hard == 0, "半透明像素 " + partial + " 个，纯色角 " + hard + " 个");
                 Ok("卡面本身不透明", mid.A == 255, "alpha=" + mid.A);
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
 
-            // 展开错峰：刚展开时最后一行还是空的，600ms 后已经在
+            // 展开错峰：时间/进度条先动，最后一行要晚好几帧才出现
             Func<int, Bitmap> stage = delegate(int ms)
             {
                 using (var form = new WidgetForm(new SettingsStore(), s))
@@ -1154,19 +1180,122 @@ class Check
                     return bmp;
                 }
             };
-            using (var early = stage(0))
+            using (var first = stage(0))
+            using (var early = stage(60))
             using (var done = stage(700))
             {
-                int diff = 0;
-                for (int y = 240; y < 275; y++)
-                    for (int x = 20; x < 380; x++)
-                        if (Distance(early.GetPixel(x, y), done.GetPixel(x, y)) > 20) diff++;
-                Color focalEarly = early.GetPixel(80, 130);
-                Ok("展开时时间先出来、最后一行后出来", diff > 300 && Distance(focalEarly, done.GetPixel(80, 130)) < 120,
-                    "末行变化 " + diff + " 点");
+                int focalStep = 0, footStep = 0;
+                for (int y = 108; y < 158; y++)
+                    for (int x = 24; x < 380; x++)
+                        if (Distance(first.GetPixel(x, y), early.GetPixel(x, y)) > 12) focalStep++;
+                for (int y = 242; y < 276; y++)
+                    for (int x = 24; x < 380; x++)
+                        if (Distance(first.GetPixel(x, y), early.GetPixel(x, y)) > 12) footStep++;
+                int footDiff = 0;
+                for (int y = 242; y < 276; y++)
+                    for (int x = 24; x < 380; x++)
+                        if (Distance(early.GetPixel(x, y), done.GetPixel(x, y)) > 12) footDiff++;
+                Ok("展开时时间先出来、最后一行后出来", focalStep > 200 && footStep == 0 && footDiff > 200,
+                    "主视觉变了 " + focalStep + " 点，末行此时还没动，末尾共变 " + footDiff + " 点");
             }
         }
 
+
+            // ── 13. 展开/收起的点击路径（v2.6.1 修的就是这里） ──
+            {
+                // 缩起来时点一下必须变大；即使 collapsed 字段和窗口尺寸不同步也要自愈
+                var s = new Settings();
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    Set(form, "scale", 1.5f);
+                    form.MinimumSize = Size.Empty;
+                    Call(form, "Recompute");
+                    Set(form, "collapsed", false);        // 故意让字段和尺寸对不上
+                    form.Size = new Size(336, 102);
+                    Call(form, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, 168, 51, 0));
+                    bool started = (bool)Get(form, "animating");
+                    Set(form, "animStart", Environment.TickCount - 900);
+                    Call(form, "StepAnim");
+                    Ok("点小卡片能展开（尺寸不同步也能救回来）",
+                        started && form.Width == 420 && form.Height == 282 && !(bool)Get(form, "collapsed"),
+                        "animating=" + started + " 现在 " + form.Width + "x" + form.Height);
+                }
+
+                // 展开状态下点右上角箭头要收起来；没画过（命中区为空）也要能点中
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    Set(form, "scale", 1.5f);
+                    form.MinimumSize = Size.Empty;
+                    Call(form, "Recompute");
+                    Set(form, "collapsed", false);
+                    form.Size = new Size(420, 282);
+                    Call(form, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, 381, 30, 0));
+                    bool started = (bool)Get(form, "animating");
+                    Set(form, "animStart", Environment.TickCount - 900);
+                    Call(form, "StepAnim");
+                    Ok("点右上角箭头能收起（没画过也算数）",
+                        started && form.Width == 336 && form.Height == 102 && (bool)Get(form, "collapsed"),
+                        "animating=" + started + " 现在 " + form.Width + "x" + form.Height);
+                }
+
+                // 动画被卡住时，点击不能失灵：SetCollapsed 会先把上一段收尾
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    Set(form, "scale", 1.5f);
+                    form.MinimumSize = Size.Empty;
+                    Call(form, "Recompute");
+                    Set(form, "collapsed", true);
+                    form.Size = new Size(336, 102);
+                    Set(form, "animating", true);           // 假装上一段动画还没走完
+                    Set(form, "animToW", 336);
+                    Set(form, "animToH", 102);
+                    Call(form, "SetCollapsed", false);
+                    bool started = (bool)Get(form, "animating");
+                    Set(form, "animStart", Environment.TickCount - 900);
+                    Call(form, "StepAnim");
+                    Ok("上一段动画卡住时点击仍然有效",
+                        started && form.Width == 420 && !(bool)Get(form, "collapsed"),
+                        "animating=" + started + " 现在 " + form.Width + "x" + form.Height);
+                }
+
+                // 手抖：按下后只挪了 2 像素就松手，仍然算点击——窗口要挪回原位，不能变成拖动
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    Set(form, "scale", 1.5f);
+                    form.MinimumSize = Size.Empty;
+                    Call(form, "Recompute");
+                    Set(form, "collapsed", true);
+                    form.Size = new Size(336, 102);
+                    var origin = new Point(900, 500);
+                    form.Location = origin;
+                    Call(form, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, 168, 51, 0));
+                    form.Location = new Point(origin.X + 2, origin.Y + 1);   // 手抖 2 像素
+                    Set(form, "moved", true);                                // 模拟 OnMouseMove 已经置过
+                    Call(form, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, 168, 51, 0));
+                    Ok("手抖拖 2 像素仍算点击（窗口挪回原位）",
+                        form.Location == origin && (bool)Get(form, "animating"),
+                        "位置 " + form.Location + " animating=" + Get(form, "animating"));
+                }
+
+                // 对称面：真拖动（挪了 40 像素）不能被当成点击，也不该展开
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    Set(form, "scale", 1.5f);
+                    form.MinimumSize = Size.Empty;
+                    Call(form, "Recompute");
+                    Set(form, "collapsed", true);
+                    form.Size = new Size(336, 102);
+                    var origin = new Point(600, 400);
+                    form.Location = origin;
+                    Call(form, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, 168, 51, 0));
+                    form.Location = new Point(origin.X + 40, origin.Y + 30);
+                    Set(form, "moved", true);
+                    Call(form, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, 168, 51, 0));
+                    Ok("真拖动 40 像素不当成点击",
+                        !(bool)Get(form, "animating") && (bool)Get(form, "collapsed"),
+                        "animating=" + Get(form, "animating") + " collapsed=" + Get(form, "collapsed"));
+                }
+            }
 
         Console.WriteLine(fail == 0 ? ("ALL PASS  (" + pass + " checks)") : ("FAILED  " + fail + " of " + (pass + fail)));
         return fail == 0 ? 0 : 1;

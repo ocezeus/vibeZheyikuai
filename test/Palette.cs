@@ -22,6 +22,8 @@ class Palette
     [STAThread]
     static void Main()
     {
+        // 探针只读配置，绝不回写用户自己的设置
+        Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         Application.EnableVisualStyles();
         string dir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "visual");
         Directory.CreateDirectory(dir);

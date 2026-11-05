@@ -621,6 +621,8 @@ namespace WorkCountdown
 
         public void Save(Settings settings)
         {
+            // 探针 / 截图程序只读配置：设了 WC_NO_SAVE=1 就不回写，免得把用户自己的设置冲掉
+            if (Environment.GetEnvironmentVariable("WC_NO_SAVE") == "1") return;
             try
             {
                 settings.Normalize();

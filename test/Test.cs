@@ -16,6 +16,8 @@ internal static class Test
 
     private static void Main()
     {
+        // 探针只读配置，绝不回写用户自己的设置
+        Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         var s = new Settings();
         s.mode = "flex";
         s.flexMinutes = 630;

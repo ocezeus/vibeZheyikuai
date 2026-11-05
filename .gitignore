@@ -1,4 +1,4 @@
-﻿# 构建产物
+# 构建产物
 dist/
 preview-run/
 
@@ -13,3 +13,7 @@ test/visual/
 # 临时文件
 *.log
 *.tmp
+
+# 会话交接文档（agent 生成，不入库）
+.handoff/
+HANDOFF.md

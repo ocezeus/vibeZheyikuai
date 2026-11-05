@@ -105,6 +105,7 @@ namespace WorkCountdown
         private bool expandAnim;
         private int expandStart;
 
+        private int downAt;
         private bool dragging;
         private bool moved;
         private Point dragOrigin;
@@ -283,6 +284,10 @@ namespace WorkCountdown
             RequestCalendar(false);
             tick.Start();
             flowT.Start();
+            // 开机也是展开的：同样按「N 秒没动就收起」的规则走，别一直杵在那儿
+            ResetAutoCollapse();
+            // 第一帧主动推一次：分层窗口不会因为窗口出现就自动有东西
+            BeginInvoke((MethodInvoker)delegate { Invalidate(); if (IsHandleCreated && Visible) PushFrame(); });
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -421,7 +426,6 @@ namespace WorkCountdown
         /// <summary>每秒检查一次：到点（开始时间 - 提前量）就放一次提醒动画。</summary>
         private void CheckReminders()
         {
-            if (reminding || animating) return;
             DateTime now = DateTime.Now;
             if (CheckBreaks(now)) return;
             var all = Reminders.Merge(settings, larkEvents);
@@ -1066,6 +1070,19 @@ namespace WorkCountdown
             else x = scr.WorkingArea.Right - width;
             y = Math.Max(scr.WorkingArea.Top, Math.Min(scr.WorkingArea.Bottom - Height, y));
             Location = new Point(x, y);
+            // 存下来的位置可能落在屏幕外（换过显示器/缩放改过）：那就挪回主屏右上角，别让卡片「打开看不见」
+            if (!IsRectVisible(new Rectangle(x, y, width, Height)))
+            {
+                Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+                Location = new Point(wa.Right - Width - S(12), Math.Max(wa.Top + S(40), wa.Top + (wa.Height - Height) / 3));
+            }
+        }
+
+        private static bool IsRectVisible(Rectangle r)
+        {
+            foreach (Screen s in Screen.AllScreens)
+                if (s.WorkingArea.IntersectsWith(r)) return true;
+            return false;
         }
 
         private static bool IsPointVisible(int x, int y)
@@ -1098,9 +1115,9 @@ namespace WorkCountdown
             if (d > r.Height) d = r.Height;
             var path = new GraphicsPath();
             path.AddArc(r.X, r.Y, d, d, 180, 90);
-            path.AddArc(r.Right - d - 1, r.Y, d, d, 270, 90);
-            path.AddArc(r.Right - d - 1, r.Bottom - d - 1, d, d, 0, 90);
-            path.AddArc(r.X, r.Bottom - d - 1, d, d, 90, 90);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
             path.CloseFigure();
             return path;
         }
@@ -1113,12 +1130,13 @@ namespace WorkCountdown
 
         private void StartAnim(bool collapse)
         {
-            if (animating) return;
+            if (animating) FinishAnimNow();   // 动画还没走完也照样响应，先把它收尾
             animating = true;
             animFromW = Width; animFromH = Height; animFromX = Left;
             animToW = collapse ? S(DesignCollapsedW) : S(DesignExpandedW);
             animToH = collapse ? S(DesignCollapsedH) : ExpandedH;
             animToX = settings.ui.edge == "free" ? Left : DockedX(animToW);
+            store.Log((collapse ? "收起" : "展开") + "动画: " + Width + "x" + Height + " -> " + animToW + "x" + animToH);
             animStart = Environment.TickCount;
             // 展开时错峰从这一刻就算起：窗口一边长高，时间、进度条和其余行一边各就各位
             expandAnim = !collapse;
@@ -1128,6 +1146,12 @@ namespace WorkCountdown
 
         private void StepAnim()
         {
+            // 看门狗：动画超时还没结束就直接收尾，免得一直卡在「点击没反应」的状态
+            if (animating && Environment.TickCount - animStart > AnimMs + 1200)
+            {
+                FinishAnimNow();
+                return;
+            }
             if (!animating)
             {
                 // 尺寸已经到位，只剩各行错峰淡入
@@ -1164,8 +1188,45 @@ namespace WorkCountdown
         private void SetCollapsed(bool value)
         {
             if (reminding) return;
-            if (collapsed == value && !animating) return;
+            // 上一段动画万一没走完（掉帧、被系统挂起），这里先把它收尾，
+            // 否则 animating 一直为 true，点击就彻底没反应了
+            if (animating) FinishAnimNow();
+            if (collapsed == value)
+            {
+                SyncBounds();
+                return;
+            }
             StartAnim(value);
+        }
+
+        /// <summary>把动画直接推到终点：尺寸、状态、展开错峰一起收干净。</summary>
+        private void FinishAnimNow()
+        {
+            animT.Stop();
+            animating = false;
+            collapsed = animToW == S(DesignCollapsedW);
+            if (!collapsed)
+            {
+                // 直接给最终布局，不再错峰
+                expandAnim = false;
+                SetBounds(animToX, Top, animToW, animToH);
+                ResetAutoCollapse();
+            }
+            else
+            {
+                expandAnim = false;
+                SetBounds(animToX, Top, animToW, animToH);
+            }
+            SyncBounds();
+            Invalidate();
+        }
+
+        /// <summary>尺寸和 collapsed 状态对不上时（极少数情况）自己纠正一次。</summary>
+        private void SyncBounds()
+        {
+            int w = collapsed ? S(DesignCollapsedW) : S(DesignExpandedW);
+            int h = collapsed ? S(DesignCollapsedH) : ExpandedH;
+            if (Width != w || Height != h) SetBounds(Left, Top, w, h);
         }
 
         private void ResetAutoCollapse()
@@ -1306,7 +1367,9 @@ namespace WorkCountdown
                                 layer.PixelOffsetMode = PixelOffsetMode.HighQuality;
                                 layer.Clear(Color.Transparent);
                                 var clip = layer.Clip;
-                                layer.SetClip(new Rectangle(0, 0, Width, Height));
+                                // 提醒层也按卡片的圆角裁一刀，否则两块色块会把圆角糊成直角
+                                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                                    layer.SetClip(cardPath, CombineMode.Intersect);
                                 PaintReminder(layer, elapsed, quietNow, 1, contentA);
                                 layer.Clip = clip;
                             }
@@ -1515,6 +1578,14 @@ namespace WorkCountdown
             }
         }
 
+
+        /// <summary>右上角图标的命中区。正常由绘制时填好；万一还没画过，就按当前宽度算一个。</summary>
+        private Rectangle GlyphRect(Rectangle stored, int fromRightDip)
+        {
+            if (stored.Width > 0 && stored.Bottom <= Height) return stored;
+            int size = S(24);
+            return new Rectangle(Width - S(fromRightDip), S(15), size, size);
+        }
         private void PaintCollapsed(Graphics g)
         {
             int pad=S(14); float w=Width-pad*2;
@@ -1592,6 +1663,7 @@ namespace WorkCountdown
             if (e.Button == MouseButtons.Left)
             {
                 dragging = true;
+                downAt = Environment.TickCount;
                 moved = false;
                 dragOrigin = Cursor.Position;
                 formOrigin = Location;
@@ -1619,7 +1691,14 @@ namespace WorkCountdown
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (Environment.GetEnvironmentVariable("WC_TRACE") == "1") store.Log("up " + e.Location + " " + Width + "x" + Height + " col=" + collapsed + " anim=" + animating + " rem=" + reminding + " chev=" + rectChevron + " gear=" + rectGear);
             if (e.Button != MouseButtons.Left) return;
+            // 手抖一两像素不算拖：把窗口挪回去，照常当点击处理（不然点半天不展开）
+            if (moved && Math.Abs(Location.X - formOrigin.X) + Math.Abs(Location.Y - formOrigin.Y) <= S(24) && Environment.TickCount - downAt < 450)
+            {
+                Location = formOrigin;
+                moved = false;
+            }
             bool wasDragging = moved;
             dragging = false;
             moved = false;
@@ -1637,17 +1716,22 @@ namespace WorkCountdown
                 return;
             }
 
-            if (collapsed)
+            // 判「现在是不是小卡片」看实际尺寸，不看 collapsed 字段：万一状态和窗口尺寸不同步，点一下自愈
+            if (collapsed || Width <= S(DesignCollapsedW) + S(8))
             {
+                collapsed = true;
+                store.Log("点击小卡片: 展开 (animating=" + animating + ", 当前 " + Width + "x" + Height + ")");
                 SetCollapsed(false);
                 ResetAutoCollapse();
                 return;
             }
 
-            if (reminding || animating) return;
-            if (rectGear.Contains(e.Location)) { OpenSettings(); return; }
-            if (rectRefresh.Contains(e.Location)) { RequestRefresh(true); return; }
-            if (rectChevron.Contains(e.Location)) { SetCollapsed(true); return; }
+            // 提醒卡片上点哪儿都能把它收起来——不然一张卡片杵四十分钟、点它又没反应，最烦人
+            if (reminding) { store.Log("点击提醒卡片: 收起「" + (remindEvent == null ? "" : remindEvent.title) + "」"); DismissReminder(); return; }
+            if (animating) FinishAnimNow();   // 动画还没走完也照样响应，先把它收尾
+            if (GlyphRect(rectGear, 90).Contains(e.Location)) { OpenSettings(); return; }
+            if (GlyphRect(rectRefresh, 62).Contains(e.Location)) { RequestRefresh(true); return; }
+            if (GlyphRect(rectChevron, 34).Contains(e.Location)) { SetCollapsed(true); return; }
             ResetAutoCollapse();
         }
 
