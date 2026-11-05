@@ -1334,6 +1334,12 @@ namespace WorkCountdown
         public static string Clock(TimeSpan ts)
         {
             if (ts < TimeSpan.Zero) ts = ts.Negate();
+            // 不足一小时：分:秒.厘秒，秒后面那两位每 50ms 跳一次，肉眼能看到它在走
+            if (ts.TotalMinutes < 60)
+            {
+                return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}.{2:00}",
+                    (int)ts.TotalMinutes, ts.Seconds, ts.Milliseconds / 10);
+            }
             int totalHours = (int)ts.TotalHours;
             return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00}", totalHours, ts.Minutes, ts.Seconds);
         }

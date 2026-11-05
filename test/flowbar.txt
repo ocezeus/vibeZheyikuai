@@ -1,0 +1,20 @@
+                // 流动光带：一道柔光沿着已经走过的部分往前走，走到头再从左边出来
+                if (!settings.ui.reducedMotion && !SystemInformation.HighContrast && filled > height * 4)
+                {
+                    double phase = (Environment.TickCount % FlowPeriodMs) / (double)FlowPeriodMs;
+                    int bandW = Math.Max(S(24), filled / 3);
+                    int cx = (int)Math.Round(-bandW + (filled + bandW) * phase);
+                    var savedFlow = g.Save();
+                    g.SetClip(path, CombineMode.Intersect);
+                    var flowRect = new Rectangle(cx - bandW, y, bandW * 2, Math.Max(2, height));
+                    using (var fb = new LinearGradientBrush(flowRect,
+                        Color.FromArgb(0, Color.White), Color.FromArgb(0, Color.White), 0f))
+                    {
+                        var fblend = new ColorBlend();
+                        fblend.Colors = new Color[] { Color.FromArgb(0, Color.White), Color.FromArgb(150, Color.White), Color.FromArgb(0, Color.White) };
+                        fblend.Positions = new float[] { 0f, 0.5f, 1f };
+                        fb.InterpolationColors = fblend;
+                        g.FillRectangle(fb, flowRect);
+                    }
+                    g.Restore(savedFlow);
+                }

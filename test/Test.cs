@@ -39,7 +39,7 @@ internal static class Test
         // 2. 刚到点
         st = StatusBuilder.Build(s, snap, new DateTime(2026, 11, 3, 19, 57, 0), Themes.Get("midnight"));
         Check("19:57 状态", st.state.ToString(), "Overtime");
-        Check("19:57 倒计时", st.big, "00:00:00");
+        Check("19:57 倒计时", st.big, "00:00.00");   // 不足一小时：分:秒.厘秒
 
         // 3. 已下班 20:09
         snap.clockOut = new DateTime(2026, 11, 3, 20, 9, 0);
@@ -51,12 +51,12 @@ internal static class Test
         // 4. 没打卡且已过上班时间
         st = StatusBuilder.Build(s, null, new DateTime(2026, 11, 3, 9, 40, 0), Themes.Get("midnight"));
         Check("9:40 未打卡", st.state.ToString(), "NotClockedIn");
-        Check("9:40 已过", st.big, "00:40:00");
+        Check("9:40 已过", st.big, "40:00.00");
 
         // 5. 早于上班时间
         st = StatusBuilder.Build(s, null, new DateTime(2026, 11, 3, 8, 30, 0), Themes.Get("midnight"));
         Check("8:30 状态", st.state.ToString(), "BeforeWork");
-        Check("8:30 距上班", st.big, "00:30:00");
+        Check("8:30 距上班", st.big, "30:00.00");
 
         // 6. 周六休息
         st = StatusBuilder.Build(s, null, new DateTime(2026, 11, 7, 10, 0, 0), Themes.Get("midnight"));
@@ -227,7 +227,7 @@ internal static class Test
         Check("没接飞书 班次", st17.sub, "上班 09:00 · 预计下班 18:00");
         var st18 = StatusBuilder.Build(s17, null, new DateTime(2026, 11, 3, 8, 30, 0), Themes.Get("midnight"));
         Check("没接飞书 上班前", st18.state.ToString(), "BeforeWork");
-        Check("没接飞书 距上班", st18.big, "00:30:00");
+        Check("没接飞书 距上班", st18.big, "30:00.00");
 
         // 18. 会议与单个日程的提前量各自独立；日程带结束时间 / 会议室 / 内容
         var s18 = new Settings();

@@ -1,0 +1,67 @@
+        // ---------------- 分层窗口 ----------------
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativePoint { public int X; public int Y; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeSize { public int cx; public int cy; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        private struct BlendFunction { public byte BlendOp; public byte BlendFlags; public byte SourceConstantAlpha; public byte AlphaFormat; }
+
+        [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDc);
+        [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst,
+            ref NativePoint pptDst, ref NativeSize psize, IntPtr hdcSrc, ref NativePoint pptSrc,
+            int crKey, ref BlendFunction pblend, int dwFlags);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hDc);
+        [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hDc);
+        [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hDc, IntPtr hObject);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
+
+        private const int WsExLayered = 0x80000;
+        private const int UlwAlpha = 0x2;
+        private const byte AcSrcAlpha = 0x1;
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= WsExLayered;
+                return cp;
+            }
+        }
+
+        /// <summary>把整帧位图按像素 alpha 推到屏幕上：圆角、文字、图标都走同一条抗锯齿路径。</summary>
+        private void PushFrame()
+        {
+            if (frame == null) return;
+            IntPtr screenDc = GetDC(IntPtr.Zero);
+            IntPtr memDc = CreateCompatibleDC(screenDc);
+            IntPtr hBitmap = IntPtr.Zero;
+            IntPtr oldBitmap = IntPtr.Zero;
+            try
+            {
+                hBitmap = frame.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
+                oldBitmap = SelectObject(memDc, hBitmap);
+                var size = new NativeSize();
+                size.cx = frame.Width;
+                size.cy = frame.Height;
+                var src = new NativePoint();
+                var dst = new NativePoint();
+                dst.X = Left;
+                dst.Y = Top;
+                var blend = new BlendFunction();
+                blend.BlendOp = 0;
+                blend.SourceConstantAlpha = frameAlpha;
+                blend.AlphaFormat = AcSrcAlpha;
+                UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, UlwAlpha);
+            }
+            catch { }
+            finally
+            {
+                if (oldBitmap != IntPtr.Zero) SelectObject(memDc, oldBitmap);
+                if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+                DeleteDC(memDc);
+                ReleaseDC(IntPtr.Zero, screenDc);
+            }
+        }

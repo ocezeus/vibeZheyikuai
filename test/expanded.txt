@@ -1,0 +1,88 @@
+        private void PaintExpanded(Graphics g)
+        {
+            int pad=S(18); float w=Width-pad*2;
+            Color muted=MixColor(theme.textMain,theme.bgBottom,MutedMix);
+            Color dim=MixColor(theme.textMain,theme.bgBottom,DimMix);
+            int gap=S(RowGapDip);
+            int y=S(CardTopDip);
+
+            // 展开时：先出时间和进度条（主视觉），其余行按顺序一行一行错峰浮上来，
+            // 同一行里的几个元素共用一条时间线，所以是整行一起出现。
+            double flow = expandAnim ? Math.Max(0, Environment.TickCount - expandStart) : 100000;
+            double[] p = new double[6];
+            for (int i = 0; i < p.Length; i++) p[i] = Clamp01((flow - i * StaggerGapMs) / 190.0);
+            double pFocal = p[0];
+
+            // 1. 状态行：状态点 + 文案 + 右上角三个图标，同一行的中心对齐
+            {
+                double a = p[1];
+                int dy = (int)Math.Round((1 - a) * S(6));
+                int head=S(HeadHDip);
+                using(var brush=new SolidBrush(Fade(status.accent, a))) g.FillEllipse(brush,pad,y+head/2-S(3)+dy,S(6),S(6));
+                Line(g,status.headline,fontStatus,muted,new RectangleF(pad+S(13),y+dy,w-S(13),head),a,false);
+                int iconSize=S(24); int iconY=y+(head-iconSize)/2+dy;
+                rectGear=new Rectangle(Width-S(90),iconY,iconSize,iconSize);
+                rectRefresh=new Rectangle(Width-S(62),iconY,iconSize,iconSize);
+                rectChevron=new Rectangle(Width-S(34),iconY,iconSize,iconSize);
+                DrawGlyph(g,"gear",rectGear,Fade(dim, a));
+                DrawGlyph(g,"refresh",rectRefresh,Fade(fetching?status.accent:dim, a));
+                DrawGlyph(g,"chevron",rectChevron,Fade(dim, a));
+                y+=head+gap;
+            }
+
+            // 2. 说明行
+            {
+                double a = p[2]; int dy = (int)Math.Round((1 - a) * S(6));
+                Line(g,status.bigLabel,fontSmall,muted,new RectangleF(pad,y+dy,w,S(LineDip)),a,false);
+                y+=S(LineDip)+gap;
+            }
+
+            // 3. 大号倒计时（主视觉，和进度条一起最先出现）
+            {
+                int dy = (int)Math.Round((1 - pFocal) * S(8));
+                Font basis=status.bigIsClock?fontBig:fontBigText;
+                Font fit=FitFont(g,status.big,basis,w);
+                Line(g,status.big,fit,theme.textMain,new RectangleF(pad-S(2),y+dy,w+S(2),S(BigDip)),pFocal,false);
+                if(fit!=basis) fit.Dispose();
+                y+=S(BigDip)+gap;
+            }
+
+            // 4. 进度条
+            {
+                int dy = (int)Math.Round((1 - pFocal) * S(8));
+                var saved = g.Save();
+                g.TranslateTransform(0, dy);
+                DrawProgress(g,pad,y,Width-pad*2,S(BarDip),true);
+                g.Restore(saved);
+                y+=S(BarDip)+gap;
+            }
+
+            // 5. 下一段
+            {
+                double a = p[3]; int dy = (int)Math.Round((1 - a) * S(6));
+                Line(g,status.sub,fontSmall,muted,new RectangleF(pad,y+dy,w,S(LineDip)),a,false);
+                y+=S(LineDip)+gap;
+            }
+
+            // 6. 午休行（有才占一行）
+            if(ShowLunchRow)
+            {
+                double a = p[4]; int dy = (int)Math.Round((1 - a) * S(6));
+                string row=(status.lunchLabel??"");
+                if(!string.IsNullOrEmpty(status.lunchValue)) row+="  "+status.lunchValue;
+                Line(g,row,fontSmallBold,
+                    status.lunchCounting?theme.textMain:muted,new RectangleF(pad,y+dy,w,S(LineDip)),a,false);
+                y+=S(LineDip)+gap;
+            }
+
+            // 7. 最后一行小字
+            {
+                double a = p[5]; int dy = (int)Math.Round((1 - a) * S(6));
+                Line(g,status.extra,fontTiny,dim,new RectangleF(pad,y+dy,w,S(FootDip)),a,false);
+            }
+        }
+
+        private static Color Fade(Color c, double alpha)
+        {
+            return Color.FromArgb((int)Math.Round(255 * Clamp01(alpha)), c);
+        }

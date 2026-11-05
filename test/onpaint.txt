@@ -1,0 +1,71 @@
+        /// <summary>分层窗口由 PushFrame 推像素，这里不能清背景，否则会闪一下白底。</summary>
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (Width <= 0 || Height <= 0) return;
+            if (frame == null || frame.Width != Width || frame.Height != Height)
+            {
+                if (frame != null) frame.Dispose();
+                frame = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+            }
+            using (var g = Graphics.FromImage(frame))
+            {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                // 卡面是不透明底色，ClearType 才有意义；边缘的圆角靠 alpha 收，所以不会出现彩边
+                g.TextRenderingHint = UseClearType ? TextRenderingHint.ClearTypeGridFit : TextRenderingHint.AntiAliasGridFit;
+                RenderCard(g);
+            }
+            PushFrame();
+        }
+
+        /// <summary>整张卡片的内容：底色、文字、图标、提醒层，全在这一个 Graphics 上完成。</summary>
+        private void RenderCard(Graphics g)
+        {
+            if (status == null) Recompute();
+            if (theme == null) theme = Themes.Get(settings.ui.theme);
+            using (var path = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+            {
+                using (var brush = new LinearGradientBrush(new Rectangle(0, 0, Width, Height), theme.bgTop, theme.bgBottom, 90f))
+                    g.FillPath(brush, path);
+                if (!reminding)
+                {
+                    if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
+                }
+                else
+                {
+                    double elapsed = ReminderClock();
+                    bool quietNow = settings.ui.reducedMotion || SystemInformation.HighContrast;
+                    double exit = elapsed - RemindInMs - RemindHoldMs;
+                    double contentA = quietNow ? 1 : Clamp01((elapsed - 470) / 300) * (1 - Clamp01(exit / 150.0));
+                    if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
+                    if (elapsed < RemindInMs + RemindHoldMs + RemindOutMs)
+                    {
+                        using (var bitmap = new Bitmap(Width, Height, PixelFormat.Format32bppArgb))
+                        {
+                            bitmap.SetResolution(g.DpiX, g.DpiY);
+                            using (var layer = Graphics.FromImage(bitmap))
+                            {
+                                // 提醒层是半透明的：用灰阶抗锯齿，ClearType 在透明底上会镶彩边
+                                layer.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                                layer.SmoothingMode = SmoothingMode.AntiAlias;
+                                layer.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                                layer.Clear(Color.Transparent);
+                                var clip = layer.Clip;
+                                layer.SetClip(new Rectangle(0, 0, Width, Height));
+                                PaintReminder(layer, elapsed, quietNow, 1, contentA);
+                                layer.Clip = clip;
+                            }
+                            g.DrawImage(bitmap, 0, 0, Width, Height);
+                        }
+                    }
+                }
+                // 提醒动画期间不描边：浅色主题下这一圈线会压在色块上显出一条亮边。
+                if (!reminding)
+                    using (var pen = new Pen(Color.FromArgb(24, theme.accent), Math.Max(1, scale))) g.DrawPath(pen, path);
+            }
+        }

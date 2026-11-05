@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -47,6 +49,11 @@ namespace WorkCountdown
         private readonly System.Windows.Forms.Timer animT;
         private readonly System.Windows.Forms.Timer calPoll;
         private readonly System.Windows.Forms.Timer remindT;
+        private readonly System.Windows.Forms.Timer flowT;
+
+        // 分层窗口：整帧画在 32 位位图上，圆角由像素 alpha 收边（Region 剪出来的是硬锯齿边）
+        private Bitmap frame;
+        private byte frameAlpha = 240;
 
         // 日程提醒
         private List<ReminderEvent> larkEvents = new List<ReminderEvent>();
@@ -88,6 +95,15 @@ namespace WorkCountdown
         private int animFromW, animFromH, animFromX, animToW, animToH, animToX;
         private int animStart;
         private const int AnimMs = 150;
+        // 展开后的错峰：主视觉先出，其余行每行相隔 55ms，每行 190ms 淡入
+        // 进度条流光跑一个来回的时间
+        private const int FlowPeriodMs = 2600;
+        // 进度条整体透明度：展开动画里要和时间一起淡入
+        private double barAlpha = 1;
+        private const int StaggerGapMs = 55;
+        private const int StaggerTotalMs = 6 * StaggerGapMs + 200;
+        private bool expandAnim;
+        private int expandStart;
 
         private bool dragging;
         private bool moved;
@@ -189,6 +205,16 @@ namespace WorkCountdown
 
             remindT = new System.Windows.Forms.Timer();
             remindT.Interval = 16;
+
+            // 进度条上的流光要一直走：只在窗口可见、没在放提醒动画时按 18fps 重画
+            flowT = new System.Windows.Forms.Timer();
+            flowT.Interval = 55;
+            flowT.Tick += delegate
+            {
+                if (!Visible || reminding || animating || expandAnim) return;
+                if (settings.ui.reducedMotion || SystemInformation.HighContrast) return;
+                Invalidate();
+            };
             remindT.Tick += delegate { StepReminder(); };
 
             ApplySettings();
@@ -217,7 +243,9 @@ namespace WorkCountdown
         internal static float TypeTinyPt = 9f;
         internal static float MutedMix = 0.18f;
         internal static float DimMix = 0.30f;
-        internal static bool UseClearType = true;
+        // 分层窗口里整帧是 32 位带 alpha 的位图：ClearType 会在字形边上留下彩色描边（看着像锯齿），
+        // 灰阶抗锯齿 + 整数像素定位才是干净的做法。
+        internal static bool UseClearType = false;
 
         private static int CardHeightDip(bool withLunch)
         {
@@ -242,7 +270,7 @@ namespace WorkCountdown
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW：不出现在 Alt+Tab
+                cp.ExStyle |= 0x00000080 | WsExLayered; // WS_EX_TOOLWINDOW + 分层窗口
                 return cp;
             }
         }
@@ -254,12 +282,13 @@ namespace WorkCountdown
             RequestRefresh(false);
             RequestCalendar(false);
             tick.Start();
+            flowT.Start();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-            tick.Stop(); poll.Stop(); autoCollapse.Stop(); animT.Stop(); calPoll.Stop(); remindT.Stop();
+            tick.Stop(); poll.Stop(); autoCollapse.Stop(); animT.Stop(); flowT.Stop(); calPoll.Stop(); remindT.Stop();
             base.OnFormClosing(e);
         }
 
@@ -269,7 +298,7 @@ namespace WorkCountdown
             {
                 reminderTip.Dispose();
                 if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, remindT })
+                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, remindT, flowT })
                     if (timer != null) timer.Dispose();
                 foreach (var font in new Font[] { fontBig, fontBigText, fontStatus, fontTiny, fontSmall,
                     fontCollapsedNum, fontCollapsedLabel, fontCollapsedText, fontRemindBig, fontRemindSmall,
@@ -288,6 +317,7 @@ namespace WorkCountdown
             // 窗口底色必须和卡片一致：圆角抗锯齿边缘会与底色混合，浅灰底会出现一圈白边
             if (BackColor != theme.bgBottom) BackColor = theme.bgBottom;
             status = StatusBuilder.Build(settings, snapshot, DateTime.Now, theme);
+            UpdateTickRate();
             Invalidate();
         }
 
@@ -650,6 +680,15 @@ namespace WorkCountdown
             Invalidate();
         }
 
+        /// <summary>最后 60 分钟显示厘秒，这时才把刷新提到 20Hz；其余时间仍旧一秒一跳。</summary>
+        private void UpdateTickRate()
+        {
+            int ms = 1000;
+            if (status != null && status.bigIsClock && status.big != null && status.big.IndexOf('.') >= 0)
+                ms = settings.ui.reducedMotion ? 200 : 50;
+            if (tick.Interval != ms) tick.Interval = ms;
+        }
+
         /// <summary>每次 tick：常驻的提醒一旦过了自己的时段，就退场。</summary>
         private void CheckSticky()
         {
@@ -976,7 +1015,7 @@ namespace WorkCountdown
 
         private void ApplySettings()
         {
-            Opacity = Math.Max(0.3, Math.Min(1.0, settings.ui.opacity / 100.0));
+            frameAlpha = (byte)Math.Round(255 * Math.Max(0.3, Math.Min(1.0, settings.ui.opacity / 100.0)));
             TopMost = settings.ui.alwaysOnTop;
             int ms = Math.Max(1, settings.lark.pollMinutes) * 60 * 1000;
             poll.Interval = ms;
@@ -1048,13 +1087,7 @@ namespace WorkCountdown
 
         private void ApplyRegion()
         {
-            int radius = S(collapsed ? 14 : 18);
-            using (var path = RoundPath(new Rectangle(0, 0, Width, Height), radius))
-            {
-                var old = Region;
-                Region = new Region(path);
-                if (old != null) old.Dispose();
-            }
+            // 分层窗口用像素 alpha 收圆角，不再设置 Region（Region 的边缘是没有抗锯齿的硬锯齿）
         }
 
         private static GraphicsPath RoundPath(Rectangle r, int radius)
@@ -1087,11 +1120,26 @@ namespace WorkCountdown
             animToH = collapse ? S(DesignCollapsedH) : ExpandedH;
             animToX = settings.ui.edge == "free" ? Left : DockedX(animToW);
             animStart = Environment.TickCount;
+            // 展开时错峰从这一刻就算起：窗口一边长高，时间、进度条和其余行一边各就各位
+            expandAnim = !collapse;
+            expandStart = animStart;
             animT.Start();
         }
 
         private void StepAnim()
         {
+            if (!animating)
+            {
+                // 尺寸已经到位，只剩各行错峰淡入
+                if (expandAnim && Environment.TickCount - expandStart <= StaggerTotalMs)
+                {
+                    Invalidate();
+                    return;
+                }
+                expandAnim = false;
+                animT.Stop();
+                return;
+            }
             int elapsed = Environment.TickCount - animStart;
             double t = Math.Min(1.0, Math.Max(0.0, elapsed / (double)AnimMs));
             double e = 1 - Math.Pow(1 - t, 3);
@@ -1104,11 +1152,12 @@ namespace WorkCountdown
             SetBounds(x, Top, Math.Max(1, w), Math.Max(1, h));
             if (t >= 1.0)
             {
-                animT.Stop();
                 animating = false;
                 collapsed = animToW == S(DesignCollapsedW);
-                ApplyRegion();
+                Invalidate();
                 if (!collapsed) ResetAutoCollapse();
+                if (expandAnim && Environment.TickCount - expandStart <= StaggerTotalMs) return;
+                animT.Stop();
             }
         }
 
@@ -1138,59 +1187,137 @@ namespace WorkCountdown
 
         // ---------------- 绘制 ----------------
 
+        // ---------------- 分层窗口 ----------------
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativePoint { public int X; public int Y; }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeSize { public int cx; public int cy; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        private struct BlendFunction { public byte BlendOp; public byte BlendFlags; public byte SourceConstantAlpha; public byte AlphaFormat; }
+
+        [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDc);
+        [DllImport("user32.dll")] private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst,
+            ref NativePoint pptDst, ref NativeSize psize, IntPtr hdcSrc, ref NativePoint pptSrc,
+            int crKey, ref BlendFunction pblend, int dwFlags);
+        [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hDc);
+        [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hDc);
+        [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hDc, IntPtr hObject);
+        [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
+
+        private const int WsExLayered = 0x80000;
+        private const int UlwAlpha = 0x2;
+        private const byte AcSrcAlpha = 0x1;
+
+
+        /// <summary>把整帧位图按像素 alpha 推到屏幕上：圆角、文字、图标都走同一条抗锯齿路径。</summary>
+        private void PushFrame()
+        {
+            if (frame == null) return;
+            IntPtr screenDc = GetDC(IntPtr.Zero);
+            IntPtr memDc = CreateCompatibleDC(screenDc);
+            IntPtr hBitmap = IntPtr.Zero;
+            IntPtr oldBitmap = IntPtr.Zero;
+            try
+            {
+                hBitmap = frame.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
+                oldBitmap = SelectObject(memDc, hBitmap);
+                var size = new NativeSize();
+                size.cx = frame.Width;
+                size.cy = frame.Height;
+                var src = new NativePoint();
+                var dst = new NativePoint();
+                dst.X = Left;
+                dst.Y = Top;
+                var blend = new BlendFunction();
+                blend.BlendOp = 0;
+                blend.SourceConstantAlpha = frameAlpha;
+                blend.AlphaFormat = AcSrcAlpha;
+                UpdateLayeredWindow(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, UlwAlpha);
+            }
+            catch { }
+            finally
+            {
+                if (oldBitmap != IntPtr.Zero) SelectObject(memDc, oldBitmap);
+                if (hBitmap != IntPtr.Zero) DeleteObject(hBitmap);
+                DeleteDC(memDc);
+                ReleaseDC(IntPtr.Zero, screenDc);
+            }
+        }
+
+        /// <summary>分层窗口由 PushFrame 推像素，这里不能清背景，否则会闪一下白底。</summary>
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            // 卡片底下是不透明的底色，小字用 ClearType 才不发虚（灰阶抗锯齿会把 8.5pt 的笔画糊掉）
-            g.TextRenderingHint = UseClearType ? TextRenderingHint.ClearTypeGridFit : TextRenderingHint.AntiAliasGridFit;
+            if (Width <= 0 || Height <= 0) return;
+            if (frame == null || frame.Width != Width || frame.Height != Height)
+            {
+                if (frame != null) frame.Dispose();
+                frame = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+            }
+            using (var g = Graphics.FromImage(frame))
+            {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                // 卡面是不透明底色，ClearType 才有意义；边缘的圆角靠 alpha 收，所以不会出现彩边
+                g.TextRenderingHint = UseClearType ? TextRenderingHint.ClearTypeGridFit : TextRenderingHint.AntiAliasGridFit;
+                RenderCard(g);
+            }
+            // 离屏渲染（测试探针）拿到的就是这个位图；真实窗口再由 PushFrame 推像素
+            if (e.Graphics != null) e.Graphics.DrawImage(frame, 0, 0);
+            if (IsHandleCreated && Visible) PushFrame();
+        }
+
+        /// <summary>整张卡片的内容：底色、文字、图标、提醒层，全在这一个 Graphics 上完成。</summary>
+        private void RenderCard(Graphics g)
+        {
             if (status == null) Recompute();
             if (theme == null) theme = Themes.Get(settings.ui.theme);
-            var saved = g.Save();
-            // 圆角由窗口 Region 负责；这里铺满整个客户区，免得最外一列/一行没被画到、
-            // 露出 BackColor（浅色主题下就是一整条亮边）。
-            g.SetClip(ClientRectangle);
-            using (var path = RoundPath(new Rectangle(0,0,Width,Height),S(collapsed ? 15 : 20)))
+            using (var path = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
             {
-                using (var brush = new LinearGradientBrush(ClientRectangle,theme.bgTop,theme.bgBottom,90f)) g.FillRectangle(brush,ClientRectangle);
+                using (var brush = new LinearGradientBrush(new Rectangle(0, 0, Width, Height), theme.bgTop, theme.bgBottom, 90f))
+                    g.FillPath(brush, path);
                 if (!reminding)
                 {
                     if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
                 }
                 else
                 {
-                double elapsed = ReminderClock();
-                bool quietNow = settings.ui.reducedMotion || SystemInformation.HighContrast;
-                double exit = elapsed - RemindInMs - RemindHoldMs;
-                // 两张卡落定（约 510ms）之后文字才浮上来；退场先收字再抽卡
-                double bandA = quietNow ? 1 : 1;
-                double contentA = quietNow ? 1 : Clamp01((elapsed - 470) / 300) * (1 - Clamp01(exit / 150.0));
-                if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
-                if (elapsed < RemindInMs + RemindHoldMs + RemindOutMs)
-                {
-                    using (var bitmap = new Bitmap(Width, Height))
+                    double elapsed = ReminderClock();
+                    bool quietNow = settings.ui.reducedMotion || SystemInformation.HighContrast;
+                    double exit = elapsed - RemindInMs - RemindHoldMs;
+                    double contentA = quietNow ? 1 : Clamp01((elapsed - 470) / 300) * (1 - Clamp01(exit / 150.0));
+                    if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
+                    if (elapsed < RemindInMs + RemindHoldMs + RemindOutMs)
                     {
-                        bitmap.SetResolution(g.DpiX, g.DpiY);
-                        using (var layer = Graphics.FromImage(bitmap))
+                        using (var bitmap = new Bitmap(Width, Height, PixelFormat.Format32bppArgb))
                         {
-                            layer.TextRenderingHint = UseClearType ? TextRenderingHint.ClearTypeGridFit : TextRenderingHint.AntiAliasGridFit;
-                            layer.SmoothingMode = SmoothingMode.AntiAlias;
-                            layer.Clear(Color.Transparent);
-                            var clip = layer.Clip;
-                            layer.SetClip(new Rectangle(0, 0, Width, Height));
-                            PaintReminder(layer, elapsed, quietNow, bandA, contentA);
-                            layer.Clip = clip;
+                            bitmap.SetResolution(g.DpiX, g.DpiY);
+                            using (var layer = Graphics.FromImage(bitmap))
+                            {
+                                // 提醒层是半透明的：用灰阶抗锯齿，ClearType 在透明底上会镶彩边
+                                layer.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                                layer.SmoothingMode = SmoothingMode.AntiAlias;
+                                layer.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                                layer.Clear(Color.Transparent);
+                                var clip = layer.Clip;
+                                layer.SetClip(new Rectangle(0, 0, Width, Height));
+                                PaintReminder(layer, elapsed, quietNow, 1, contentA);
+                                layer.Clip = clip;
+                            }
+                            g.DrawImage(bitmap, 0, 0, Width, Height);
                         }
-                        g.DrawImage(bitmap, ClientRectangle, 0, 0, Width, Height, GraphicsUnit.Pixel);
-                }
+                    }
                 }
                 // 提醒动画期间不描边：浅色主题下这一圈线会压在色块上显出一条亮边。
                 if (!reminding)
-                    using(var pen = new Pen(Color.FromArgb(24,theme.accent),Math.Max(1,scale))) g.DrawPath(pen,path);
+                    using (var pen = new Pen(Color.FromArgb(24, theme.accent), Math.Max(1, scale))) g.DrawPath(pen, path);
             }
-            g.Restore(saved);
-        }
         }
 
         private void PaintExpanded(Graphics g)
@@ -1201,48 +1328,86 @@ namespace WorkCountdown
             int gap=S(RowGapDip);
             int y=S(CardTopDip);
 
+            // 展开时：先出时间和进度条（主视觉），其余行按顺序一行一行错峰浮上来，
+            // 同一行里的几个元素共用一条时间线，所以是整行一起出现。
+            double flow = expandAnim ? Math.Max(0, Environment.TickCount - expandStart) : 100000;
+            double[] p = new double[6];
+            for (int i = 0; i < p.Length; i++) p[i] = Clamp01((flow + 40 - i * StaggerGapMs) / 190.0);
+            double pFocal = p[0];
+            barAlpha = pFocal;
+
             // 1. 状态行：状态点 + 文案 + 右上角三个图标，同一行的中心对齐
-            int head=S(HeadHDip);
-            using(var brush=new SolidBrush(status.accent)) g.FillEllipse(brush,pad,y+head/2-S(3),S(6),S(6));
-            Line(g,status.headline,fontStatus,muted,new RectangleF(pad+S(13),y,w-S(13),head),1,false);
-            int iconSize=S(24); int iconY=y+(head-iconSize)/2;
-            rectGear=new Rectangle(Width-S(90),iconY,iconSize,iconSize);
-            rectRefresh=new Rectangle(Width-S(62),iconY,iconSize,iconSize);
-            rectChevron=new Rectangle(Width-S(34),iconY,iconSize,iconSize);
-            DrawGlyph(g,"gear",rectGear,dim); DrawGlyph(g,"refresh",rectRefresh,fetching?status.accent:dim); DrawGlyph(g,"chevron",rectChevron,dim);
-            y+=head+gap;
+            {
+                double a = p[1];
+                int dy = (int)Math.Round((1 - a) * S(6));
+                int head=S(HeadHDip);
+                using(var brush=new SolidBrush(Fade(status.accent, a))) g.FillEllipse(brush,pad,y+head/2-S(3)+dy,S(6),S(6));
+                Line(g,status.headline,fontStatus,muted,new RectangleF(pad+S(13),y+dy,w-S(13),head),a,false);
+                int iconSize=S(24); int iconY=y+(head-iconSize)/2+dy;
+                rectGear=new Rectangle(Width-S(90),iconY,iconSize,iconSize);
+                rectRefresh=new Rectangle(Width-S(62),iconY,iconSize,iconSize);
+                rectChevron=new Rectangle(Width-S(34),iconY,iconSize,iconSize);
+                DrawGlyph(g,"gear",rectGear,Fade(dim, a));
+                DrawGlyph(g,"refresh",rectRefresh,Fade(fetching?status.accent:dim, a));
+                DrawGlyph(g,"chevron",rectChevron,Fade(dim, a));
+                y+=head+gap;
+            }
 
             // 2. 说明行
-            Line(g,status.bigLabel,fontSmall,muted,new RectangleF(pad,y,w,S(LineDip)),1,false);
-            y+=S(LineDip)+gap;
+            {
+                double a = p[2]; int dy = (int)Math.Round((1 - a) * S(6));
+                Line(g,status.bigLabel,fontSmall,muted,new RectangleF(pad,y+dy,w,S(LineDip)),a,false);
+                y+=S(LineDip)+gap;
+            }
 
-            // 3. 大号倒计时
-            Font basis=status.bigIsClock?fontBig:fontBigText;
-            Font fit=FitFont(g,status.big,basis,w);
-            Line(g,status.big,fit,theme.textMain,new RectangleF(pad-S(2),y,w+S(2),S(BigDip)),1,false);
-            if(fit!=basis) fit.Dispose();
-            y+=S(BigDip)+gap;
+            // 3. 大号倒计时（主视觉，和进度条一起最先出现）
+            {
+                int dy = (int)Math.Round((1 - pFocal) * S(8));
+                Font basis=status.bigIsClock?fontBig:fontBigText;
+                Font fit=FitFont(g,status.big,basis,w);
+                Line(g,status.big,fit,theme.textMain,new RectangleF(pad-S(2),y+dy,w+S(2),S(BigDip)),pFocal,false);
+                if(fit!=basis) fit.Dispose();
+                y+=S(BigDip)+gap;
+            }
 
             // 4. 进度条
-            DrawProgress(g,pad,y,Width-pad*2,S(BarDip),true);
-            y+=S(BarDip)+gap;
+            {
+                int dy = (int)Math.Round((1 - pFocal) * S(8));
+                var saved = g.Save();
+                g.TranslateTransform(0, dy);
+                DrawProgress(g,pad,y,Width-pad*2,S(BarDip),true);
+                g.Restore(saved);
+                y+=S(BarDip)+gap;
+            }
 
             // 5. 下一段
-            Line(g,status.sub,fontSmall,muted,new RectangleF(pad,y,w,S(LineDip)),1,false);
-            y+=S(LineDip)+gap;
+            {
+                double a = p[3]; int dy = (int)Math.Round((1 - a) * S(6));
+                Line(g,status.sub,fontSmall,muted,new RectangleF(pad,y+dy,w,S(LineDip)),a,false);
+                y+=S(LineDip)+gap;
+            }
 
             // 6. 午休行（有才占一行）
             if(ShowLunchRow)
             {
+                double a = p[4]; int dy = (int)Math.Round((1 - a) * S(6));
                 string row=(status.lunchLabel??"");
                 if(!string.IsNullOrEmpty(status.lunchValue)) row+="  "+status.lunchValue;
                 Line(g,row,fontSmallBold,
-                    status.lunchCounting?theme.textMain:muted,new RectangleF(pad,y,w,S(LineDip)),1,false);
+                    status.lunchCounting?theme.textMain:muted,new RectangleF(pad,y+dy,w,S(LineDip)),a,false);
                 y+=S(LineDip)+gap;
             }
 
             // 7. 最后一行小字
-            Line(g,status.extra,fontTiny,dim,new RectangleF(pad,y,w,S(FootDip)),1,false);
+            {
+                double a = p[5]; int dy = (int)Math.Round((1 - a) * S(6));
+                Line(g,status.extra,fontTiny,dim,new RectangleF(pad,y+dy,w,S(FootDip)),a,false);
+            }
+        }
+
+        private static Color Fade(Color c, double alpha)
+        {
+            return Color.FromArgb((int)Math.Round(255 * Clamp01(alpha)), c);
         }
 
         /// <summary>距离下班还剩几分钟；拿不到时间点就返回 -1。</summary>
@@ -1264,8 +1429,9 @@ namespace WorkCountdown
         /// <summary>进度条：走过的一段带发光，最后半小时整条变彩色。</summary>
         private void DrawProgress(Graphics g, int x, int y, int width, int height, bool glowOn)
         {
+            if (barAlpha <= 0.01) return;
             using (var path = RoundPath(new Rectangle(x, y, width, height), height / 2))
-            using (var brush = new SolidBrush(theme.track))
+            using (var brush = new SolidBrush(Fade(theme.track, barAlpha)))
                 g.FillPath(brush, path);
 
             int filled = (int)(width * Math.Max(0, Math.Min(1, status.progress)));
@@ -1284,12 +1450,12 @@ namespace WorkCountdown
                     // 右边多留一截做羽毛状的尾巴，光才不会在前缘突然断掉
                     var halo = new Rectangle(x - grow, y - grow, filled + grow * 2 + feather, height + grow * 2);
                     using (var gp = RoundPath(halo, halo.Height / 2))
-                    using (var br = new LinearGradientBrush(halo, Color.FromArgb(alpha, status.accent),
-                        Color.FromArgb(0, status.accent), 0f))
+                    using (var br = new LinearGradientBrush(halo, Color.FromArgb((int)Math.Round((alpha) * barAlpha), status.accent),
+                        Color.FromArgb((int)Math.Round((0) * barAlpha), status.accent), 0f))
                     {
                         var fblend = new ColorBlend();
                         float keep = Math.Min(1f, (float)(filled + grow) / halo.Width);
-                        fblend.Colors = new Color[] { Color.FromArgb(alpha, status.accent), Color.FromArgb(alpha, status.accent), Color.FromArgb(0, status.accent) };
+                        fblend.Colors = new Color[] { Color.FromArgb((int)Math.Round((alpha) * barAlpha), status.accent), Color.FromArgb((int)Math.Round((alpha) * barAlpha), status.accent), Color.FromArgb((int)Math.Round((0) * barAlpha), status.accent) };
                         fblend.Positions = new float[] { 0f, keep, 1f };
                         br.InterpolationColors = fblend;
                         g.FillPath(br, gp);
@@ -1303,13 +1469,13 @@ namespace WorkCountdown
                 {
                     // 彩色：整条轨道从左到右 绿→黄→橙→粉，走到哪段都是该有的颜色
                     using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, width), height),
-                        Color.FromArgb(46, 212, 122), Color.FromArgb(255, 92, 122), 0f))
+                        Color.FromArgb((int)Math.Round(255 * barAlpha), 212, 122), Color.FromArgb((int)Math.Round(255 * barAlpha), 92, 122), 0f))
                     {
                         var blend = new ColorBlend();
                         blend.Colors = new Color[]
                         {
-                            Color.FromArgb(46, 212, 122), Color.FromArgb(255, 214, 61),
-                            Color.FromArgb(255, 138, 61), Color.FromArgb(255, 92, 122)
+                            Color.FromArgb((int)Math.Round(255 * barAlpha), 212, 122), Color.FromArgb((int)Math.Round(255 * barAlpha), 214, 61),
+                            Color.FromArgb((int)Math.Round(255 * barAlpha), 138, 61), Color.FromArgb((int)Math.Round(255 * barAlpha), 92, 122)
                         };
                         blend.Positions = new float[] { 0f, 0.42f, 0.74f, 1f };
                         brush.InterpolationColors = blend;
@@ -1319,13 +1485,33 @@ namespace WorkCountdown
                 else
                 {
                     using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), height),
-                        MixColor(status.accent, theme.bgBottom, 0.22), status.accent, 0f))
+                        Fade(MixColor(status.accent, theme.bgBottom, 0.22), barAlpha), Fade(status.accent, barAlpha), 0f))
                         g.FillPath(brush, path);
                 }
                 // 上面压一道高光，条子才有厚度
                 using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(2, height)),
-                    Color.FromArgb(90, Color.White), Color.FromArgb(0, Color.White), 90f))
+                    Color.FromArgb((int)Math.Round((90) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), 90f))
                     g.FillPath(brush, path);
+                // 流动光带：一道柔光沿着已经走过的部分往前走，走到头再从左边出来
+                if (!settings.ui.reducedMotion && !SystemInformation.HighContrast && filled > height * 4)
+                {
+                    double phase = (Environment.TickCount % FlowPeriodMs) / (double)FlowPeriodMs;
+                    int bandW = Math.Max(S(24), filled / 3);
+                    int cx = (int)Math.Round(-bandW + (filled + bandW) * phase);
+                    var savedFlow = g.Save();
+                    g.SetClip(path, CombineMode.Intersect);
+                    var flowRect = new Rectangle(cx - bandW, y, bandW * 2, Math.Max(2, height));
+                    using (var fb = new LinearGradientBrush(flowRect,
+                        Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), 0f))
+                    {
+                        var fblend = new ColorBlend();
+                        fblend.Colors = new Color[] { Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((150) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White) };
+                        fblend.Positions = new float[] { 0f, 0.5f, 1f };
+                        fb.InterpolationColors = fblend;
+                        g.FillRectangle(fb, flowRect);
+                    }
+                    g.Restore(savedFlow);
+                }
             }
         }
 

@@ -1,0 +1,8 @@
+        /// <summary>最后 60 分钟显示厘秒，这时才把刷新提到 20Hz；其余时间仍旧一秒一跳。</summary>
+        private void UpdateTickRate()
+        {
+            int ms = 1000;
+            if (status != null && status.bigIsClock && status.big != null && status.big.IndexOf('.') >= 0)
+                ms = settings.ui.reducedMotion ? 200 : 50;
+            if (tick.Interval != ms) tick.Interval = ms;
+        }

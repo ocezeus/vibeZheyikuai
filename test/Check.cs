@@ -1029,6 +1029,32 @@ class Check
         }
 
         // ---- 12. 提醒出场：两张色块先后落定，退场时下面的先走 ----
+        // ---- 11b. 最后 60 分钟走厘秒，刷新率跟着提上来 ----
+        {
+            var s = new Settings();
+            var snap = new AttendanceSnapshot();
+            snap.ok = true;
+            snap.clockIn = DateTime.Now.AddHours(-9).AddMinutes(-40);
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Set(form, "scale", 1.5f);
+                Set(form, "snapshot", snap);
+                Call(form, "Recompute");
+                object st = Get(form, "status");
+                st.GetType().GetProperty("targetIso").SetValue(st, DateTime.Now.AddSeconds(95).ToString("s"), null);
+                st.GetType().GetProperty("big").SetValue(st, Policy.Clock(TimeSpan.FromSeconds(95)), null);
+                st.GetType().GetProperty("bigIsClock").SetValue(st, true, null);
+                Call(form, "UpdateTickRate");
+                string big = (string)st.GetType().GetProperty("big").GetValue(st, null);
+                var tick = (System.Windows.Forms.Timer)Get(form, "tick");
+                Ok("不足一小时换成分:秒.厘秒", big == "01:35.00", big);
+                Ok("厘秒模式把刷新提到 50ms", tick.Interval == 50, tick.Interval + "ms");
+                st.GetType().GetProperty("big").SetValue(st, Policy.Clock(TimeSpan.FromHours(5)), null);
+                Call(form, "UpdateTickRate");
+                Ok("一小时以上还是一秒一跳", tick.Interval == 1000, tick.Interval + "ms");
+            }
+        }
+
         {
             var s = new Settings();
             s.ui.theme = "midnight";
@@ -1098,6 +1124,47 @@ class Check
                 Ok("最后整张卡回到普通卡片", topGone, fmt(e2.GetPixel(300, 20)) + " / " + fmt(plainA));
             }
             Ok("两块色块颜色不同", Distance(bandA, bandB) > 20, fmt(bandA) + " / " + fmt(bandB));
+
+            // 圆角是像素 alpha 收的边：角上应该半透明，中间完全不透明
+            using (var b = shot(2000, false))
+            {
+                Color corner = b.GetPixel(1, 1);
+                Color mid = b.GetPixel(210, 140);
+                Ok("圆角是抗锯齿的（不是硬边）", corner.A > 0 && corner.A < 250, "角上 alpha=" + corner.A);
+                Ok("卡面本身不透明", mid.A == 255, "alpha=" + mid.A);
+            }
+
+            // 展开错峰：刚展开时最后一行还是空的，600ms 后已经在
+            Func<int, Bitmap> stage = delegate(int ms)
+            {
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "collapsed", false);
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(420, 282);
+                    Call(form, "Recompute");
+                    Set(form, "expandAnim", true);
+                    Set(form, "expandStart", Environment.TickCount - ms);
+                    var bmp = new Bitmap(420, 282);
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                    Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                    return bmp;
+                }
+            };
+            using (var early = stage(0))
+            using (var done = stage(700))
+            {
+                int diff = 0;
+                for (int y = 240; y < 275; y++)
+                    for (int x = 20; x < 380; x++)
+                        if (Distance(early.GetPixel(x, y), done.GetPixel(x, y)) > 20) diff++;
+                Color focalEarly = early.GetPixel(80, 130);
+                Ok("展开时时间先出来、最后一行后出来", diff > 300 && Distance(focalEarly, done.GetPixel(80, 130)) < 120,
+                    "末行变化 " + diff + " 点");
+            }
         }
 
 
