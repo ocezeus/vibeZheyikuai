@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using WorkCountdown;
 
@@ -9,6 +10,15 @@ class Check
 {
     static BindingFlags F = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Static;
     static int pass, fail;
+
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after,
+        int x, int y, int cx, int cy, uint flags);
+    static readonly IntPtr HwndTopMost = new IntPtr(-1);
+    static readonly IntPtr HwndNotTopMost = new IntPtr(-2);
+    const int GwlExStyle = -20;
+    const int WsExTopMost = 0x8;
+    const uint SwpNoMoveNoSizeNoActivate = 0x1 | 0x2 | 0x10 | 0x200;
 
     static void Ok(string name, bool cond, string detail)
     {
@@ -1304,6 +1314,85 @@ class Check
                         !(bool)Get(form, "animating") && (bool)Get(form, "collapsed"),
                         "animating=" + Get(form, "animating") + " collapsed=" + Get(form, "collapsed"));
                 }
+            }
+
+            // ── 14. 置顶看门狗 + 流光在尽头淡出（v2.6.4） ──
+            {
+                // 设置里默认「窗口置顶」：建句柄后必须真的带 WS_EX_TOPMOST；
+                // 被系统 / 别的程序摘掉后，看门狗要能补回来；关掉开关就不再强制。
+                var s = new Settings();
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    form.MinimumSize = Size.Empty;
+                    IntPtr h = form.Handle;
+                    Call(form, "KeepTopMost");
+                    bool on = (GetWindowLong(h, GwlExStyle) & WsExTopMost) != 0;
+                    SetWindowPos(h, HwndNotTopMost, 0, 0, 0, 0, SwpNoMoveNoSizeNoActivate);
+                    bool lost = (GetWindowLong(h, GwlExStyle) & WsExTopMost) == 0;
+                    Call(form, "KeepTopMost");
+                    bool back = (GetWindowLong(h, GwlExStyle) & WsExTopMost) != 0;
+                    Ok("置顶被摘掉后看门狗能补回来", on && lost && back,
+                        "初始置顶=" + on + " 摘掉后=" + (!lost) + " 补回=" + back);
+
+                    s.ui.alwaysOnTop = false;
+                    Call(form, "ApplySettings");
+                    bool off = (GetWindowLong(h, GwlExStyle) & WsExTopMost) == 0;
+                    Ok("关掉置顶后不再强制最上层", off, "WS_EX_TOPMOST=" + (!off));
+                }
+
+                // 流光不透明度曲线：中段全亮，两头（尤其走到尽头）平滑降到 0
+                double o02 = WidgetForm.FlowOpacity(0.02);
+                double o18 = WidgetForm.FlowOpacity(0.18);
+                double o50 = WidgetForm.FlowOpacity(0.50);
+                double o80 = WidgetForm.FlowOpacity(0.80);
+                double o90 = WidgetForm.FlowOpacity(0.90);
+                double o995 = WidgetForm.FlowOpacity(0.995);
+                Ok("流光两头淡入淡出（尽头不是突然消失）",
+                    WidgetForm.FlowOpacity(0) == 0 && WidgetForm.FlowOpacity(1) == 0 &&
+                    o50 == 1 && o80 > o90 && o995 < 0.02 && o02 < 0.06 && o18 > 0.99,
+                    "0.02=" + o02.ToString("0.000") + " 0.18=" + o18.ToString("0.000") +
+                    " 0.50=" + o50.ToString("0.000") + " 0.80=" + o80.ToString("0.000") +
+                    " 0.90=" + o90.ToString("0.000") + " 0.995=" + o995.ToString("0.000"));
+
+                // 真正画出来也要对：中段有亮带，走到尽头时亮带应该已经淡没了
+                Func<double, Bitmap> flowShot = delegate(double phase)
+                {
+                    var fs = new Settings();
+                    fs.ui.reducedMotion = false;
+                    var snap = new AttendanceSnapshot();
+                    snap.ok = true;
+                    snap.clockIn = DateTime.Today.AddHours(9);
+                    using (var form = new WidgetForm(new SettingsStore(), fs))
+                    {
+                        Set(form, "scale", 1.5f);
+                        Set(form, "snapshot", snap);
+                        Set(form, "collapsed", false);
+                        form.MinimumSize = Size.Empty;
+                        form.Size = new Size(420, 282);
+                        Call(form, "Recompute");
+                        var st = Get(form, "status");
+                        st.GetType().GetProperty("progress").SetValue(st, 0.6, null);
+                        Set(form, "flowPhase", phase);
+                        var bmp = new Bitmap(420, 282);
+                        using (var g = Graphics.FromImage(bmp))
+                            Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                        Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                        return bmp;
+                    }
+                };
+                int mid = 0, end = 0;
+                using (var a = flowShot(0.50))
+                using (var b = flowShot(0.995))
+                {
+                    for (int y = 153; y < 159; y++)
+                        for (int x = 30; x < 240; x++)
+                        {
+                            mid = Math.Max(mid, (int)Math.Round(RelLum(a.GetPixel(x, y)) * 255));
+                            end = Math.Max(end, (int)Math.Round(RelLum(b.GetPixel(x, y)) * 255));
+                        }
+                }
+                Ok("流光淡出已经接进绘制（尽头不再有亮带）", mid - end >= 8,
+                    "中段最亮 " + mid + " / 尽头 " + end);
             }
 
         Console.WriteLine(fail == 0 ? ("ALL PASS  (" + pass + " checks)") : ("FAILED  " + fail + " of " + (pass + fail)));

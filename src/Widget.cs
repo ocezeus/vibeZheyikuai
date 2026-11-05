@@ -50,6 +50,7 @@ namespace WorkCountdown
         private readonly System.Windows.Forms.Timer calPoll;
         private readonly System.Windows.Forms.Timer remindT;
         private readonly System.Windows.Forms.Timer flowT;
+        private readonly System.Windows.Forms.Timer topT;
 
         // 分层窗口：整帧画在 32 位位图上，圆角由像素 alpha 收边（Region 剪出来的是硬锯齿边）
         private Bitmap frame;
@@ -98,6 +99,11 @@ namespace WorkCountdown
         // 展开后的错峰：主视觉先出，其余行每行相隔 55ms，每行 190ms 淡入
         // 进度条流光跑一个来回的时间
         private const int FlowPeriodMs = 2600;
+        // 流光在一圈两端的淡入 / 淡出占比：走到尽头要慢慢变淡，不能「啪」一下消失
+        private const double FlowFadeIn = 0.18;
+        private const double FlowFadeOut = 0.30;
+        // 探针用：>= 0 时固定流光相位（真实运行永远是 -1，按 TickCount 自己走）
+        private double flowPhase = -1;
         // 进度条整体透明度：展开动画里要和时间一起淡入
         private double barAlpha = 1;
         private const int StaggerGapMs = 55;
@@ -222,6 +228,13 @@ namespace WorkCountdown
             };
             remindT.Tick += delegate { StepReminder(); };
 
+            // 置顶看门狗：Windows 有时会把 WS_EX_TOPMOST 摘掉（换显示器 / Explorer 重启 /
+            // 别的顶层窗口抢 z 序），每 2 秒看一眼，掉了就补回来。已经是置顶时不动 z 序，
+            // 免得把设置窗、右键菜单压下去。
+            topT = new System.Windows.Forms.Timer();
+            topT.Interval = 2000;
+            topT.Tick += delegate { KeepTopMost(); };
+
             ApplySettings();
             BackColor = theme.bgBottom;
             collapsed = settings.ui.edge != "free";
@@ -288,16 +301,54 @@ namespace WorkCountdown
             RequestCalendar(false);
             tick.Start();
             flowT.Start();
+            topT.Start();
+            KeepTopMost();
             // 开机也是展开的：同样按「N 秒没动就收起」的规则走，别一直杵在那儿
             ResetAutoCollapse();
             // 第一帧主动推一次：分层窗口不会因为窗口出现就自动有东西
             BeginInvoke((MethodInvoker)delegate { Invalidate(); if (IsHandleCreated && Visible) PushFrame(); });
         }
 
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            // 从托盘 / 最小化恢复时重新压到最上层，别让它停在别人后面
+            if (Visible) KeepTopMost();
+        }
+
+        /// <summary>
+        /// 置顶看门狗：设置里开着「窗口置顶」时，保证窗口带 WS_EX_TOPMOST。
+        /// 已经是置顶就什么都不做——不能每 2 秒把 z 序抬一次，否则会盖住自己的
+        /// 设置窗 / 右键菜单，也会和别人的置顶窗口互相打架。
+        /// </summary>
+        internal void KeepTopMost()
+        {
+            if (settings == null) return;
+            bool want = settings.ui.alwaysOnTop;
+            if (TopMost != want) TopMost = want;     // 还没建句柄时 WinForms 会记着，建句柄时应用
+            if (!want || !IsHandleCreated) return;
+            if (IsWindowTopMost()) return;
+            SetWindowPos(Handle, HwndTopMost, 0, 0, 0, 0,
+                SwpNoSize | SwpNoMove | SwpNoActivate | SwpNoOwnerZOrder);
+        }
+
+        /// <summary>窗口现在是不是置顶（读实际的扩展样式，不信 Form.TopMost 字段）。</summary>
+        internal bool IsWindowTopMost()
+        {
+            return IsHandleCreated && (GetWindowLong(Handle, GwlExStyle) & WsExTopMost) != 0;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            // 换显示器 / 改缩放后，有的显卡驱动会把窗口的置顶样式弄丢：补一次
+            if (m.Msg == 0x007E && Visible) KeepTopMost();   // WM_DISPLAYCHANGE
+        }
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-            tick.Stop(); poll.Stop(); autoCollapse.Stop(); animT.Stop(); flowT.Stop(); calPoll.Stop(); remindT.Stop();
+            tick.Stop(); poll.Stop(); autoCollapse.Stop(); animT.Stop(); flowT.Stop(); topT.Stop(); calPoll.Stop(); remindT.Stop();
             base.OnFormClosing(e);
         }
 
@@ -307,7 +358,7 @@ namespace WorkCountdown
             {
                 reminderTip.Dispose();
                 if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, remindT, flowT })
+                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, remindT, flowT, topT })
                     if (timer != null) timer.Dispose();
                 foreach (var font in new Font[] { fontBig, fontBigText, fontStatus, fontTiny, fontSmall,
                     fontCollapsedNum, fontCollapsedLabel, fontCollapsedText, fontRemindBig, fontRemindSmall,
@@ -1024,7 +1075,7 @@ namespace WorkCountdown
         private void ApplySettings()
         {
             frameAlpha = (byte)Math.Round(255 * Math.Max(0.3, Math.Min(1.0, settings.ui.opacity / 100.0)));
-            TopMost = settings.ui.alwaysOnTop;
+            KeepTopMost();
             int ms = Math.Max(1, settings.lark.pollMinutes) * 60 * 1000;
             poll.Interval = ms;
             poll.Stop();
@@ -1270,6 +1321,17 @@ namespace WorkCountdown
         [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hDc);
         [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hDc, IntPtr hObject);
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
+        [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+            int X, int Y, int cx, int cy, uint uFlags);
+        [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        private static readonly IntPtr HwndTopMost = new IntPtr(-1);
+        private const int GwlExStyle = -20;
+        private const int WsExTopMost = 0x00000008;
+        private const uint SwpNoSize = 0x0001;
+        private const uint SwpNoMove = 0x0002;
+        private const uint SwpNoActivate = 0x0010;
+        private const uint SwpNoOwnerZOrder = 0x0200;
 
         private const int WsExLayered = 0x80000;
         private const int UlwAlpha = 0x2;
@@ -1492,6 +1554,27 @@ namespace WorkCountdown
             return minutesLeft > 0 && minutesLeft <= 30;
         }
 
+        /// <summary>
+        /// 流光在「一圈」里的不透明度：从左端出来时淡入，快到尽头时淡出。
+        /// 老做法是一整圈都按 150 的不透明度画，光带中心走到右端时被进度条的圆角裁掉，
+        /// 下一帧又跳回左边——看起来就是「走到尽头突然没了」。现在两头都过一遍
+        /// 平滑曲线，最后一段是渐渐变淡，回到左边时也是从无到有。
+        /// </summary>
+        internal static double FlowOpacity(double phase)
+        {
+            if (phase <= 0 || phase >= 1) return 0;
+            double fadeIn = SmoothStep01(phase / FlowFadeIn);
+            double fadeOut = SmoothStep01((1 - phase) / FlowFadeOut);
+            return Math.Min(fadeIn, fadeOut);
+        }
+
+        /// <summary>0→1 的平滑曲线（smoothstep），避免透明度线性变化看着发「硬」。</summary>
+        private static double SmoothStep01(double t)
+        {
+            t = Clamp01(t);
+            return t * t * (3 - 2 * t);
+        }
+
         /// <summary>进度条：走过的一段带发光，最后半小时整条变彩色。</summary>
         /// <summary>进度条：走过的一段带发光，最后半小时整条变彩色。</summary>
         private void DrawProgress(Graphics g, int x, int y, int width, int height, bool glowOn)
@@ -1559,25 +1642,37 @@ namespace WorkCountdown
                 using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(2, height)),
                     Color.FromArgb((int)Math.Round((90) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), 90f))
                     g.FillPath(brush, path);
-                // 流动光带：一道柔光沿着已经走过的部分往前走，走到头再从左边出来
+                // 流动光带：一道柔光沿着已经走过的部分往前走。两头都淡入淡出——
+                // 走到尽头先慢慢变淡再回到左边，不会在终点「啪」一下整条消失。
                 if (!settings.ui.reducedMotion && !SystemInformation.HighContrast && filled > height * 4)
                 {
-                    double phase = (Environment.TickCount % FlowPeriodMs) / (double)FlowPeriodMs;
-                    int bandW = Math.Max(S(24), filled / 3);
-                    int cx = (int)Math.Round(-bandW + (filled + bandW) * phase);
-                    var savedFlow = g.Save();
-                    g.SetClip(path, CombineMode.Intersect);
-                    var flowRect = new Rectangle(cx - bandW, y, bandW * 2, Math.Max(2, height));
-                    using (var fb = new LinearGradientBrush(flowRect,
-                        Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), 0f))
+                    double phase = flowPhase >= 0
+                        ? flowPhase
+                        : (Environment.TickCount % FlowPeriodMs) / (double)FlowPeriodMs;
+                    double opacity = FlowOpacity(phase);
+                    if (opacity > 0.01)
                     {
-                        var fblend = new ColorBlend();
-                        fblend.Colors = new Color[] { Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((150) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White) };
-                        fblend.Positions = new float[] { 0f, 0.5f, 1f };
-                        fb.InterpolationColors = fblend;
-                        g.FillRectangle(fb, flowRect);
+                        int bandW = Math.Max(S(24), filled / 3);
+                        // 光带是在整窗坐标里画的：起点要从条的左端（x）算，不能从 0 算，
+                        // 否则光还没走到条的真正尽头就先没了。
+                        int cx = (int)Math.Round(x - bandW + (filled + bandW) * phase);
+                        var savedFlow = g.Save();
+                        g.SetClip(path, CombineMode.Intersect);
+                        var flowRect = new Rectangle(cx - bandW, y, bandW * 2, Math.Max(2, height));
+                        using (var fb = new LinearGradientBrush(flowRect,
+                            Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), 0f))
+                        {
+                            var fblend = new ColorBlend();
+                            fblend.Colors = new Color[] {
+                                Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White),
+                                Color.FromArgb((int)Math.Round((150) * barAlpha * opacity), Color.White),
+                                Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White) };
+                            fblend.Positions = new float[] { 0f, 0.5f, 1f };
+                            fb.InterpolationColors = fblend;
+                            g.FillRectangle(fb, flowRect);
+                        }
+                        g.Restore(savedFlow);
                     }
-                    g.Restore(savedFlow);
                 }
             }
         }
@@ -1832,7 +1927,7 @@ namespace WorkCountdown
             miTop.Click += delegate
             {
                 settings.ui.alwaysOnTop = miTop.Checked;
-                TopMost = miTop.Checked;
+                KeepTopMost();
                 store.Save(settings);
             };
             var miStart = new ToolStripMenuItem("开机自动启动");
@@ -1869,6 +1964,9 @@ namespace WorkCountdown
             m.Items.Add(miExit);
             m.Opening += delegate
             {
+                // 设置窗口里也能改「窗口置顶」，菜单每次打开都按当前配置刷新勾选状态，
+                // 否则勾是旧的：点一下会把用户刚打开/关掉的置顶又改回去。
+                miTop.Checked = settings.ui.alwaysOnTop;
                 miNext.Text = "下一个日程：" + NextEventText();
                 miDismiss.Enabled = reminding && remindEvent != null;
                 miDismiss.Text = remindEvent != null ? "关闭当前提醒：" + remindEvent.title : "关闭当前提醒";
