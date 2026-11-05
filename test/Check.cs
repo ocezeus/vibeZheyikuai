@@ -1258,6 +1258,15 @@ class Check
                         "animating=" + started + " 现在 " + form.Width + "x" + form.Height);
                 }
 
+                // v2.6.3 的老毛病：分层窗口一旦开双缓冲，WinForms 就再也不调 OnPaint，
+                // 第一帧永远出不来 → 窗口全透明，既看不见也点不动。这条守住它。
+                using (var form = new WidgetForm(new SettingsStore(), s))
+                {
+                    bool dbl = (bool)Call(form, "GetStyle", ControlStyles.OptimizedDoubleBuffer);
+                    Ok("分层窗口没有开双缓冲（开了就永远不画第一帧）", !dbl,
+                        "OptimizedDoubleBuffer=" + dbl);
+                }
+
                 // 手抖：按下后只挪了 2 像素就松手，仍然算点击——窗口要挪回原位，不能变成拖动
                 using (var form = new WidgetForm(new SettingsStore(), s))
                 {

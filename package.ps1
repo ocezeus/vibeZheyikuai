@@ -1,5 +1,5 @@
 ﻿param(
-[string]$Version = '2.6.2'
+[string]$Version = '2.6.3'
 )
 
 # 打包成一份可以直接发给别人的压缩包：dist\下班倒计时-v1.0.zip

@@ -146,11 +146,15 @@ namespace WorkCountdown
             if (scale < 0.75f) scale = 0.75f;
             if (scale > 3f) scale = 3f;
 
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            // 分层窗口：画面是我们自己渲染到 frame 位图再 UpdateLayeredWindow 推上去的，
+            // WinForms 这条 WM_PAINT 只负责「该出一帧了」。**千万不要开双缓冲**
+            // （OptimizedDoubleBuffer / DoubleBuffered = true）：在 WS_EX_LAYERED 窗口上
+            // WinForms 会因此根本不调用 OnPaint，于是永远没有第一帧——
+            // 窗口全透明、连点击都穿透过去，看起来就是「看不见、点不动」。
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             FormBorderStyle = FormBorderStyle.None;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
-            DoubleBuffered = true;
             AutoScaleMode = AutoScaleMode.None;
             Text = "下班倒计时";
             MinimumSize = new Size(S(DesignCollapsedW), S(DesignCollapsedH));
