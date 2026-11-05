@@ -110,6 +110,7 @@ $sources = @(
     (Join-Path $src 'Models.cs'),
     (Join-Path $src 'Lark.cs'),
     (Join-Path $src 'Widget.cs'),
+    (Join-Path $src 'ScreenReminderForm.cs'),
     (Join-Path $src 'SettingsForm.cs'),
     (Join-Path $src 'FirstRunForm.cs')
 )

@@ -383,23 +383,13 @@ class Check
                     Ok("双层色块 " + kinds[i],
                         Distance(bandA[i], bandB[i]) > 25,
                         "A=" + fmt(bandA[i]) + " B=" + fmt(bandB[i]));
-                    // 文字压在色块上要看得清（会议橙黄用深色字，休息/日程用各自预设的墨色）
+                    // 会议/日程跟随主题；午休、晚休用固定日程自己的配色
                     {
                         Color ink;
-                        if (kinds[i] == "meeting")
-                        {
-                            Color ma = Color.FromArgb(244, 145, 53), mb2 = Color.FromArgb(255, 205, 105);
-                            ink = Color.FromArgb(52, 30, 15);
-                            ReminderStyles.FitToTheme(Themes.Get(s.ui.theme), ref ma, ref mb2, ref ink);
-                        }
-                        else ink = Color.FromArgb(52, 30, 15);
-                        if (kinds[i] != "meeting")
-                        {
-                            string sid = kinds[i] == "lunch" ? s.ui.lunchReminderStyle
-                                : kinds[i] == "evening" ? s.ui.eveningReminderStyle : "theme";
-                            Color ia, ib;
-                            ReminderStyles.Resolve(sid, Themes.Get(s.ui.theme), out ia, out ib, out ink);
-                        }
+                        string sid = kinds[i] == "lunch" ? s.ui.lunchReminderStyle
+                            : kinds[i] == "evening" ? s.ui.eveningReminderStyle : "theme";
+                        Color ia, ib;
+                        ReminderStyles.Resolve(sid, Themes.Get(s.ui.theme), out ia, out ib, out ink);
                         double cA = Contrast(ink, bandA[i]);
                         double cB = Contrast(ink, bandB[i]);
                         Ok("文字对比度 " + kinds[i], cA >= 4.5 && cB >= 4.5,
@@ -411,10 +401,13 @@ class Check
             for (int i = 0; i < kinds.Length; i++)
                 for (int j = i + 1; j < kinds.Length; j++)
                 {
+                    // 会议和日程现在都跟随主题，本来就是同一个颜色
+                    if ((kinds[i] == "meeting" && kinds[j] == "event")
+                        || (kinds[i] == "event" && kinds[j] == "meeting")) continue;
                     int d = Distance(bandA[i], bandA[j]);
                     if (d <= 40) { distinct = false; Ok("配色区分 " + kinds[i] + "/" + kinds[j], false, "距离 " + d); }
                 }
-            Ok("四类提醒配色可区分", distinct, "会议橙黄 / 午休青绿 / 晚休靛蓝 / 日程主题色");
+            Ok("主题色与固定日程配色可区分", distinct, "午休青绿 / 晚休靛蓝 / 会议与日程=主题色");
         }
 
         // ---- 5b. 午休/晚休/下班的配色从已有主题里挑 ----
@@ -542,6 +535,85 @@ class Check
                 back.ui.lunchReminderStyle == "hong-fengye" && back.ui.offReminderStyle == "lan-zangqing"
                 && back.ui.eveningReminderStyle == "bai-zhenzhu",
                 back.ui.lunchReminderStyle + " / " + back.ui.eveningReminderStyle + " / " + back.ui.offReminderStyle);
+        }
+
+        // ---- 5c. 提醒扩散范围 / 样式：默认 + 回落 + 存读 ----
+        {
+            var s = new Settings();
+            Ok("提醒扩散默认（仅卡片 / 圆形）",
+                s.ui.reminderSpread == "card" && s.ui.reminderSpreadStyle == "circle",
+                s.ui.reminderSpread + " / " + s.ui.reminderSpreadStyle);
+
+            var bad = new Settings();
+            bad.ui.reminderSpread = "bogus";
+            bad.ui.reminderSpreadStyle = "bogus";
+            bad.Normalize();
+            Ok("非法扩散设置回落默认",
+                bad.ui.reminderSpread == "card" && bad.ui.reminderSpreadStyle == "circle",
+                bad.ui.reminderSpread + " / " + bad.ui.reminderSpreadStyle);
+
+            var pick = new Settings();
+            pick.ui.reminderSpread = "screen";
+            pick.ui.reminderSpreadStyle = "bar";
+            var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var back = ser.Deserialize<Settings>(ser.Serialize(pick));
+            back.Normalize();
+            Ok("扩散设置能存能读",
+                back.ui.reminderSpread == "screen" && back.ui.reminderSpreadStyle == "bar",
+                back.ui.reminderSpread + " / " + back.ui.reminderSpreadStyle);
+        }
+
+        // ---- 5d. 新提醒动画：扩散从条子末端开始，停留时两块色 + 全屏模式 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.ui.edge = "free";
+            s.ui.theme = "lv-kongque";
+            s.ui.reminderSpread = "card";
+            s.ui.reminderSpreadStyle = "circle";
+            var ev = new ReminderEvent();
+            ev.title = "需求对齐会";
+            ev.place = "3F · 会议室 A";
+            ev.detail = "带上排期";
+            ev.source = "local";
+            ev.start = Reminders.FormatStart(DateTime.Now.AddMinutes(12));
+            ev.end = Reminders.FormatStart(DateTime.Now.AddMinutes(40));
+            Color a, b, ink;
+            ReminderStyles.Resolve(ReminderStyles.Follow, Themes.Get(s.ui.theme), out a, out b, out ink);
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Set(form, "scale", 1.5f);
+                Set(form, "collapsed", false);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                Set(form, "remindEvent", ev);
+                Set(form, "reminding", true);
+                Set(form, "remindAt", DateTime.Now.AddMilliseconds(-300));
+                Call(form, "Recompute");
+                using (var bmp = new Bitmap(420, 282))
+                {
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                    Color nearTip = bmp.GetPixel(380, 240);
+                    Color far = bmp.GetPixel(10, 10);
+                    Ok("卡片扩散从条子末端开始", Distance(nearTip, a) < 14 && Distance(far, a) > 30,
+                        "近端=" + nearTip.R + "," + nearTip.G + "," + nearTip.B + " 远端=" + far.R + "," + far.G + "," + far.B);
+                }
+                Set(form, "remindAt", DateTime.Now.AddMilliseconds(-900));
+                using (var bmp = new Bitmap(420, 282))
+                {
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                    Ok("卡片停留 = 两块主题色", Distance(bmp.GetPixel(300, 40), a) < 12 && Distance(bmp.GetPixel(300, 262), b) < 12,
+                        "A=" + bmp.GetPixel(300, 40) + " B=" + bmp.GetPixel(300, 262));
+                }
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+
         }
 
         // ---- 6. 展开卡片更紧凑，且提醒分界线落在两行之间 ----
@@ -1104,38 +1176,37 @@ class Check
                 }
             };
             // 150% 下分界线在 96px：上块盖 0..96，下块盖 96..282
-            Color bandA, bandB, plainA, plainB;
+            Color bandA, bandB, plainA, floodA, floodB, floodInk;
+            ReminderStyles.Resolve(ReminderStyles.Follow, Themes.Get(s.ui.theme), out floodA, out floodB, out floodInk);
             using (var b0 = shot(0, false))
             {
                 plainA = b0.GetPixel(300, 20);
-                plainB = b0.GetPixel(300, 200);
             }
             using (var early = shot(120, false))
-            using (var landed = shot(560, false))
+            using (var flooded = shot(520, false))
+            using (var hold = shot(1200, false))
             {
                 Color nearSeamEarly = early.GetPixel(300, 90);
                 bool moved = Distance(nearSeamEarly, plainA) < 30
-                          && Distance(landed.GetPixel(300, 90), plainA) > 40;
-                Ok("上面的色块是落下来的（不是一下子出现）", moved,
-                    "接缝上方 120ms=" + fmt(nearSeamEarly) + " 560ms=" + fmt(landed.GetPixel(300, 90)));
-                Ok("两块都到齐后整张卡都是色块", Distance(landed.GetPixel(300, 6), plainA) > 25
-                    && Distance(landed.GetPixel(300, 260), plainB) > 25, "");
-                bandA = landed.GetPixel(300, 6);
-                bandB = landed.GetPixel(300, 260);
+                          && Distance(flooded.GetPixel(300, 90), floodA) < 20;
+                Ok("扩散是逐渐铺开的（不是一下子出现）", moved,
+                    "120ms=" + fmt(nearSeamEarly) + " 520ms=" + fmt(flooded.GetPixel(300, 90)));
+                Ok("铺满后整张卡都是色块", Distance(flooded.GetPixel(300, 6), floodA) < 20
+                    && Distance(flooded.GetPixel(300, 260), floodA) < 20, "");
+                bandA = hold.GetPixel(300, 6);
+                bandB = hold.GetPixel(300, 260);
+                Ok("停留时上下两块色不同", Distance(bandA, bandB) > 20, fmt(bandA) + " / " + fmt(bandB));
             }
-            // 退场：先收字，然后下面的色块先抽走，上面的后走
+            // 退场：先擦字，然后整块色收回去
             using (var e1 = shot(320, true))
-            using (var e2 = shot(760, true))
+            using (var e2 = shot(900, true))
             {
-                Color underSeam = e1.GetPixel(300, 108);
-                bool bottomGone = Distance(underSeam, plainB) < 45;
-                bool topStill = Distance(e1.GetPixel(300, 20), plainA) > 20;
-                bool topGone = Distance(e2.GetPixel(300, 20), plainA) < 45;
-                Ok("退场时下面的先走、上面的还在", bottomGone && topStill,
-                    "接缝下 " + fmt(underSeam) + " 顶部 " + fmt(e1.GetPixel(300, 20)));
+                bool stillFlooded = Distance(e1.GetPixel(300, 20), floodA) < 20;
+                bool topGone = Distance(e2.GetPixel(300, 20), plainA) < 20;
+                Ok("退场先擦内容、色块还铺着", stillFlooded,
+                    "顶部 " + fmt(e1.GetPixel(300, 20)) + " / 色块 " + fmt(floodA));
                 Ok("最后整张卡回到普通卡片", topGone, fmt(e2.GetPixel(300, 20)) + " / " + fmt(plainA));
             }
-            Ok("两块色块颜色不同", Distance(bandA, bandB) > 20, fmt(bandA) + " / " + fmt(bandB));
 
             // 圆角是像素 alpha 收的边：角上应该半透明，中间完全不透明
             using (var form = new WidgetForm(new SettingsStore(), s))

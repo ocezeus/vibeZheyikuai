@@ -92,6 +92,20 @@ namespace WorkCountdown
         private Font fontRemindTime;
         private Font fontCollapsedText;
 
+        // 全屏提醒：同一扇分层窗临时铺满整块屏，按 1/DPI 的分辨率渲染再交给 ULW 放大
+        private bool screenReminder;
+        private Rectangle screenRestoreBounds;
+        private bool screenRestoreCollapsed;
+        private Rectangle screenBounds;
+        private int screenW, screenH, screenRenderW, screenRenderH;
+        private double screenLayout;
+        private int screenTipX, screenTipY;
+        private byte screenAlphaBefore;
+        private Bitmap screenCardUnder;
+        private ScreenReminderForm screenForm;
+        private Font screenKindFont, screenTitleFont, screenCountFont, screenWhenFont,
+            screenPlaceFont, screenDetailFont, screenHintFont;
+
         private bool animating;
         private int animFromW, animFromH, animFromX, animToW, animToH, animToX;
         private int animStart;
@@ -249,6 +263,17 @@ namespace WorkCountdown
             return (int)Math.Round(value * scale);
         }
 
+        /// <summary>全屏提醒的 1280×720 设计坐标 → 渲染位图坐标。</summary>
+        private int SX(float value)
+        {
+            return (int)Math.Round(value * screenLayout);
+        }
+
+        private int SY(float value)
+        {
+            return (int)Math.Round(value * screenLayout);
+        }
+
         /// <summary>是否显示第二段时间（午休倒计时）。</summary>
         private bool ShowLunchRow
         {
@@ -324,7 +349,7 @@ namespace WorkCountdown
         internal void KeepTopMost()
         {
             if (settings == null) return;
-            bool want = settings.ui.alwaysOnTop;
+            bool want = settings.ui.alwaysOnTop || screenReminder;
             if (TopMost != want) TopMost = want;     // 还没建句柄时 WinForms 会记着，建句柄时应用
             if (!want || !IsHandleCreated) return;
             if (IsWindowTopMost()) return;
@@ -364,6 +389,10 @@ namespace WorkCountdown
                     fontCollapsedNum, fontCollapsedLabel, fontCollapsedText, fontRemindBig, fontRemindSmall,
                     fontRemindTitle, fontRemindMeta, fontRemindTime }) if (font != null) font.Dispose();
                 sfCenter.Dispose(); sfNear.Dispose(); sfFar.Dispose();
+                DisposeScreenFonts();
+                if (screenForm != null) { screenForm.CloseNow(); screenForm = null; }
+                if (screenCardUnder != null) { screenCardUnder.Dispose(); screenCardUnder = null; }
+                if (frame != null) { frame.Dispose(); frame = null; }
                 if (menu != null) menu.Dispose();
             }
             base.Dispose(disposing);
@@ -671,6 +700,7 @@ namespace WorkCountdown
 
         private void StartReminder(ReminderEvent e)
         {
+            if (screenReminder) ExitScreenMode();
             if (animating) { animT.Stop(); animating = false; SetBounds(animToX, Top, animToW, animToH); collapsed = animToW == S(DesignCollapsedW); ApplyRegion(); }
             remindEvent = e;
             remindUntil = ComputeRemindUntil(e, DateTime.Now);
@@ -682,6 +712,7 @@ namespace WorkCountdown
             reminding = true;
             autoCollapse.Stop();
             remindT.Interval = (settings.ui.reducedMotion || SystemInformation.HighContrast) ? 100 : 33; remindT.Start();
+            if (UseScreenReminder(e)) ShowScreenReminder(e);
             Invalidate();
             store.Log("日程提醒: " + e.title + " @" + Reminders.ParseStart(e).ToString("yyyy-MM-dd HH:mm"));
             ShowBalloon("日程提醒 · " + e.title + "\r\n" + Reminders.ParseStart(e).ToString("HH:mm") +
@@ -722,6 +753,7 @@ namespace WorkCountdown
         private void BeginExitReminder()
         {
             if (remindEvent == null) return;
+            if (screenForm != null) { screenForm.BeginExit(); return; }
             remindExiting = true;
             remindExitAt = DateTime.Now;
             remindT.Interval = 33;
@@ -732,11 +764,146 @@ namespace WorkCountdown
         private void EndReminder()
         {
             remindT.Stop();
+            if (screenForm != null) { screenForm.CloseNow(); screenForm = null; }
             reminding = false;
             remindExiting = false;
             remindEvent = null;
+            if (screenReminder) ExitScreenMode();
             ResetAutoCollapse();
             Invalidate();
+        }
+
+        private bool UseScreenReminder(ReminderEvent e)
+        {
+            return settings.ui.reminderSpread == "screen"
+                && !settings.ui.reducedMotion && !SystemInformation.HighContrast
+                && e != null && e.source != "alert";
+        }
+
+        private void ShowScreenReminder(ReminderEvent e)
+        {
+            if (screenForm != null) { screenForm.CloseNow(); screenForm = null; }
+            var scr = Screen.FromControl(this);
+            int pad = S(18);
+            int barY = collapsed ? S(59) : S(102);
+            int barH = collapsed ? S(3) : S(4);
+            double progress = status == null ? 0 : Math.Max(0, Math.Min(1, status.progress));
+            int tipX = Left + pad + (int)Math.Round((Width - pad * 2) * progress);
+            int tipY = Top + barY + barH / 2;
+            screenForm = new ScreenReminderForm(settings, e, theme, scr.Bounds,
+                new Point(tipX, tipY), OnScreenDone);
+            screenForm.Show();
+            // 全屏窗自己跑入场动画；卡片留在后面，等它关掉再恢复
+            remindT.Stop();
+        }
+
+        private void OnScreenDone()
+        {
+            // 全屏动画放完回到卡片提醒；提醒本身继续常驻
+            screenForm = null;
+            Invalidate();
+        }
+
+        /// <summary>把窗口临时铺满小组件所在的那块屏，退场后原样缩回卡片。</summary>
+        private void EnterScreenMode()
+        {
+            if (screenReminder) return;
+            screenRestoreBounds = Bounds;
+            screenRestoreCollapsed = collapsed;
+            var scr = Screen.FromControl(this);
+            screenBounds = scr.Bounds;
+            screenW = Math.Max(320, screenBounds.Width);
+            screenH = Math.Max(240, screenBounds.Height);
+            screenRenderW = screenW;
+            screenRenderH = screenH;
+            screenLayout = Math.Min(screenRenderW / 1280.0, screenRenderH / 720.0);
+
+            int pad = S(18);
+            int barY = collapsed ? S(59) : S(102);
+            int barH = collapsed ? S(3) : S(4);
+            double progress = status == null ? 0 : Math.Max(0, Math.Min(1, status.progress));
+            double tipLocalX = pad + (Width - pad * 2) * progress;
+            double tipLocalY = barY + barH / 2.0;
+            screenTipX = (int)Math.Round(Left + tipLocalX - screenBounds.Left);
+            screenTipY = (int)Math.Round(Top + tipLocalY - screenBounds.Top);
+
+            screenCardUnder = frame == null ? null : (Bitmap)frame.Clone();
+            CreateScreenFonts();
+            screenAlphaBefore = frameAlpha;
+            frameAlpha = 255;
+            screenReminder = true;
+            MinimumSize = Size.Empty;
+            SetBounds(screenBounds.Left, screenBounds.Top, screenW, screenH);
+            TopMost = true;
+            KeepTopMost();
+            if (frame != null) { frame.Dispose(); frame = null; }
+            Invalidate();
+        }
+
+        private Bitmap CaptureScreen(Rectangle r)
+        {
+            try
+            {
+                var bmp = new Bitmap(Math.Max(1, r.Width), Math.Max(1, r.Height), PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(bmp))
+                    g.CopyFromScreen(r.Left, r.Top, 0, 0, new Size(r.Width, r.Height));
+                return bmp;
+            }
+            catch { return null; }
+        }
+
+        private void ExitScreenMode()
+        {
+            if (!screenReminder) return;
+            screenReminder = false;
+            DisposeScreenFonts();
+            if (screenCardUnder != null) { screenCardUnder.Dispose(); screenCardUnder = null; }
+            frameAlpha = screenAlphaBefore;
+            MinimumSize = new Size(S(DesignCollapsedW), S(DesignCollapsedH));
+            SetBounds(screenRestoreBounds.X, screenRestoreBounds.Y, screenRestoreBounds.Width, screenRestoreBounds.Height);
+            collapsed = screenRestoreCollapsed;
+            if (frame != null) { frame.Dispose(); frame = null; }
+            TopMost = settings.ui.alwaysOnTop;
+            KeepTopMost();
+            Invalidate();
+        }
+
+        private void CreateScreenFonts()
+        {
+            DisposeScreenFonts();
+            float l = (float)screenLayout;
+            screenKindFont = UiFont.Make(12f * l, FontStyle.Bold);
+            screenTitleFont = UiFont.Make(46f * l, FontStyle.Bold);
+            screenCountFont = UiFont.Make(19f * l);
+            screenWhenFont = UiFont.Make(28f * l, FontStyle.Bold);
+            screenPlaceFont = UiFont.Make(16f * l);
+            screenDetailFont = UiFont.Make(14f * l);
+            screenHintFont = UiFont.Make(11.5f * l);
+
+            // 标题太长就缩一点，别把右侧的关闭按钮顶掉
+            if (remindEvent != null && screenTitleFont != null)
+            {
+                float maxW = screenRenderW - 2 * (68f * l);
+                using (var probe = new Bitmap(1, 1))
+                using (var pg = Graphics.FromImage(probe))
+                {
+                    while (screenTitleFont.Size > 22f * l && pg.MeasureString(remindEvent.title, screenTitleFont).Width > maxW)
+                    {
+                        float next = screenTitleFont.Size - 2f;
+                        screenTitleFont.Dispose();
+                        screenTitleFont = UiFont.Make(next, FontStyle.Bold);
+                    }
+                }
+            }
+        }
+
+        private void DisposeScreenFonts()
+        {
+            foreach (var f in new Font[] { screenKindFont, screenTitleFont, screenCountFont,
+                screenWhenFont, screenPlaceFont, screenDetailFont, screenHintFont })
+                if (f != null) f.Dispose();
+            screenKindFont = screenTitleFont = screenCountFont = screenWhenFont =
+                screenPlaceFont = screenDetailFont = screenHintFont = null;
         }
 
         /// <summary>最后 60 分钟显示厘秒，这时才把刷新提到 20Hz；其余时间仍旧一秒一跳。</summary>
@@ -765,6 +932,12 @@ namespace WorkCountdown
             var e = remindEvent;
             notified.Add((e.id ?? e.title) + "@" + Reminders.ParseStart(e).Ticks);
             store.Log("手动关闭提醒: " + e.title);
+            if (screenForm != null)
+            {
+                // 全屏时手动关闭：直接结束提醒，不要让卡片再留着
+                EndReminder();
+                return;
+            }
             if (e.source == "alert")
             {
                 offAlertMutedDay = DateTime.Today;     // 今天不再弹
@@ -818,6 +991,12 @@ namespace WorkCountdown
             return t * t * t;
         }
 
+        private static double Smooth(double t)
+        {
+            t = Math.Max(0, Math.Min(1, t));
+            return t * t * (3 - 2 * t);
+        }
+
         private static double Luminance(Color c)
         {
             return (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0;
@@ -842,22 +1021,10 @@ namespace WorkCountdown
             if (alert) { PaintOffAlert(g, t, quiet, bandAlpha); return; }
             bool meeting = Reminders.IsMeeting(remindEvent);
             var fixedSched = FixedOf(remindEvent);
-            // 四类配色互不混淆：会议=橙黄、日程=主题色、固定日程=各自选的配色；
-            // 但都要先贴合当前主题的明暗，否则在深色主题上会突然跳出一张浅色卡。
+            // 固定日程用自己的配色；会议、日程等一律跟随当前主题。
             Color a, b;
             Color styleInk;
-            if (meeting)
-            {
-                a = Color.FromArgb(244, 145, 53); b = Color.FromArgb(255, 205, 105);
-                styleInk = Color.FromArgb(52, 30, 15);
-            }
-            else
-            {
-                string styleId = fixedSched != null && !string.IsNullOrWhiteSpace(fixedSched.styleId)
-                    ? fixedSched.styleId : ReminderStyles.Follow;
-                ReminderStyles.Resolve(styleId, theme, out a, out b, out styleInk);
-            }
-            if (meeting) ReminderStyles.FitToTheme(theme, ref a, ref b, ref styleInk);
+            ReminderColors(out a, out b, out styleInk);
 
             double exit = t - RemindInMs - RemindHoldMs;
             int seam = collapsed ? S(37) : S(64);
@@ -910,6 +1077,16 @@ namespace WorkCountdown
                 g.DrawLine(pen, x + pad, y + pad, x + size - pad, y + size - pad);
                 g.DrawLine(pen, x + size - pad, y + pad, x + pad, y + size - pad);
             }
+        }
+
+        /// <summary>提醒的两层色：固定日程按自己的配色；会议、日程等跟随当前主题。</summary>
+        private void ReminderColors(out Color a, out Color b, out Color ink)
+        {
+            if (theme == null) theme = Themes.Get(settings.ui.theme);
+            var fixedSched = FixedOf(remindEvent);
+            string styleId = fixedSched != null && !string.IsNullOrWhiteSpace(fixedSched.styleId)
+                ? fixedSched.styleId : ReminderStyles.Follow;
+            ReminderStyles.Resolve(styleId, theme, out a, out b, out ink);
         }
 
         /// <summary>提醒卡片第一行的类型名（会议/日程/固定日程名/注意）。</summary>
@@ -1279,6 +1456,7 @@ namespace WorkCountdown
         /// <summary>尺寸和 collapsed 状态对不上时（极少数情况）自己纠正一次。</summary>
         private void SyncBounds()
         {
+            if (screenReminder) return;
             int w = collapsed ? S(DesignCollapsedW) : S(DesignExpandedW);
             int h = collapsed ? S(DesignCollapsedH) : ExpandedH;
             if (Width != w || Height != h) SetBounds(Left, Top, w, h);
@@ -1296,6 +1474,7 @@ namespace WorkCountdown
 
         private void MaybeAutoCollapse()
         {
+            if (screenReminder) return;
             if (collapsed || animating || reminding) return;
             if (ClientRectangle.Contains(PointToClient(Cursor.Position))) { ResetAutoCollapse(); return; }
             SetCollapsed(true);
@@ -1324,16 +1503,17 @@ namespace WorkCountdown
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
             int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
         private static readonly IntPtr HwndTopMost = new IntPtr(-1);
         private const int GwlExStyle = -20;
         private const int WsExTopMost = 0x00000008;
+        private const int WsExLayered = 0x00080000;
         private const uint SwpNoSize = 0x0001;
         private const uint SwpNoMove = 0x0002;
         private const uint SwpNoActivate = 0x0010;
         private const uint SwpNoOwnerZOrder = 0x0200;
 
-        private const int WsExLayered = 0x80000;
         private const int UlwAlpha = 0x2;
         private const byte AcSrcAlpha = 0x1;
 
@@ -1351,12 +1531,12 @@ namespace WorkCountdown
                 hBitmap = frame.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
                 oldBitmap = SelectObject(memDc, hBitmap);
                 var size = new NativeSize();
-                size.cx = frame.Width;
-                size.cy = frame.Height;
+                size.cx = screenReminder ? screenW : frame.Width;
+                size.cy = screenReminder ? screenH : frame.Height;
                 var src = new NativePoint();
                 var dst = new NativePoint();
-                dst.X = Left;
-                dst.Y = Top;
+                dst.X = screenReminder ? screenBounds.Left : Left;
+                dst.Y = screenReminder ? screenBounds.Top : Top;
                 var blend = new BlendFunction();
                 blend.BlendOp = 0;
                 blend.SourceConstantAlpha = frameAlpha;
@@ -1381,10 +1561,12 @@ namespace WorkCountdown
         protected override void OnPaint(PaintEventArgs e)
         {
             if (Width <= 0 || Height <= 0) return;
-            if (frame == null || frame.Width != Width || frame.Height != Height)
+            int fw = screenReminder ? screenRenderW : Width;
+            int fh = screenReminder ? screenRenderH : Height;
+            if (frame == null || frame.Width != fw || frame.Height != fh)
             {
                 if (frame != null) frame.Dispose();
-                frame = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+                frame = new Bitmap(fw, fh, PixelFormat.Format32bppArgb);
             }
             using (var g = Graphics.FromImage(frame))
             {
@@ -1392,8 +1574,8 @@ namespace WorkCountdown
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 // 卡面是不透明底色，ClearType 才有意义；边缘的圆角靠 alpha 收，所以不会出现彩边
-                g.TextRenderingHint = UseClearType ? TextRenderingHint.ClearTypeGridFit : TextRenderingHint.AntiAliasGridFit;
-                RenderCard(g);
+                g.TextRenderingHint = screenReminder || !UseClearType ? TextRenderingHint.AntiAliasGridFit : TextRenderingHint.ClearTypeGridFit;
+                if (screenReminder) RenderScreenReminder(g); else RenderCard(g);
             }
             // 离屏渲染（测试探针）拿到的就是这个位图；真实窗口再由 PushFrame 推像素
             if (e.Graphics != null) e.Graphics.DrawImage(frame, 0, 0);
@@ -1413,7 +1595,7 @@ namespace WorkCountdown
                 {
                     if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
                 }
-                else
+                else if (remindEvent != null && remindEvent.source == "alert")
                 {
                     double elapsed = ReminderClock();
                     bool quietNow = settings.ui.reducedMotion || SystemInformation.HighContrast;
@@ -1443,10 +1625,407 @@ namespace WorkCountdown
                         }
                     }
                 }
+                else
+                {
+                    PaintCardReminder(g, ReminderClock());
+                }
                 // 提醒动画期间不描边：浅色主题下这一圈线会压在色块上显出一条亮边。
                 if (!reminding)
                     using (var pen = new Pen(Color.FromArgb(24, theme.accent), Math.Max(1, scale))) g.DrawPath(pen, path);
             }
+        }
+
+        private const double CardFloodDelayMs = 100;
+        private const double CardCircleFloodMs = 420;
+        private const double CardBarHMs = 200;
+        private const double CardBarVStartMs = 280;
+        private const double CardBarVMs = 240;
+        private const double CardRevealStartMs = 520;
+        private const double CardRevealMs = 300;
+        private const double CardOutMs = 240;
+        private const double CardShrinkMs = 360;
+
+        /// <summary>
+        /// 卡片内的提醒入场：先让普通卡片露出来，再从进度条已走段的末端做一块柔边扩散，
+        /// 铺满卡片后标题和下方第二块同时擦出。退场反过来。
+        /// </summary>
+        private void PaintCardReminder(Graphics g, double t)
+        {
+            bool bar = settings.ui.reminderSpreadStyle == "bar";
+            if (settings.ui.reducedMotion || SystemInformation.HighContrast)
+            {
+                using (var hold = ReminderHoldBitmap())
+                    g.DrawImageUnscaled(hold, 0, 0);
+                return;
+            }
+
+            if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
+
+            double end = RemindInMs + RemindHoldMs;
+            if (t >= CardFloodDelayMs) DrawCardFlood(g, t, bar, end);
+            double reveal = CardReveal(t, end);
+            if (reveal > 0) DrawCardReveal(g, reveal, bar);
+        }
+
+        private double CardReveal(double t, double end)
+        {
+            double p = EaseOutCubic(Clamp01((t - CardRevealStartMs) / CardRevealMs));
+            double o = EaseInCubic(Clamp01((t - end) / CardOutMs));
+            return Math.Max(0, p * (1 - o));
+        }
+
+        /// <summary>扩散的软边：整块 A 色按逐像素 alpha 叠在普通卡片上，边缘按距离柔化。</summary>
+        private void DrawCardFlood(Graphics g, double t, bool bar, double end)
+        {
+            int pad = S(18);
+            int barY = collapsed ? S(59) : S(102);
+            int barH = collapsed ? S(3) : S(4);
+            double progress = status == null ? 0 : Math.Max(0, Math.Min(1, status.progress));
+            double tipX = pad + (Width - pad * 2) * progress;
+            double tipY = barY + barH / 2.0;
+
+            double outStart = end + CardOutMs;
+            Func<int, int, double> mask;
+            if (bar)
+            {
+                double p1 = Smooth(Clamp01((t - CardFloodDelayMs) / CardBarHMs));
+                double p2 = Smooth(Clamp01((t - CardBarVStartMs) / CardBarVMs));
+                int left = (int)Math.Round(tipX - p1 * tipX);
+                int right = (int)Math.Round(tipX + p1 * (Width - tipX));
+                int top = (int)Math.Round(tipY - 3 - p2 * (tipY - 3));
+                int bottom = (int)Math.Round(tipY + 3 + p2 * (Height - tipY - 3));
+                double colY = EaseInCubic(Clamp01((t - outStart) / 160.0));
+                double colX = EaseInCubic(Clamp01((t - (outStart + 140)) / 220.0));
+                if (t > outStart) { left = (int)Math.Round(left + colX * (tipX - left)); right = (int)Math.Round(right - colX * (right - tipX)); }
+                if (colY > 0) { top = (int)Math.Round(top + colY * (tipY - 3 - top)); bottom = (int)Math.Round(bottom - colY * (bottom - (tipY + 3))); }
+                if (right - left < 2 || bottom - top < 2) return;
+                double fl = left > 0 ? S(10) : 0, fr = right < Width ? S(10) : 0;
+                double ft = top > 0 ? Math.Min(S(10), (bottom - top) * 0.25) : 0;
+                double fb = bottom < Height ? Math.Min(S(10), (bottom - top) * 0.25) : 0;
+                mask = (x, y) =>
+                {
+                    if (x < left || x >= right || y < top || y >= bottom) return 0;
+                    double a = 1;
+                    if (fl > 0) a = Math.Min(a, Smooth((x - left) / fl));
+                    if (fr > 0) a = Math.Min(a, Smooth((right - x) / fr));
+                    if (ft > 0) a = Math.Min(a, Smooth((y - top) / ft));
+                    if (fb > 0) a = Math.Min(a, Smooth((bottom - y) / fb));
+                    return a;
+                };
+            }
+            else
+            {
+                double p = Smooth(Clamp01((t - CardFloodDelayMs) / CardCircleFloodMs));
+                double outP = EaseInCubic(Clamp01((t - outStart) / CardShrinkMs));
+                double maxR = 0;
+                foreach (var pt in new[] { new Point(0, 0), new Point(Width, 0), new Point(0, Height), new Point(Width, Height) })
+                    maxR = Math.Max(maxR, Math.Sqrt((pt.X - tipX) * (pt.X - tipX) + (pt.Y - tipY) * (pt.Y - tipY)));
+                double r = (maxR + S(8)) * p * (1 - outP);
+                if (r < 1) return;
+                double feather = Math.Max(S(7), Math.Min(S(18), r * 0.06));
+                mask = (x, y) =>
+                {
+                    double dx = x - tipX, dy = y - tipY;
+                    double d = Math.Sqrt(dx * dx + dy * dy);
+                    if (d <= r - feather) return 1;
+                    if (d >= r) return 0;
+                    return Smooth((r - d) / feather);
+                };
+            }
+
+            Color ca, cbn, cink;
+            ReminderColors(out ca, out cbn, out cink);
+            using (var layer = new Bitmap(Width, Height, PixelFormat.Format32bppArgb))
+            {
+                var rect = new Rectangle(0, 0, Width, Height);
+                var bits = layer.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                int w = Width, h = Height;
+                var data = new int[w * h];
+                int cr = ca.R, cg = ca.G, cb = ca.B;
+                for (int y = 0; y < h; y++)
+                {
+                    int row = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        double al = mask(x, y);
+                        if (al <= 0.004) continue;
+                        int ai = (int)Math.Round(255 * Clamp01(al));
+                        data[row + x] = (ai << 24) | (cr << 16) | (cg << 8) | cb;
+                    }
+                }
+                Marshal.Copy(data, 0, bits.Scan0, data.Length);
+                layer.UnlockBits(bits);
+
+                var saved = g.Save();
+                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                    g.SetClip(cardPath, CombineMode.Replace);
+                g.DrawImageUnscaled(layer, 0, 0);
+                g.Restore(saved);
+            }
+        }
+
+        /// <summary>下方第二块和上方标题同时擦出：圆形样式上下来、进度条样式共用一条左→右擦线。</summary>
+        private void DrawCardReveal(Graphics g, double reveal, bool bar)
+        {
+            using (var hold = ReminderHoldBitmap())
+            {
+                int seam = collapsed ? S(37) : S(64);
+                var saved = g.Save();
+                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                {
+                    g.SetClip(cardPath, CombineMode.Replace);
+                    if (bar)
+                    {
+                        int wipeX = (int)Math.Round(Width * reveal);
+                        if (wipeX > 0)
+                        {
+                            var top = new Rectangle(0, 0, wipeX, seam);
+                            var bottom = new Rectangle(0, seam, wipeX, Height - seam);
+                            g.SetClip(top, CombineMode.Intersect);
+                            g.DrawImage(hold, top, 0, 0, wipeX, seam, GraphicsUnit.Pixel);
+                            g.SetClip(cardPath, CombineMode.Replace);
+                            g.SetClip(bottom, CombineMode.Intersect);
+                            g.DrawImage(hold, bottom, 0, seam, wipeX, Height - seam, GraphicsUnit.Pixel);
+                        }
+                    }
+                    else
+                    {
+                        int topH = (int)Math.Round(seam * reveal);
+                        if (topH > 0)
+                        {
+                            var top = new Rectangle(0, 0, Width, topH);
+                            g.SetClip(top, CombineMode.Intersect);
+                            g.DrawImage(hold, top, 0, 0, Width, topH, GraphicsUnit.Pixel);
+                        }
+                        int off = (int)Math.Round((1 - reveal) * (Height - seam + 4));
+                        var dest = new Rectangle(0, seam + off, Width, Height - seam);
+                        g.SetClip(cardPath, CombineMode.Replace);
+                        g.DrawImage(hold, dest, 0, seam, Width, Height - seam, GraphicsUnit.Pixel);
+                    }
+                }
+                g.Restore(saved);
+            }
+        }
+
+        /// <summary>提醒停留时的整卡画面（两块色 + 文字 + 关闭按钮），用作擦出时的源图。</summary>
+        private Bitmap ReminderHoldBitmap()
+        {
+            var bmp = new Bitmap(Width, Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.Clear(Color.Transparent);
+                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                    g.SetClip(cardPath, CombineMode.Intersect);
+                PaintReminder(g, RemindInMs + RemindHoldMs, false, 1, 1);
+            }
+            return bmp;
+        }
+
+        /// <summary>全屏提醒：柔边扩散从进度条末端铺满整屏，然后标题和下方色块同时擦出。</summary>
+        private void RenderScreenReminder(Graphics g)
+        {
+            if (remindEvent == null || screenKindFont == null) return;
+            int W = screenRenderW, H = screenRenderH;
+            float L = (float)screenLayout;
+            double t = ReminderClock();
+            double end = RemindInMs + RemindHoldMs;
+            bool bar = settings.ui.reminderSpreadStyle == "bar";
+            Color a, b, ink;
+            ReminderColors(out a, out b, out ink);
+
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+            if (screenCardUnder != null) g.DrawImageUnscaled(screenCardUnder, screenRestoreBounds.Left - screenBounds.Left, screenRestoreBounds.Top - screenBounds.Top);
+
+            double reveal = ScreenReveal(t, bar, end);
+            bool full = false;
+            if (bar)
+            {
+                double p1 = Smooth(Clamp01((t - 100) / 280.0));
+                double p2 = Smooth(Clamp01((t - 360) / 260.0));
+                double outStart = end + 260;
+                double colY = EaseInCubic(Clamp01((t - outStart) / 200.0));
+                double colX = EaseInCubic(Clamp01((t - (outStart + 140)) / 220.0));
+                int left = (int)Math.Round(screenTipX - p1 * screenTipX);
+                int right = (int)Math.Round(screenTipX + p1 * (W - screenTipX));
+                int top = (int)Math.Round(screenTipY - 3 - p2 * (screenTipY - 3));
+                int bottom = (int)Math.Round(screenTipY + 3 + p2 * (H - screenTipY - 3));
+                if (t > outStart) { left = (int)Math.Round(left + colX * (screenTipX - left)); right = (int)Math.Round(right - colX * (right - screenTipX)); }
+                if (colY > 0) { top = (int)Math.Round(top + colY * (screenTipY - 3 - top)); bottom = (int)Math.Round(bottom - colY * (bottom - (screenTipY + 3))); }
+                full = left <= 0 && right >= W && top <= 0 && bottom >= H;
+                if (t >= 100 && right - left > 1 && bottom - top > 1)
+                {
+                    if (full)
+                    {
+                        using (var br = new SolidBrush(a)) g.FillRectangle(br, 0, 0, W, H);
+                    }
+                    else
+                    {
+                        bool horizontal = p2 < 0.5;
+                        var band = new Rectangle(left, top, right - left, bottom - top);
+                        double f = Math.Min(40 * L, (horizontal ? band.Width : band.Height) / 3.0);
+                        using (var br = new LinearGradientBrush(band, Color.Transparent, a, horizontal ? 0f : 90f))
+                        {
+                            var cb = new ColorBlend(4);
+                            if (horizontal)
+                            {
+                                float u = (float)(f / Math.Max(1.0, band.Width));
+                                cb.Positions = new[] { 0f, u, 1f - u, 1f };
+                            }
+                            else
+                            {
+                                float u = (float)(f / Math.Max(1.0, band.Height));
+                                cb.Positions = new[] { 0f, u, 1f - u, 1f };
+                            }
+                            cb.Colors = new[] { Color.FromArgb(0, a), a, a, Color.FromArgb(0, a) };
+                            br.InterpolationColors = cb;
+                            g.FillRectangle(br, band);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                double p = Smooth(Clamp01((t - 100) / 500.0));
+                double outStart = end + 260;
+                double outP = EaseInCubic(Clamp01((t - outStart) / 400.0));
+                double maxR = 0;
+                foreach (var pt in new[] { new Point(0, 0), new Point(W, 0), new Point(0, H), new Point(W, H) })
+                    maxR = Math.Max(maxR, Math.Sqrt((pt.X - screenTipX) * (pt.X - screenTipX) + (pt.Y - screenTipY) * (pt.Y - screenTipY)));
+                maxR += 40 * L;
+                double r = maxR * p * (1 - outP);
+                full = r >= maxR;
+                if (r > 1)
+                {
+                    if (full)
+                    {
+                        using (var br = new SolidBrush(a)) g.FillRectangle(br, 0, 0, W, H);
+                    }
+                    else
+                    {
+                        double feather = Math.Max(10 * L, Math.Min(90 * L, r * 0.07));
+                        float focus = (float)Math.Max(0.86, Math.Min(0.985, 1 - feather / r));
+                        using (var path = new GraphicsPath())
+                        {
+                            path.AddEllipse((float)(screenTipX - r), (float)(screenTipY - r), (float)(r * 2), (float)(r * 2));
+                            using (var br = new PathGradientBrush(path))
+                            {
+                                br.CenterPoint = new PointF(screenTipX, screenTipY);
+                                br.CenterColor = a;
+                                br.SurroundColors = new[] { Color.FromArgb(0, a) };
+                                br.FocusScales = new PointF(focus, focus);
+                                g.FillPath(br, path);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (reveal <= 0) return;
+
+            int blockTop = (int)Math.Round(420 * L);
+            Action<Graphics> title = delegate (Graphics gg) { DrawScreenTitle(gg, ink, L); };
+            Action<Graphics> block = delegate (Graphics gg) { DrawScreenBlock(gg, b, ink, L); };
+            if (bar)
+            {
+                int wipeX = (int)Math.Round(W * reveal);
+                var clip = new Rectangle(0, 0, wipeX, H);
+                var sv = g.Save();
+                g.IntersectClip(clip);
+                title(g);
+                block(g);
+                g.Restore(sv);
+            }
+            else
+            {
+                int titleH = (int)Math.Round(260 * L * reveal);
+                if (titleH > 0)
+                {
+                    var sv = g.Save();
+                    g.IntersectClip(new Rectangle(0, 0, W, titleH));
+                    title(g);
+                    g.Restore(sv);
+                }
+                int off = (int)Math.Round((1 - reveal) * (H - blockTop + 8 * L));
+                var sv2 = g.Save();
+                g.TranslateTransform(0, off);
+                block(g);
+                g.Restore(sv2);
+            }
+        }
+
+        private double ScreenReveal(double t, bool bar, double end)
+        {
+            double start = bar ? 650 : 600;
+            double p = EaseOutCubic(Clamp01((t - start) / 320.0));
+            double o = EaseInCubic(Clamp01((t - end) / 260.0));
+            return Math.Max(0, p * (1 - o));
+        }
+
+        private void DrawScreenTitle(Graphics g, Color ink, float L)
+        {
+            int W = screenRenderW;
+            string kind = KindLabel(remindEvent, Reminders.IsMeeting(remindEvent),
+                FixedOf(remindEvent) == null ? null : FixedOf(remindEvent).name);
+            ScreenText(g, kind, screenKindFont, WithAlphaLocal(ink, 0.62), SX(74), SY(56), SX(600), SY(32));
+            ScreenText(g, remindEvent.title, screenTitleFont, ink, SX(68), SY(88), W - SX(136), SY(104));
+            string count = Reminders.CountdownText(settings, remindEvent, DateTime.Now);
+            if (!string.IsNullOrEmpty(count))
+                ScreenText(g, count, screenCountFont, WithAlphaLocal(ink, 0.78), SX(74), SY(202), SX(700), SY(44));
+
+            float x = W - SX(74), y = SY(58), d = SX(20);
+            using (var pen = new Pen(WithAlphaLocal(ink, 0.62), Math.Max(1.6f, SX(1.7f))))
+            {
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                g.DrawLine(pen, x, y, x + d, y + d);
+                g.DrawLine(pen, x + d, y, x, y + d);
+            }
+            rectDismiss = new RectangleF(x * screenW / (float)screenRenderW, y * screenH / (float)screenRenderH,
+                d * screenW / (float)screenRenderW, d * screenH / (float)screenRenderH);
+        }
+
+        private void DrawScreenBlock(Graphics g, Color b, Color ink, float L)
+        {
+            int W = screenRenderW, H = screenRenderH;
+            int top = SY(420);
+            using (var br = new SolidBrush(b)) g.FillRectangle(br, 0, top, W, H - top);
+            using (var pen = new Pen(Color.FromArgb(28, ink), Math.Max(1f, L))) g.DrawLine(pen, 0, top, W, top);
+            string when = Reminders.TimeRange(remindEvent);
+            if (!string.IsNullOrEmpty(when))
+                ScreenText(g, when, screenWhenFont, ink, SX(72), SY(454), SX(700), SY(64));
+            if (!string.IsNullOrEmpty(remindEvent.place))
+                ScreenText(g, remindEvent.place, screenPlaceFont, WithAlphaLocal(ink, 0.92), SX(74), SY(524), SX(700), SY(40));
+            if (!string.IsNullOrEmpty(remindEvent.detail))
+                ScreenText(g, remindEvent.detail, screenDetailFont, WithAlphaLocal(ink, 0.70), SX(74), SY(564), SX(820), SY(36));
+            ScreenText(g, "今天", screenHintFont, WithAlphaLocal(ink, 0.55), W - SX(194), SY(464), SX(120), SY(30), StringAlignment.Far);
+            ScreenText(g, "点任意处关闭", screenHintFont, WithAlphaLocal(ink, 0.45), W - SX(254), SY(652), SX(180), SY(30), StringAlignment.Far);
+        }
+
+        private static Color WithAlphaLocal(Color c, double a)
+        {
+            return Color.FromArgb((int)Math.Round(255 * Math.Max(0, Math.Min(1, a))), c.R, c.G, c.B);
+        }
+
+        private static void ScreenText(Graphics g, string s, Font f, Color c, float x, float y, float w, float h,
+            StringAlignment align = StringAlignment.Near)
+        {
+            if (f == null || string.IsNullOrEmpty(s)) return;
+            using (var sf = new StringFormat
+            {
+                Alignment = align,
+                LineAlignment = StringAlignment.Near,
+                Trimming = StringTrimming.EllipsisCharacter,
+                FormatFlags = StringFormatFlags.NoWrap
+            })
+            using (var br = new SolidBrush(c))
+                g.DrawString(s, f, br, new RectangleF(x, y, w, h), sf);
         }
 
         private void PaintExpanded(Graphics g)
@@ -1759,6 +2338,7 @@ namespace WorkCountdown
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
+            if (screenReminder) return;
             if (e.Button == MouseButtons.Left)
             {
                 dragging = true;
@@ -1773,6 +2353,7 @@ namespace WorkCountdown
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (screenReminder) return;
             if (dragging && (Control.MouseButtons & MouseButtons.Left) != 0)
             {
                 Point cur = Cursor.Position;
@@ -1790,6 +2371,11 @@ namespace WorkCountdown
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (screenReminder)
+            {
+                if (e.Button == MouseButtons.Left && reminding) DismissReminder();
+                return;
+            }
             if (Environment.GetEnvironmentVariable("WC_TRACE") == "1") store.Log("up " + e.Location + " " + Width + "x" + Height + " col=" + collapsed + " anim=" + animating + " rem=" + reminding + " chev=" + rectChevron + " gear=" + rectGear);
             if (e.Button != MouseButtons.Left) return;
             // 手抖一两像素不算拖：把窗口挪回去，照常当点击处理（不然点半天不展开）

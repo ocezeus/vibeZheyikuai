@@ -80,6 +80,10 @@ namespace WorkCountdown
         private CheckBox cbAutoStart;
         private CheckBox cbShowLunch;
         private CheckBox cbReducedMotion;
+        private RadioButton rbSpreadCard;
+        private RadioButton rbSpreadScreen;
+        private RadioButton rbStyleCircle;
+        private RadioButton rbStyleBar;
 
         public SettingsForm(SettingsStore store, Settings settings)
         {
@@ -898,7 +902,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildLook(TabPage page)
         {
-            var g = CardBox(page, "外观与启动", 8, 212, 492, 224);
+            var g = CardBox(page, "外观与提醒", 8, 212, 492, 224);
 
             g.Controls.Add(Lbl("不透明度", 14, 28, 58, 24));
             numOpacity = Num(94, 76, 28, 56, 30, 100);
@@ -937,7 +941,35 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             g.Controls.Add(numReminderHold);
             g.Controls.Add(Lbl("秒（3–20），之后常驻到时段结束", 140, 116, 330, 24));
 
-            g.Controls.Add(Hint("午休 / 晚休 / 下班的配色在「固定日程」里逐条设置。", 14, 154, 466, 22));
+            g.Controls.Add(Lbl("提醒扩散", 14, 146, 58, 24));
+            var spreadPair = new Panel();
+            spreadPair.SetBounds(76, 146, 220, 24);
+            spreadPair.BackColor = Ui.CardBg;
+            g.Controls.Add(spreadPair);
+            rbSpreadCard = new RadioButton();
+            rbSpreadCard.Text = "仅卡片";
+            rbSpreadCard.SetBounds(0, 0, 76, 22);
+            spreadPair.Controls.Add(rbSpreadCard);
+            rbSpreadScreen = new RadioButton();
+            rbSpreadScreen.Text = "全屏";
+            rbSpreadScreen.SetBounds(80, 0, 62, 22);
+            spreadPair.Controls.Add(rbSpreadScreen);
+
+            g.Controls.Add(Lbl("扩散样式", 14, 176, 58, 24));
+            var stylePair = new Panel();
+            stylePair.SetBounds(76, 176, 260, 24);
+            stylePair.BackColor = Ui.CardBg;
+            g.Controls.Add(stylePair);
+            rbStyleCircle = new RadioButton();
+            rbStyleCircle.Text = "圆形柔光";
+            rbStyleCircle.SetBounds(0, 0, 86, 22);
+            stylePair.Controls.Add(rbStyleCircle);
+            rbStyleBar = new RadioButton();
+            rbStyleBar.Text = "进度条拉伸";
+            rbStyleBar.SetBounds(90, 0, 100, 22);
+            stylePair.Controls.Add(rbStyleBar);
+
+            g.Controls.Add(Hint("固定日程按各自配色；其余提醒跟随当前主题。", 14, 202, 466, 18));
         }
 
         private void BuildBackup(TabPage page)
@@ -1051,6 +1083,10 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             cbShowLunch.Checked = s.ui.showLunch;
             cbReducedMotion.Checked = s.ui.reducedMotion;
             numReminderHold.Value = Math.Max(3, Math.Min(20, s.ui.reminderHoldSeconds));
+            rbSpreadCard.Checked = s.ui.reminderSpread != "screen";
+            rbSpreadScreen.Checked = s.ui.reminderSpread == "screen";
+            rbStyleCircle.Checked = s.ui.reminderSpreadStyle != "bar";
+            rbStyleBar.Checked = s.ui.reminderSpreadStyle == "bar";
 
             if (picker != null)
             {
@@ -1131,6 +1167,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.showLunch = cbShowLunch.Checked;
             s.ui.reducedMotion = cbReducedMotion.Checked;
             s.ui.reminderHoldSeconds = (int)numReminderHold.Value;
+            s.ui.reminderSpread = rbSpreadScreen.Checked ? "screen" : "card";
+            s.ui.reminderSpreadStyle = rbStyleBar.Checked ? "bar" : "circle";
             if (cbAutoStart.Checked != Startup.IsEnabled()) Startup.SetEnabled(cbAutoStart.Checked);
 
             s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
