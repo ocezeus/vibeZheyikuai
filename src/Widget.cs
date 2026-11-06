@@ -1647,12 +1647,11 @@ namespace WorkCountdown
         private void PaintCardGlow(Graphics g, GraphicsPath cardPath)
         {
             string mode = settings.ui.cardGlow;
-            if (mode != "corner" && mode != "bar" && mode != "rim" && mode != "all") return;
+            if (mode != "corner" && mode != "bar" && mode != "all") return;   // classic = 上个版本原样
             bool all = mode == "all";
             bool a = all || mode == "corner";
             bool b = all || mode == "bar";
-            bool d = all || mode == "rim";
-            double damp = all ? 0.55 : 1.0;
+            double damp = all ? 0.70 : 1.0;
             Color accent = theme.accent;
             var saved = g.Save();
             g.SetClip(cardPath, CombineMode.Intersect);
@@ -1674,10 +1673,6 @@ namespace WorkCountdown
                 DrawGlowEllipse(g, new RectangleF(cx - rx, cy - ry, rx * 2, ry * 2),
                     new PointF(cx, cy), accent, 0.32 * CardGlowStrength * damp);
             }
-            if (d)
-            {
-                DrawRimGlow(g, accent, 0.46 * CardGlowStrength * damp);
-            }
             g.Restore(saved);
         }
 
@@ -1697,26 +1692,6 @@ namespace WorkCountdown
                     g.FillPath(br, path);
                 }
             }
-        }
-
-        private void DrawRimGlow(Graphics g, Color accent, double alpha)
-        {
-            alpha = Math.Max(0, Math.Min(1, alpha));
-            if (alpha <= 0.003) return;
-            int radius = S(collapsed ? 14 : 18);
-            int step = Math.Max(1, S(2));
-            for (int i = 0; i < 10; i++)
-            {
-                int inset = i * step;
-                var r = new Rectangle(inset, inset, Width - inset * 2, Height - inset * 2);
-                if (r.Width <= 6 || r.Height <= 6) break;
-                using (var path = RoundPath(r, Math.Max(3, radius - inset / 3)))
-                using (var pen = new Pen(Color.FromArgb((int)Math.Round(255 * alpha * (1 - i / 11.0)), accent), Math.Max(1, step)))
-                    g.DrawPath(pen, path);
-            }
-            using (var path = RoundPath(new Rectangle(0, 0, Width, Height), radius))
-            using (var pen = new Pen(Color.FromArgb((int)Math.Round(255 * Math.Min(0.9, alpha * 1.15)), accent), Math.Max(1, S(1))))
-                g.DrawPath(pen, path);
         }
 
         private const double CardFloodDelayMs = 100;

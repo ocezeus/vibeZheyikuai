@@ -1032,7 +1032,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             cmbGlow = new ComboBox();
             cmbGlow.DropDownStyle = ComboBoxStyle.DropDownList;
             cmbGlow.SetBounds(76, 182, 170, 24);
-            cmbGlow.Items.AddRange(new object[] { "角落柔光 A", "进度条同色光 B", "内缘轮廓光 D", "三种都开" });
+            cmbGlow.Items.AddRange(new object[] { "原样式（默认）", "角落柔光 A", "进度条同色光 B", "两种都开 A+B" });
             g.Controls.Add(cmbGlow);
             g.Controls.Add(Lbl("强度 1.6×", 254, 184, 90, 22));
 
@@ -1154,8 +1154,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             rbSpreadScreen.Checked = s.ui.reminderSpread == "screen";
             rbStyleCircle.Checked = s.ui.reminderSpreadStyle != "bar";
             rbStyleBar.Checked = s.ui.reminderSpreadStyle == "bar";
-            cmbGlow.SelectedIndex = s.ui.cardGlow == "corner" ? 0
-                : s.ui.cardGlow == "bar" ? 1 : s.ui.cardGlow == "rim" ? 2 : 3;
+            cmbGlow.SelectedIndex = s.ui.cardGlow == "corner" ? 1
+                : s.ui.cardGlow == "bar" ? 2 : s.ui.cardGlow == "all" ? 3 : 0;
 
             if (picker != null)
             {
@@ -1238,7 +1238,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.reminderHoldSeconds = (int)numReminderHold.Value;
             s.ui.reminderSpread = rbSpreadScreen.Checked ? "screen" : "card";
             s.ui.reminderSpreadStyle = rbStyleBar.Checked ? "bar" : "circle";
-            string[] glowIds = new string[] { "corner", "bar", "rim", "all" };
+            string[] glowIds = new string[] { "classic", "corner", "bar", "all" };
             s.ui.cardGlow = glowIds[Math.Max(0, Math.Min(glowIds.Length - 1, cmbGlow.SelectedIndex))];
             if (cbAutoStart.Checked != Startup.IsEnabled()) Startup.SetEnabled(cbAutoStart.Checked);
 
@@ -1924,7 +1924,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
                 sv = new SvPanel();
                 sv.SetBounds(16, 16, 220, 190);
-                sv.Changed += delegate { SyncFromHsv(); };
+                sv.Changed += delegate { sat = sv.Sat; val = sv.Val; SyncFromHsv(); };
                 Controls.Add(sv);
 
                 hueBar = new HuePanel();

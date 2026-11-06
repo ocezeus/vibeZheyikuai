@@ -419,7 +419,7 @@ namespace WorkCountdown
         public int reminderHoldSeconds { get; set; } // 3..20
         public string reminderSpread { get; set; }      // card | screen：提醒扩散范围
         public string reminderSpreadStyle { get; set; } // circle | bar：提醒扩散样式
-        public string cardGlow { get; set; }            // corner | bar | rim | all：卡片背景光效
+        public string cardGlow { get; set; }            // classic | corner | bar | all：卡片背景光效
         public string lunchReminderStyle { get; set; }   // 午休提醒配色（ReminderStyles 的 id）
         public string eveningReminderStyle { get; set; } // 晚休提醒配色
         public string offReminderStyle { get; set; }     // 下班提醒配色
@@ -441,7 +441,7 @@ namespace WorkCountdown
             reminderHoldSeconds = 6;
             reminderSpread = "card";
             reminderSpreadStyle = "circle";
-            cardGlow = "all";
+            cardGlow = "classic";
             lunchReminderStyle = "lan-yuming";
             eveningReminderStyle = "zi-jiegeng";
             offReminderStyle = "forest";
@@ -834,8 +834,8 @@ namespace WorkCountdown
             if (s.ui.reminderSpread != "screen") s.ui.reminderSpread = "card";
             if (s.ui.reminderSpreadStyle != "bar") s.ui.reminderSpreadStyle = "circle";
             if (s.ui.cardGlow != "corner" && s.ui.cardGlow != "bar"
-                && s.ui.cardGlow != "rim" && s.ui.cardGlow != "all")
-                s.ui.cardGlow = "all";
+                && s.ui.cardGlow != "all")
+                s.ui.cardGlow = "classic";
             s.ui.lunchReminderStyle = ReminderStyles.Normalize(s.ui.lunchReminderStyle, "lan-yuming");
             s.ui.eveningReminderStyle = ReminderStyles.Normalize(s.ui.eveningReminderStyle, "zi-jiegeng");
             s.ui.offReminderStyle = ReminderStyles.Normalize(s.ui.offReminderStyle, "forest");

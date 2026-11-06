@@ -566,11 +566,11 @@ class Check
         // ---- 5e. 背景光效设置 + 自建主题的背景/进度条分开 ----
         {
             var s = new Settings();
-            Ok("背景光效默认三种都开", s.ui.cardGlow == "all", s.ui.cardGlow);
+            Ok("背景光效默认原样式", s.ui.cardGlow == "classic", s.ui.cardGlow);
             var bad = new Settings();
             bad.ui.cardGlow = "bogus";
             bad.Normalize();
-            Ok("非法背景光效回落三种都开", bad.ui.cardGlow == "all", bad.ui.cardGlow);
+            Ok("非法背景光效回落原样式", bad.ui.cardGlow == "classic", bad.ui.cardGlow);
 
             Color darkThemeA, darkThemeB, darkInk;
             ReminderStyles.Resolve(ReminderStyles.Follow, Themes.Get("zi-fengxin"), out darkThemeA, out darkThemeB, out darkInk);
@@ -628,6 +628,17 @@ class Check
                 ct.bg == "#101C2E" && ct.bar == "#FFB454"
                 && loaded.accent.R == 0xFF && loaded.bgTop.B == 0x2E,
                 ct.bg + " / " + ct.bar + " loaded=" + loaded.accent);
+
+            // 调色方块点一下要真的改当前颜色（之前 Changed 只同步面板，没把 sv 的 sat/val 收回表单，点了会弹回去）
+            using (var dlg = new ColorWheelForm("测试", "测试",
+                Color.FromArgb(16, 28, 46), Color.FromArgb(255, 180, 84)))
+            {
+                var sv = (Control)Get(dlg, "sv");
+                var hex = (Label)Get(dlg, "lblHex");
+                string before = hex.Text;
+                sv.GetType().GetMethod("Pick", F).Invoke(sv, new object[] { new Point(sv.Width / 2, sv.Height / 2) });
+                Ok("调色方块点击能改色", hex.Text != before, before.Replace("\r\n", " | ") + " -> " + hex.Text.Replace("\r\n", " | "));
+            }
         }
 
         // ---- 5d. 新提醒动画：扩散从条子末端开始，停留时两块色 + 全屏模式 ----
