@@ -563,6 +563,73 @@ class Check
                 back.ui.reminderSpread + " / " + back.ui.reminderSpreadStyle);
         }
 
+        // ---- 5e. 背景光效设置 + 自建主题的背景/进度条分开 ----
+        {
+            var s = new Settings();
+            Ok("背景光效默认三种都开", s.ui.cardGlow == "all", s.ui.cardGlow);
+            var bad = new Settings();
+            bad.ui.cardGlow = "bogus";
+            bad.Normalize();
+            Ok("非法背景光效回落三种都开", bad.ui.cardGlow == "all", bad.ui.cardGlow);
+
+            Color darkThemeA, darkThemeB, darkInk;
+            ReminderStyles.Resolve(ReminderStyles.Follow, Themes.Get("zi-fengxin"), out darkThemeA, out darkThemeB, out darkInk);
+            Color accent = Themes.Get("zi-fengxin").accent;
+            Func<string, Color> corner = delegate (string mode)
+            {
+                var st = new Settings();
+                st.lark.enabled = false;
+                st.calendarEnabled = false;
+                st.ui.edge = "free";
+                st.ui.theme = "zi-fengxin";
+                st.ui.cardGlow = mode;
+                using (var form = new WidgetForm(new SettingsStore(), st))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "collapsed", false);
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(420, 273);
+                    Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                    Call(form, "Recompute");
+                    using (var bmp = new Bitmap(420, 273))
+                    {
+                        bmp.SetResolution(144, 144);
+                        using (var g = Graphics.FromImage(bmp))
+                            Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 273)));
+                        var px = bmp.GetPixel(12, 12);
+                        Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                        return px;
+                    }
+                }
+            };
+            Color plainCorner = corner("none");
+            Color litCorner = corner("corner");
+            Ok("角落光效确实让角落更接近主题色",
+                Distance(litCorner, accent) + 8 < Distance(plainCorner, accent),
+                fmt(plainCorner) + " -> " + fmt(litCorner) + " 主题 " + fmt(accent));
+
+            var theme = Themes.FromColors("my-test", "夜航橙", "#101C2E", "#FFB454");
+            Ok("自建主题背景/进度条分开",
+                theme.bgTop.R == 0x10 && theme.bgTop.G == 0x1C && theme.bgTop.B == 0x2E
+                && theme.accent.R == 0xFF && theme.accent.G == 0xB4 && theme.accent.B == 0x54,
+                fmt(theme.bgTop) + " / " + fmt(theme.accent));
+
+            var pack = new Settings();
+            pack.customThemes.Add(new CustomTheme
+            {
+                id = "my-pack", name = "存读", bg = "#101C2E", bar = "#FFB454", accent = "#FFB454"
+            });
+            var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+            var back = ser.Deserialize<Settings>(ser.Serialize(pack));
+            back.Normalize();
+            var ct = back.customThemes[0];
+            var loaded = Themes.Get("my-pack");
+            Ok("自建主题能存能读（bg/bar）",
+                ct.bg == "#101C2E" && ct.bar == "#FFB454"
+                && loaded.accent.R == 0xFF && loaded.bgTop.B == 0x2E,
+                ct.bg + " / " + ct.bar + " loaded=" + loaded.accent);
+        }
+
         // ---- 5d. 新提醒动画：扩散从条子末端开始，停留时两块色 + 全屏模式 ----
         {
             var s = new Settings();
@@ -572,6 +639,7 @@ class Check
             s.ui.theme = "lv-kongque";
             s.ui.reminderSpread = "card";
             s.ui.reminderSpreadStyle = "circle";
+            s.ui.cardGlow = "none";
             var ev = new ReminderEvent();
             ev.title = "需求对齐会";
             ev.place = "3F · 会议室 A";
@@ -592,6 +660,8 @@ class Check
                 Set(form, "reminding", true);
                 Set(form, "remindAt", DateTime.Now.AddMilliseconds(-300));
                 Call(form, "Recompute");
+                var st = Get(form, "status");
+                st.GetType().GetProperty("progress").SetValue(st, 0.85, null);
                 using (var bmp = new Bitmap(420, 282))
                 {
                     bmp.SetResolution(144, 144);

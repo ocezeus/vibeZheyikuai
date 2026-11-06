@@ -84,6 +84,8 @@ namespace WorkCountdown
         private RadioButton rbSpreadScreen;
         private RadioButton rbStyleCircle;
         private RadioButton rbStyleBar;
+        private ComboBox cmbGlow;
+        private Button btnEditTheme;
 
         public SettingsForm(SettingsStore store, Settings settings)
         {
@@ -866,12 +868,17 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             picker.SetBounds(14, 30, 456, 122);
             picker.SelectedIdChanged += delegate { UpdateThemeName(); };
             g.Controls.Add(picker);
-
-            lblThemeName = Lbl("", 14, 160, 300, 20);
+            lblThemeName = Lbl("", 14, 160, 210, 20);
             lblThemeName.ForeColor = Muted;
             g.Controls.Add(lblThemeName);
 
-            var btnCustom = FlatButton("＋ 新建主题", 330, 156, 140, 28);
+            btnEditTheme = FlatButton("编辑", 240, 156, 70, 28);
+            btnEditTheme.FlatAppearance.BorderColor = AccentColor;
+            btnEditTheme.ForeColor = AccentColor;
+            btnEditTheme.Click += delegate { EditCustomTheme(); };
+            g.Controls.Add(btnEditTheme);
+
+            var btnCustom = FlatButton("＋ 新建主题", 316, 156, 154, 28);
             btnCustom.FlatAppearance.BorderColor = AccentColor;
             btnCustom.ForeColor = AccentColor;
             btnCustom.Click += delegate { NewCustomTheme(); };
@@ -883,21 +890,73 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             if (lblThemeName == null || picker == null) return;
             var t = Themes.Get(picker.SelectedId);
             lblThemeName.Text = "当前：" + (Themes.IsCustom(t.id) ? "我的主题 · " : "") + t.name;
+            if (btnEditTheme != null)
+            {
+                bool custom = Themes.IsCustom(t.id);
+                btnEditTheme.Enabled = custom;
+                btnEditTheme.ForeColor = custom ? AccentColor : Muted;
+                btnEditTheme.FlatAppearance.BorderColor = custom ? AccentColor : Color.FromArgb(208, 213, 222);
+            }
         }
 
         private void NewCustomTheme()
         {
-            var dlg = new ColorWheelForm(Themes.Get(picker.SelectedId));
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            var ct = new CustomTheme();
-            ct.id = "my-" + Guid.NewGuid().ToString("N").Substring(0, 6);
-            ct.name = dlg.ThemeName;
-            ct.accent = dlg.AccentHex;
-            s.customThemes.Add(ct);
-            Themes.SetCustom(s.customThemes);
-            picker.SelectedId = ct.id;
-            picker.Invalidate();
-            UpdateThemeName();
+            var seed = Themes.Get(picker.SelectedId);
+            using (var dlg = new ColorWheelForm("新建主题", "我的主题", seed.bgTop, seed.accent))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                var ct = new CustomTheme();
+                ct.id = "my-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                ct.name = dlg.ThemeName;
+                ct.bg = dlg.BgHex;
+                ct.bar = dlg.BarHex;
+                ct.accent = dlg.BarHex;
+                s.customThemes.Add(ct);
+                Themes.SetCustom(s.customThemes);
+                picker.SelectedId = ct.id;
+                picker.Invalidate();
+                UpdateThemeName();
+            }
+        }
+
+        private void EditCustomTheme()
+        {
+            CustomTheme ct = null;
+            foreach (var item in s.customThemes)
+                if (item != null && item.id == picker.SelectedId) { ct = item; break; }
+            if (ct == null)
+            {
+                MessageBox.Show(this, "内置主题不能直接改。点「＋ 新建主题」可以基于它另存一套。",
+                    "编辑主题", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            var t = Themes.Get(ct.id);
+            Color bg = ParseHex(ct.bg, t.bgTop);
+            Color bar = ParseHex(string.IsNullOrWhiteSpace(ct.bar) ? ct.accent : ct.bar, t.accent);
+            using (var dlg = new ColorWheelForm("编辑主题", ct.name, bg, bar))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                ct.name = dlg.ThemeName;
+                ct.bg = dlg.BgHex;
+                ct.bar = dlg.BarHex;
+                ct.accent = dlg.BarHex;
+                Themes.SetCustom(s.customThemes);
+                picker.Invalidate();
+                picker.SelectedId = ct.id;
+                UpdateThemeName();
+            }
+        }
+
+        private static Color ParseHex(string text, Color fallback)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(text) && text.Length == 7 && text[0] == '#')
+                    return Color.FromArgb(Convert.ToInt32(text.Substring(1, 2), 16),
+                        Convert.ToInt32(text.Substring(3, 2), 16), Convert.ToInt32(text.Substring(5, 2), 16));
+            }
+            catch { }
+            return fallback;
         }
 
         private void BuildLook(TabPage page)
@@ -932,18 +991,18 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
             cbReducedMotion = new CheckBox();
             cbReducedMotion.Text = "减少动态效果";
-            cbReducedMotion.SetBounds(14, 86, 142, 22);
+            cbReducedMotion.SetBounds(14, 80, 142, 22);
             g.Controls.Add(cbReducedMotion);
-            g.Controls.Add(Hint("少动一点，提醒内容照旧。", 164, 86, 310, 22));
+            g.Controls.Add(Hint("少动一点，提醒内容照旧。", 164, 80, 310, 22));
 
-            g.Controls.Add(Lbl("最短停留", 14, 116, 58, 24));
-            numReminderHold = Num(6, 76, 116, 56, 3, 20);
+            g.Controls.Add(Lbl("最短停留", 14, 106, 58, 24));
+            numReminderHold = Num(6, 76, 106, 56, 3, 20);
             g.Controls.Add(numReminderHold);
-            g.Controls.Add(Lbl("秒（3–20），之后常驻到时段结束", 140, 116, 330, 24));
+            g.Controls.Add(Lbl("秒（3–20），之后常驻到时段结束", 140, 106, 330, 24));
 
-            g.Controls.Add(Lbl("提醒扩散", 14, 146, 58, 24));
+            g.Controls.Add(Lbl("提醒扩散", 14, 132, 58, 24));
             var spreadPair = new Panel();
-            spreadPair.SetBounds(76, 146, 220, 24);
+            spreadPair.SetBounds(76, 132, 220, 24);
             spreadPair.BackColor = Ui.CardBg;
             g.Controls.Add(spreadPair);
             rbSpreadCard = new RadioButton();
@@ -955,9 +1014,9 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             rbSpreadScreen.SetBounds(80, 0, 62, 22);
             spreadPair.Controls.Add(rbSpreadScreen);
 
-            g.Controls.Add(Lbl("扩散样式", 14, 176, 58, 24));
+            g.Controls.Add(Lbl("扩散样式", 14, 158, 58, 24));
             var stylePair = new Panel();
-            stylePair.SetBounds(76, 176, 260, 24);
+            stylePair.SetBounds(76, 158, 260, 24);
             stylePair.BackColor = Ui.CardBg;
             g.Controls.Add(stylePair);
             rbStyleCircle = new RadioButton();
@@ -969,7 +1028,15 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             rbStyleBar.SetBounds(90, 0, 100, 22);
             stylePair.Controls.Add(rbStyleBar);
 
-            g.Controls.Add(Hint("固定日程按各自配色；其余提醒跟随当前主题。", 14, 202, 466, 18));
+            g.Controls.Add(Lbl("背景光效", 14, 184, 58, 24));
+            cmbGlow = new ComboBox();
+            cmbGlow.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbGlow.SetBounds(76, 182, 170, 24);
+            cmbGlow.Items.AddRange(new object[] { "角落柔光 A", "进度条同色光 B", "内缘轮廓光 D", "三种都开" });
+            g.Controls.Add(cmbGlow);
+            g.Controls.Add(Lbl("强度 1.6×", 254, 184, 90, 22));
+
+            g.Controls.Add(Hint("固定日程按各自配色；其余提醒跟随当前主题。", 14, 206, 466, 16));
         }
 
         private void BuildBackup(TabPage page)
@@ -1087,6 +1154,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             rbSpreadScreen.Checked = s.ui.reminderSpread == "screen";
             rbStyleCircle.Checked = s.ui.reminderSpreadStyle != "bar";
             rbStyleBar.Checked = s.ui.reminderSpreadStyle == "bar";
+            cmbGlow.SelectedIndex = s.ui.cardGlow == "corner" ? 0
+                : s.ui.cardGlow == "bar" ? 1 : s.ui.cardGlow == "rim" ? 2 : 3;
 
             if (picker != null)
             {
@@ -1169,6 +1238,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.reminderHoldSeconds = (int)numReminderHold.Value;
             s.ui.reminderSpread = rbSpreadScreen.Checked ? "screen" : "card";
             s.ui.reminderSpreadStyle = rbStyleBar.Checked ? "bar" : "circle";
+            string[] glowIds = new string[] { "corner", "bar", "rim", "all" };
+            s.ui.cardGlow = glowIds[Math.Max(0, Math.Min(glowIds.Length - 1, cmbGlow.SelectedIndex))];
             if (cbAutoStart.Checked != Startup.IsEnabled()) Startup.SetEnabled(cbAutoStart.Checked);
 
             s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
@@ -1815,6 +1886,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         {
             public string ThemeName = "我的主题";
             public string AccentHex = "#4C8DFF";
+            public string BgHex = "#14180E";
+            public string BarHex = "#A4CBFF";
 
             private double hue, sat = 0.75, val = 0.85;
             private SvPanel sv;
@@ -1822,61 +1895,103 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             private TextBox tbName;
             private Label lblHex;
             private PreviewSwatch preview;
+            private Button btnBg, btnBar;
+            private Color bgColor, barColor;
+            private bool bgActive = true;
 
             public ColorWheelForm(ThemeDef seed)
+                : this("新建主题", "我的主题", seed == null ? Color.FromArgb(20, 24, 14) : seed.bgTop,
+                       seed == null ? Color.FromArgb(76, 141, 255) : seed.accent)
             {
-                Text = "新建主题";
+            }
+
+            public ColorWheelForm(string title, string name, Color bg, Color bar)
+            {
+                Text = title;
+                ThemeName = name;
+                bgColor = bg;
+                barColor = bar;
                 FormBorderStyle = FormBorderStyle.FixedDialog;
                 MaximizeBox = false;
                 MinimizeBox = false;
                 StartPosition = FormStartPosition.CenterParent;
                 AutoScaleDimensions = new SizeF(96f, 96f);
                 AutoScaleMode = AutoScaleMode.None;
-                ClientSize = new Size(452, 330);
+                ClientSize = new Size(452, 390);
                 Font = UiFont.Make(9f, FontStyle.Regular);
                 BackColor = Color.White;
-                if (seed != null) FromColor(seed.accent);
+                FromColor(bgColor);
 
                 sv = new SvPanel();
-                sv.SetBounds(16, 16, 220, 180);
+                sv.SetBounds(16, 16, 220, 190);
                 sv.Changed += delegate { SyncFromHsv(); };
                 Controls.Add(sv);
 
                 hueBar = new HuePanel();
-                hueBar.SetBounds(244, 16, 22, 180);
+                hueBar.SetBounds(244, 16, 22, 190);
                 hueBar.Changed += delegate { hue = hueBar.Hue; SyncFromHsv(); };
                 Controls.Add(hueBar);
 
                 preview = new PreviewSwatch();
-                preview.SetBounds(280, 16, 156, 76);
+                preview.SetBounds(280, 16, 156, 92);
                 Controls.Add(preview);
 
+                btnBg = new Button();
+                btnBg.SetBounds(280, 116, 74, 28);
+                btnBg.FlatStyle = FlatStyle.Flat;
+                btnBg.FlatAppearance.BorderSize = 2;
+                btnBg.UseVisualStyleBackColor = false;
+                btnBg.TabStop = false;
+                btnBg.Click += delegate { bgActive = true; FromColor(bgColor); SyncFromHsv(); };
+                Controls.Add(btnBg);
+
+                btnBar = new Button();
+                btnBar.SetBounds(362, 116, 74, 28);
+                btnBar.FlatStyle = FlatStyle.Flat;
+                btnBar.FlatAppearance.BorderSize = 2;
+                btnBar.UseVisualStyleBackColor = false;
+                btnBar.TabStop = false;
+                btnBar.Click += delegate { bgActive = false; FromColor(barColor); SyncFromHsv(); };
+                Controls.Add(btnBar);
+
                 var l1 = new Label();
-                l1.Text = "名字";
-                l1.SetBounds(280, 100, 40, 22);
+                l1.Text = "背景";
+                l1.SetBounds(280, 146, 74, 18);
                 l1.ForeColor = Ui.Muted;
                 Controls.Add(l1);
 
+                var l2 = new Label();
+                l2.Text = "进度条";
+                l2.SetBounds(362, 146, 74, 18);
+                l2.ForeColor = Ui.Muted;
+                Controls.Add(l2);
+
+                var l3 = new Label();
+                l3.Text = "名字";
+                l3.SetBounds(280, 174, 40, 22);
+                l3.ForeColor = Ui.Muted;
+                Controls.Add(l3);
+
                 tbName = new TextBox();
-                tbName.SetBounds(280, 122, 156, 24);
-                tbName.Text = "我的主题";
+                tbName.SetBounds(280, 196, 156, 24);
+                tbName.Text = name;
                 tbName.TextChanged += delegate { ThemeName = tbName.Text.Trim(); };
                 Controls.Add(tbName);
 
                 lblHex = new Label();
-                lblHex.SetBounds(280, 152, 156, 20);
+                lblHex.SetBounds(280, 226, 156, 52);
                 lblHex.ForeColor = Ui.Muted;
                 Controls.Add(lblHex);
 
                 var tips = new Label();
-                tips.Text = "色相条选颜色家族，方块里选深浅；右边是这套配色做出来的卡片。";
-                tips.SetBounds(16, 206, 420, 40);
+                tips.Text = "点「背景」或「进度条」切换要调的颜色；\r\n色相条选颜色家族，方块里选深浅。";
+                tips.SetBounds(16, 216, 250, 70);
                 tips.ForeColor = Ui.Muted;
                 Controls.Add(tips);
 
                 var ok = new Button();
                 ok.Text = "保存";
-                ok.SetBounds(240, 262, 96, 32);
+                ok.SetBounds(240, 336, 96, 32);
                 ok.FlatStyle = FlatStyle.Flat;
                 ok.FlatAppearance.BorderSize = 0;
                 ok.BackColor = Ui.Accent;
@@ -1885,7 +2000,9 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 {
                     ThemeName = tbName.Text.Trim();
                     if (ThemeName.Length == 0) ThemeName = "我的主题";
-                    AccentHex = HexOf(ColorFromHsv(hue, sat, val));
+                    BgHex = HexOf(bgColor);
+                    BarHex = HexOf(barColor);
+                    AccentHex = BarHex;
                     DialogResult = DialogResult.OK;
                     Close();
                 };
@@ -1893,7 +2010,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
                 var cancel = new Button();
                 cancel.Text = "取消";
-                cancel.SetBounds(344, 262, 92, 32);
+                cancel.SetBounds(344, 336, 92, 32);
                 cancel.FlatStyle = FlatStyle.Flat;
                 cancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
                 cancel.BackColor = Color.White;
@@ -1934,8 +2051,22 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 if (sv != null) { sv.Hue = hue; sv.Sat = sat; sv.Val = val; sv.Invalidate(); }
                 if (hueBar != null) { hueBar.Hue = hue; hueBar.Invalidate(); }
                 Color c = ColorFromHsv(hue, sat, val);
-                if (lblHex != null) lblHex.Text = HexOf(c) + " · 主色";
-                if (preview != null) { preview.Accent = c; preview.Invalidate(); }
+                if (bgActive) bgColor = c; else barColor = c;
+                if (lblHex != null)
+                    lblHex.Text = "背景  " + HexOf(bgColor) + "\r\n进度条  " + HexOf(barColor);
+                if (preview != null)
+                {
+                    preview.Bg = bgColor;
+                    preview.Bar = barColor;
+                    preview.Invalidate();
+                }
+                if (btnBg != null)
+                {
+                    btnBg.BackColor = bgColor;
+                    btnBar.BackColor = barColor;
+                    btnBg.FlatAppearance.BorderColor = bgActive ? Ui.Accent : Color.FromArgb(205, 211, 222);
+                    btnBar.FlatAppearance.BorderColor = bgActive ? Color.FromArgb(205, 211, 222) : Ui.Accent;
+                }
             }
 
             public static Color ColorFromHsv(double h, double sat0, double v)
@@ -2049,10 +2180,11 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 }
             }
 
-            /// <summary>预览：这套主色做出来的卡片和提醒色带。</summary>
+            /// <summary>预览：背景色 + 进度条色做出来的小卡片。</summary>
             public class PreviewSwatch : Control
             {
-                public Color Accent = Color.FromArgb(76, 141, 255);
+                public Color Bg = Color.FromArgb(20, 24, 14);
+                public Color Bar = Color.FromArgb(164, 203, 114);
 
                 public PreviewSwatch()
                 {
@@ -2064,22 +2196,44 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 {
                     Graphics g = e.Graphics;
                     g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;   // 白底上的小字用 ClearType 才实
+                    g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                     g.Clear(Color.White);
-                    ThemeDef t = Themes.FromAccent("preview", "预览", HexOf(Accent));
-                    var r = new Rectangle(0, 0, Width - 1, 44);
-                    using (var b = new LinearGradientBrush(r, t.bgTop, t.bgBottom, 90f))
-                        g.FillRectangle(b, r);
-                    using (var f = UiFont.Make(12f, FontStyle.Bold))
+                    ThemeDef t = Themes.FromColors("preview", "预览", HexOf(Bg), HexOf(Bar));
+                    var r = new Rectangle(0, 0, Width - 1, Height - 1);
+                    using (var path = Round(r, 12))
+                    {
+                        using (var b = new LinearGradientBrush(r, t.bgTop, t.bgBottom, 90f))
+                            g.FillPath(b, path);
+                        using (var p = new Pen(Color.FromArgb(28, 255, 255, 255))) g.DrawPath(p, path);
+                    }
+                    using (var b = new SolidBrush(Bar))
+                        g.FillEllipse(b, 12, 12, 7, 7);
+                    using (var f = UiFont.Make(7.5f))
+                    using (var b = new SolidBrush(t.textMuted))
+                        g.DrawString("工作中", f, b, 25, 10);
+                    using (var f = UiFont.Make(18f, FontStyle.Bold))
                     using (var b = new SolidBrush(t.textMain))
-                        g.DrawString("12:34", f, b, 8, 10);
-                    using (var b = new SolidBrush(t.accent)) g.FillRectangle(b, 8, 34, 40, 4);
-                    Color a, b2, ink;
-                    ReminderStyles.Resolve("theme", t, out a, out b2, out ink);
-                    var band = new Rectangle(0, 48, Width - 1, 28);
-                    using (var br = new SolidBrush(a)) g.FillRectangle(br, band.X, band.Y, band.Width, 16);
-                    using (var br = new SolidBrush(b2)) g.FillRectangle(br, band.X, band.Y + 16, band.Width, 12);
-                    using (var p = new Pen(Color.FromArgb(210, 216, 228))) g.DrawRectangle(p, band.X, band.Y, band.Width - 1, band.Height - 1);
+                        g.DrawString("12:34", f, b, 10, 26);
+                    using (var b = new SolidBrush(t.track)) g.FillRectangle(b, 12, 58, Width - 26, 5);
+                    using (var b = new SolidBrush(Bar)) g.FillRectangle(b, 12, 58, (Width - 26) * 3 / 5, 5);
+                    using (var b = new SolidBrush(t.textDim))
+                    using (var f = UiFont.Make(7f))
+                        g.DrawString("背景  " + HexOf(Bg), f, b, 12, 69);
+                    using (var b = new SolidBrush(Bar))
+                    using (var f = UiFont.Make(7f))
+                        g.DrawString("进度条  " + HexOf(Bar), f, b, 12, 79);
+                }
+
+                private static GraphicsPath Round(Rectangle r, int radius)
+                {
+                    int d = radius * 2;
+                    var path = new GraphicsPath();
+                    path.AddArc(r.X, r.Y, d, d, 180, 90);
+                    path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                    path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+                    path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                    path.CloseFigure();
+                    return path;
                 }
             }
         }

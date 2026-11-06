@@ -419,6 +419,7 @@ namespace WorkCountdown
         public int reminderHoldSeconds { get; set; } // 3..20
         public string reminderSpread { get; set; }      // card | screen：提醒扩散范围
         public string reminderSpreadStyle { get; set; } // circle | bar：提醒扩散样式
+        public string cardGlow { get; set; }            // corner | bar | rim | all：卡片背景光效
         public string lunchReminderStyle { get; set; }   // 午休提醒配色（ReminderStyles 的 id）
         public string eveningReminderStyle { get; set; } // 晚休提醒配色
         public string offReminderStyle { get; set; }     // 下班提醒配色
@@ -440,6 +441,7 @@ namespace WorkCountdown
             reminderHoldSeconds = 6;
             reminderSpread = "card";
             reminderSpreadStyle = "circle";
+            cardGlow = "all";
             lunchReminderStyle = "lan-yuming";
             eveningReminderStyle = "zi-jiegeng";
             offReminderStyle = "forest";
@@ -780,12 +782,14 @@ namespace WorkCountdown
         }
     }
 
-    /// <summary>用户自建的主题：一个主色，其余由主色推导（和内置主题同一套算法）。</summary>
+    /// <summary>用户自建的主题：背景色和进度条色分开选，其余由背景色推导。</summary>
     public class CustomTheme
     {
         public string id { get; set; }
         public string name { get; set; }
-        public string accent { get; set; }      // #RRGGBB
+        public string accent { get; set; }      // 旧字段，等同进度条色
+        public string bg { get; set; }          // #RRGGBB 背景色；空 = 老主题，按 accent 推导
+        public string bar { get; set; }         // #RRGGBB 进度条色
     }
 
     public static class SettingsExtensions
@@ -829,6 +833,9 @@ namespace WorkCountdown
             s.ui.reminderHoldSeconds = Math.Max(3, Math.Min(20, s.ui.reminderHoldSeconds));
             if (s.ui.reminderSpread != "screen") s.ui.reminderSpread = "card";
             if (s.ui.reminderSpreadStyle != "bar") s.ui.reminderSpreadStyle = "circle";
+            if (s.ui.cardGlow != "corner" && s.ui.cardGlow != "bar"
+                && s.ui.cardGlow != "rim" && s.ui.cardGlow != "all")
+                s.ui.cardGlow = "all";
             s.ui.lunchReminderStyle = ReminderStyles.Normalize(s.ui.lunchReminderStyle, "lan-yuming");
             s.ui.eveningReminderStyle = ReminderStyles.Normalize(s.ui.eveningReminderStyle, "zi-jiegeng");
             s.ui.offReminderStyle = ReminderStyles.Normalize(s.ui.offReminderStyle, "forest");
@@ -928,9 +935,27 @@ namespace WorkCountdown
                 if (seen.Contains(t.id)) t.id = t.id + "-2";
                 seen.Add(t.id);
                 if (string.IsNullOrWhiteSpace(t.name)) t.name = "我的主题";
-                if (string.IsNullOrWhiteSpace(t.accent) || t.accent.Length != 7 || t.accent[0] != '#') t.accent = "#4C8DFF";
+                if (!IsHexColor(t.bar))
+                {
+                    t.bar = IsHexColor(t.accent) ? t.accent : "#4C8DFF";
+                    t.accent = t.bar;
+                }
+                if (!IsHexColor(t.accent)) t.accent = t.bar;
+                if (!IsHexColor(t.bg)) t.bg = null;   // 老主题没有 bg，继续按 accent 推导
             }
             Themes.SetCustom(s.customThemes);
+        }
+
+        private static bool IsHexColor(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text) || text.Length != 7 || text[0] != '#') return false;
+            for (int i = 1; i < 7; i++)
+            {
+                char c = text[i];
+                bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!ok) return false;
+            }
+            return true;
         }
 
         public static bool TryParseTime(string text, out int minutes)
@@ -1016,7 +1041,10 @@ namespace WorkCountdown
             foreach (var t in list)
             {
                 if (t == null || string.IsNullOrWhiteSpace(t.id)) continue;
-                custom.Add(FromAccent(t.id, t.name, t.accent));
+                if (!string.IsNullOrWhiteSpace(t.bg))
+                    custom.Add(FromColors(t.id, t.name, t.bg, string.IsNullOrWhiteSpace(t.bar) ? t.accent : t.bar));
+                else
+                    custom.Add(FromAccent(t.id, t.name, string.IsNullOrWhiteSpace(t.bar) ? t.accent : t.bar));
             }
         }
 
@@ -1032,6 +1060,28 @@ namespace WorkCountdown
             var one = new List<ThemeDef>();
             AddTinted(one, id, name, hex);
             return one[0];
+        }
+
+        /// <summary>背景色和进度条色分开：背景决定底色/文字，bar 只决定进度条和高光。</summary>
+        public static ThemeDef FromColors(string id, string name, string bgHex, string barHex)
+        {
+            Color bg = Hex(string.IsNullOrWhiteSpace(bgHex) ? "#14180E" : bgHex);
+            Color bar = Hex(string.IsNullOrWhiteSpace(barHex) ? "#A4CB72" : barHex);
+            double lum = (0.2126 * bg.R + 0.7152 * bg.G + 0.0722 * bg.B) / 255.0;
+            bool light = lum > 0.56;
+            var t = new ThemeDef();
+            t.id = id;
+            t.name = name;
+            t.accent = bar;
+            t.success = bar;
+            t.bgTop = light ? Mix(bg, Color.White, 0.04) : bg;
+            t.bgBottom = Mix(bg, light ? Color.Black : Color.Black, light ? 0.07 : 0.12);
+            t.track = Mix(bg, light ? Color.Black : Color.White, 0.18);
+            t.textMain = light ? Mix(bg, Color.Black, 0.86) : Mix(bg, Color.White, 0.90);
+            t.textMuted = light ? Mix(bg, Color.Black, 0.55) : Mix(bg, Color.White, 0.62);
+            t.textDim = light ? Mix(bg, Color.Black, 0.38) : Mix(bg, Color.White, 0.44);
+            t.edge = light ? Color.FromArgb(30, 0, 0, 0) : Color.FromArgb(22, 255, 255, 255);
+            return t;
         }
 
         private static ThemeDef[] BuildAll()
