@@ -41,6 +41,11 @@ class V36Shot
         Environment.SetEnvironmentVariable("WC_NO_RELAY", "1");
         SetProcessDPIAware();
         Application.EnableVisualStyles();
+        if (args != null && args.Length > 0 && args[0] == "update-live")
+        {
+            UpdateLive();
+            return;
+        }
         string dir = args != null && args.Length > 0 ? args[0]
             : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "visual", "v36");
         Directory.CreateDirectory(dir);
@@ -98,6 +103,57 @@ class V36Shot
         bool backup = File.Exists(dst + ".bak") && File.ReadAllText(dst + ".bak") == "OLD";
         Console.WriteLine("更新脚本: 覆盖=" + (now == "NEW") + " 备份=" + backup + " exit=" + p.ExitCode);
         try { Directory.Delete(tmp, true); } catch { }
+    }
+
+    // ---------------- 8. 真机链路：右键气泡「检查更新」从展开到拿到结果 ----------------
+
+    static void UpdateLive()
+    {
+        var s = new Settings();
+        s.lark.enabled = false;
+        s.calendarEnabled = false;
+        s.ui.theme = "graphite";
+        s.ui.edge = "free";
+        s.ui.x = 60;
+        s.ui.y = 60;
+        s.ui.autoCollapseSeconds = 0;
+        s.exceptions.Add(new HolidayEntry { date = DateTime.Today.ToString("yyyy-MM-dd"), kind = "off" });
+        using (var form = new WidgetForm(new SettingsStore(), s))
+        {
+            form.Show();
+            Pump(300);
+            Call(form, "OpenBubbleMenu");
+            Pump(600);
+            var menu = Get(form, "bubbleMenu") as BubbleMenuForm;
+            Console.WriteLine("bubble menu: " + (menu == null ? "null" : "visible=" + menu.Visible));
+            if (menu == null) return;
+            Call(menu, "OpenItem", (int)BubbleAction.Update);
+            Pump(400);
+            // 展开更新胶囊会自动触发检查（Widget 后台线程 → BeginInvoke 推状态）
+            UpdatePhase phase = UpdatePhase.Idle;
+            int waited = 0;
+            while (waited < 20000)
+            {
+                phase = menu.CurrentUpdatePhase;
+                if (phase != UpdatePhase.Idle && phase != UpdatePhase.Checking) break;
+                Pump(250);
+                waited += 250;
+            }
+            Console.WriteLine("update phase=" + phase + " latest=" + (phase == UpdatePhase.UpToDate ? "== 当前版本" : "?")
+                + " waitedMs=" + waited);
+            Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+        }
+        Application.DoEvents();
+    }
+
+    static void Pump(int ms)
+    {
+        int end = Environment.TickCount + ms;
+        while (Environment.TickCount < end)
+        {
+            Application.DoEvents();
+            Thread.Sleep(10);
+        }
     }
 
     // ---------------- 5. 预览通知：真的走一遍 StartReminder，抓提醒中的卡片 ----------------
