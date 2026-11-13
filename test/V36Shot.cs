@@ -155,6 +155,20 @@ class V36Shot
             Console.WriteLine("更新检查: 远端 tag=" + rel.tag + " version=" + rel.version
                 + " asset=" + (rel.HasAsset ? rel.assetName : "(无)")
                 + " notes=" + UpdateService.ShortNotes(rel.notes, 60));
+            if (rel.HasAsset)
+            {
+                // 真下载一遍 Release 里的 exe 资产，验证「自动更新」拿得到完整文件
+                string path = UpdateService.Download(rel, delegate(long done, long total)
+                {
+                    if (total > 0 && done >= total)
+                        Console.WriteLine("下载完成: " + UpdateService.HumanSize(done));
+                });
+                string message;
+                bool ok = UpdateService.VerifyDownloaded(path, rel, out message);
+                var vi = FileVersionInfo.GetVersionInfo(path);
+                Console.WriteLine("下载校验: ok=" + ok + " 文件=" + UpdateService.HumanSize(new FileInfo(path).Length)
+                    + " FileVersion=" + vi.FileVersion + (string.IsNullOrEmpty(message) ? "" : " / " + message));
+            }
         }
         catch (Exception ex)
         {

@@ -59,10 +59,14 @@
 
 **其他 / 发版**
 - 测试：`.\test\build-tests.ps1` → **Test 299 / Check 299 两套 ALL PASS**（v3.5 是 252 / 280；连续跑 3 次全绿）；本轮新增 `test\V36Shot.cs` 出图探针（`test\V36Shot.exe test\visual\v36`，含真打 GitHub API 的更新检查与「锁着 → 放开 → 覆盖」的更新脚本实测）。
-- 装机：`.\tools\install-dev.ps1` → **PID 30020 / 18:24 / FileVersion 3.6.0.0**；真机卡片截图 `test\visual\v36\real-card.png`，真机右键 6 胶囊截图 `test\visual\bubble-live-bubbles-graphite.png`。
-- 发布：`.\package.ps1` → `dist\上班工具箱-v3.6.0.zip`，并自动 push + 发布 GitHub Release `v3.6.0`（含 zip + exe 两个资产）。
-- 已知边界：磨砂玻璃是「拟态」不是真实背景模糊（见 ①）；自动更新只下载独立 exe 资产，`dist\pack\fonts` 与配置保留；Release 里没有 exe 资产时按钮会退化成「打开发布页下载」。
-- 一图说明书本轮**未重出**（仍是 v3.5.0 内容），下次发版补 03 / 05 / 07 三节。
+- 装机：`.\tools\install-dev.ps1` → **PID 36496 / 18:44 / FileVersion 3.6.0.0**；真机卡片截图 `test\visual\v36\real-card-v360.png`，真机右键 6 胶囊截图 `test\visual\bubble-live-bubbles-graphite.png`。
+- 发布（2026-11-13 18:46 完成）：`.\package.ps1` → `dist\上班工具箱-v3.6.0.zip`（1,965.9 KB / 2,013,107 B）；自动 commit + push（`618361a` → `c1b8fb9`）+ tag `v3.6.0` + GitHub Release **https://github.com/ocezeus/vibeZheyikuai/releases/tag/v3.6.0**，两个资产：**`WorkCountdown-v3.6.0.zip`**（GitHub 资产名只能用 ASCII，见下）+ **`WorkCountdown.exe`**（自动更新用）。发布后实测：`UpdateService.Check()` 拿到 v3.6.0 / WorkCountdown.exe，下载 399.5 KB 校验 ok、FileVersion 3.6.0.0 → `test\V36Shot.exe` 输出可复现。
+- 发版过程中踩到并修掉的 3 个坑（都已写进 `tools/release.ps1` 注释）：
+  1. **资产上传必须走 `upload_url`（uploads.github.com）**：直接打 `api.github.com/repos/.../releases/<id>/assets` 会 404。release.ps1 改成从 Release 的 `upload_url` 去掉 `{?name,label}` 再拼参数。
+  2. **GitHub Release 资产名会抹掉非 ASCII 字符**（实测 `上班工具箱-v3.6.0.zip` 变成 `-v3.6.0.zip`，`中文.txt` 甚至变 `default.txt`，PATCH 改名也一样）：资产名改 ASCII `WorkCountdown-v<Version>.zip`，本地 zip 名字不变；每次发布会顺带删掉「不该存在」的旧资产（清掉中文名残留）。
+  3. release.ps1 末尾显式 `exit 0`（否则子进程 stderr 里的 git 进度会让 package.ps1 误判发布失败）。
+- 已知边界：磨砂玻璃是「拟态」不是真实背景模糊（见 ①）；自动更新只下载独立 exe 资产，`dist\pack\fonts` 与配置保留；Release 里没有 exe 资产时按钮会退化成「打开发布页下载」；GitHub 资产名只能 ASCII（zip 资产叫 `WorkCountdown-v3.6.0.zip`）。
+- 一图说明书本轮**已重出**：2400×7426（v3.5 是 7222），07 页 …（见下）；根目录 `note-drawer.png` / `note-columns.png` / `note-delete.png` / `note-flash.png` 已按 v3.6 面板（两排 + 昵称胶囊）重出。
 
 ### 2026-11-13 17:35 · 发版 v3.5.0（工作日显示修复 + 个人昵称）
 

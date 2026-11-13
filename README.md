@@ -538,10 +538,14 @@ lark-cli auth login --scope "im:message.send_as_user"
 ## 打包给同事
 
 ```powershell
-.\package.ps1            # 编译 + 打包，产物在 dist\上班工具箱-v<Version>.zip
+.\package.ps1            # 编译 + 打包（dist\上班工具箱-v<Version>.zip），并自动发 GitHub Release
+.\package.ps1 -NoPublish # 只打包，不发布
 ```
 
-压缩包里就 7 个文件加一个 `fonts\` 空目录（约 1.6 MB，主要是一图说明书 PNG），发给别人后：
+> **v3.6 起打包会自动发布**：`package.ps1` 出完 zip 会调 `tools/release.ps1` → `git add -A` + commit（`release: 上班工具箱 v<Version>`）→ push `origin main` + tag → 建/更新 GitHub Release `v<Version>` → 上传两个资产：`WorkCountdown-v<Version>.zip`（完整包）和 `WorkCountdown.exe`（程序里「检查更新」做全量更新用）。
+> GitHub 的 Release 资产名**会抹掉中文**（实测 `上班工具箱-v3.6.0.zip` 上传后变成 `-v3.6.0.zip`），所以线上资产名用 ASCII `WorkCountdown-v<Version>.zip`，本地 zip 名仍是中文；重复发布会先删掉同名 / 多余的旧资产，幂等。
+
+压缩包里就 7 个文件加一个 `fonts\` 空目录（约 2 MB，主要是一图说明书 PNG），发给别人后：
 
 | 文件 | 作用 |
 |---|---|
@@ -549,8 +553,10 @@ lark-cli auth login --scope "im:message.send_as_user"
 | `卸载.cmd` | 删程序、删快捷方式、关掉开机自启；配置目录保留并提示路径 |
 | `install.ps1` / `uninstall.ps1` | 上面两个 cmd 的实际逻辑（cmd 只是纯 ASCII 外壳，避免代码页问题） |
 | `使用说明.txt` | 给最终用户看的说明 |
-| `一图说明书.png` | 所有界面 / 功能 / 设置项的 2400×7222 长图（v3.5.0 重出） |
+| `一图说明书.png` | 所有界面 / 功能 / 设置项的 2400×7426 长图（v3.6.0 重出） |
 | `WorkCountdown.exe` | 程序本体 |
+
+**在线更新**：已发布到 GitHub Release（`ocezeus/vibeZheyikuai`，最新 `v3.6.0`），老版本用户在卡片上右键 →「检查更新」就能全量更新到最新版。
 
 **首次启动会弹一个引导窗口**，只问三件事：上下班时间（固定班次 / 弹性工时）、午休、要不要读飞书打卡。填完写一份 `settings.json`，以后不再弹；点「先跳过」也会落一份默认配置。
 
@@ -664,4 +670,5 @@ lark-cli auth login --scope "im:message.send_as_user"
 - 小纸条每对 ID / 每个对话码只留最近 8 条，更早的会被新消息挤掉；陌生人发来的纸条会自动加一个只显示 ID 的对话。
 - 对话码是**公开可进的**（公共 MQTT 中继，谁输入同一个 5 位码谁就进来），别用公司名 / 工号 / 生日之类容易猜的码。
 - **磨砂玻璃是「拟态」不是真实背景模糊**（v3.6）：半透明 + 磨砂颗粒 + 柔光，桌面会透出来但不是逐像素模糊；要真模糊得抓屏再模糊，秒/厘秒动画会掉帧。
-- **自动更新（v3.6）**：只在 Release 里有独立 `WorkCountdown.exe` 资产时能自动全量替换；下载到 `%TEMP%\WorkCountdown-update\`，替换时旧 exe 备份成 `.bak`，失败会自动回滚并留窗口提示。GitHub API 未登录 60 次/小时/IP，被限流时只能「打开发布页」手动下载。一图说明书本轮未重出（还是 v3.5.0 内容）。
+- **自动更新（v3.6）**：只在 Release 里有独立 `WorkCountdown.exe` 资产时能自动全量替换；下载到 `%TEMP%\WorkCountdown-update\`，替换时旧 exe 备份成 `.bak`，失败会自动回滚并留窗口提示。GitHub API 未登录 60 次/小时/IP，被限流时只能「打开发布页」手动下载。一图说明书已按 v3.6.0 重出（2400×7426）。
+- **GitHub Release 资产名只能 ASCII**（v3.6 实测）：中文资产名会被抹掉（`上班工具箱-v3.6.0.zip` → `-v3.6.0.zip`），所以线上 zip 叫 `WorkCountdown-v3.6.0.zip`；本地 zip / 压缩包里的文件名仍是中文。
