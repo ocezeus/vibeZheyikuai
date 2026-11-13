@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>右键胶囊 · 胶囊长成面板（三版）</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#EDF0F6;font-family:"Microsoft YaHei","Segoe UI",sans-serif;color:#1B2230}
+  button{font-family:inherit;border:0;background:none;padding:0;color:inherit;cursor:pointer}
+  input{font-family:inherit}
+  .item,.side,.sw,.row,.chip,.save,.more,.card{user-select:none}
+
+  /* ---------- 页头 ---------- */
+  .head{max-width:1010px;margin:0 auto;padding:34px 24px 4px}
+  .kicker{font:600 11px/1 "Bahnschrift",sans-serif;letter-spacing:.28em;color:#7A8498}
+  h1{margin:12px 0 8px;font-size:26px;letter-spacing:-.01em}
+  .lede{margin:0;color:#5C6779;font-size:13.5px;line-height:1.85;max-width:900px}
+  .lede b{color:#1B2230;font-weight:600}
+  .lede code{font:600 11.5px/1.4 "Bahnschrift",monospace;color:#1B2230;background:#E2E7F0;border-radius:4px;padding:1px 5px}
+  .tips{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0 2px}
+  .tips span{font-size:11.5px;color:#5C6779;background:#fff;border-radius:999px;padding:6px 12px;box-shadow:0 1px 2px rgba(20,28,44,.06)}
+  .tips b{color:#1B2230}
+
+  /* ---------- 舞台 ---------- */
+  .stage{max-width:1010px;margin:0 auto;padding:0 24px}
+  .shead{display:flex;align-items:baseline;gap:10px;margin:26px 0 10px}
+  .shead .no{font:700 11px/1 "Bahnschrift",sans-serif;color:#8B94A6;letter-spacing:.14em}
+  .shead h2{margin:0;font-size:16px;letter-spacing:-.01em}
+  .shead p{margin:0;font-size:12.5px;color:#5C6779}
+  .viewport{width:960px;height:540px;overflow:hidden;border-radius:14px;box-shadow:0 18px 50px rgba(15,20,32,.2)}
+  .view{width:1280px;height:720px;transform:scale(.75);transform-origin:0 0}
+  .cap{margin:9px 0 0;font-size:12.5px;line-height:1.75;color:#5C6779}
+  .cap b{color:#1B2230}
+
+  /* ---------- 桌面 ---------- */
+  .screen{--cw:224px;--ac:#ffffff;--pac:#ffffff;--trk:rgba(255,255,255,.16);
+    --ct:#140B0B;--cb:#1F1212;--tx:#F5EEEE;--mu:rgba(245,238,238,.62);--dm:rgba(245,238,238,.4);
+    --ease:cubic-bezier(.22,.9,.28,1);
+    position:relative;width:1280px;height:720px;overflow:hidden;
+    background:
+      radial-gradient(70% 80% at 6% 0%,rgba(255,255,255,.96),transparent 58%),
+      radial-gradient(55% 65% at 96% 92%,rgba(190,208,236,.78),transparent 60%),
+      linear-gradient(152deg,#F3F5F9 0%,#E6EAF2 52%,#DCE2EC 100%)}
+  .screen::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+    background:radial-gradient(120% 90% at 50% 42%,transparent 55%,rgba(76,92,120,.12) 100%)}
+  .win{position:absolute;z-index:0;border-radius:12px;background:rgba(255,255,255,.7);
+    border:1px solid rgba(255,255,255,.92);box-shadow:0 22px 46px rgba(30,42,64,.13)}
+  .win .wbar{height:36px;display:flex;align-items:center;gap:6px;padding:0 14px;border-bottom:1px solid rgba(20,28,44,.06)}
+  .win .wbar i{width:8px;height:8px;border-radius:50%;background:#CBD3E1}
+  .win .wbody{padding:18px 20px;display:flex;flex-direction:column;gap:11px}
+  .win .wbody b{display:block;height:9px;border-radius:5px;background:#E4E9F1}
+  .win .wbody b.h{height:15px;background:#D8DFEA;width:42%!important}
+  .w1{left:664px;top:96px;width:560px;height:330px}
+  .w2{left:836px;top:466px;width:420px;height:200px;background:rgba(255,255,255,.55)}
+
+  /* ---------- 卡片 ---------- */
+  .card{position:absolute;left:0;top:326px;width:224px;height:68px;border-radius:14px;z-index:3;
+    background:linear-gradient(180deg,var(--ct),var(--cb));color:var(--tx);
+    box-shadow:0 18px 42px rgba(18,24,38,.36),inset 0 1px 0 rgba(255,255,255,.07)}
+  .mini{position:absolute;inset:0}
+  .mini .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:var(--ac);
+    box-shadow:0 0 7px var(--ac)}
+  .mini .lab{position:absolute;left:24px;top:8px;font-size:9.5px;color:var(--mu);letter-spacing:.02em}
+  .mini .rt{position:absolute;right:14px;top:8px;font-size:9.5px;color:var(--mu)}
+  .mini .num{position:absolute;left:12px;top:22px;font:700 23px/27px "Consolas",monospace;letter-spacing:.01em}
+  .bar{position:absolute;left:14px;right:14px;bottom:7px;height:3px;border-radius:2px;background:var(--trk);overflow:hidden}
+  .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,transparent),var(--ac))}
+
+  /* ---------- 胶囊列 ---------- */
+  .menu{position:absolute;left:calc(var(--cw) + 14px);top:268px;width:124px;z-index:4;
+    display:flex;flex-direction:column;gap:8px;transition:top .3s var(--ease)}
+  .screen.bigcard .menu{top:329px}
+  .item{position:relative;width:124px;height:40px;border-radius:20px;overflow:hidden;
+    background:linear-gradient(180deg,rgba(46,38,38,.95),rgba(19,14,14,.97));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 8px 22px rgba(10,14,22,.32),inset 0 1px 0 rgba(255,255,255,.12);
+    color:rgba(245,238,238,.9);cursor:pointer;
+    transition:width .34s var(--ease),height .34s var(--ease),border-radius .34s var(--ease),
+      background .16s ease,border-color .16s ease,opacity .2s ease}
+  .stage[data-scheme="a"] .item.open{width:246px;border-radius:18px}
+  .stage[data-scheme="b"] .item.open{width:124px;border-radius:18px}
+  .item:hover{background:linear-gradient(180deg,rgba(64,52,52,.96),rgba(27,20,20,.98));border-color:rgba(255,255,255,.24)}
+  .item.open{border-color:color-mix(in srgb,var(--ac) 70%,transparent);
+    box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 35%,transparent),0 8px 22px rgba(10,14,22,.32),inset 0 1px 0 rgba(255,255,255,.12)}
+  .ihead{height:40px;display:flex;align-items:center;gap:9px;padding:0 12px;white-space:nowrap}
+  .ihead .ico{width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center;
+    color:rgba(245,238,238,.72);transition:color .16s ease}
+  .ihead .ico svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .item:hover .ico,.item.open .ico{color:var(--ac)}
+  .ihead .lbl{font-size:11.5px;line-height:1;letter-spacing:.01em}
+  .body{padding:0 12px 12px;opacity:0;transition:opacity .16s ease}
+  .item.open .body{opacity:1;transition-delay:.14s}
+
+  /* 右侧延展（方案 C） */
+  .side{position:absolute;left:calc(var(--cw) + 14px + 134px);top:268px;width:246px;z-index:5;
+    border-radius:18px;overflow:hidden;color:rgba(245,238,238,.9);
+    background:linear-gradient(180deg,rgba(40,32,32,.975),rgba(15,11,11,.985));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 26px 64px rgba(8,12,20,.48),inset 0 1px 0 rgba(255,255,255,.1);
+    opacity:0;pointer-events:none;transform-origin:0 50%;transform:scale(.18,.22);
+    transition:transform .34s var(--ease),opacity .16s ease,top .3s var(--ease)}
+  .side.on{opacity:1;pointer-events:auto;transform:none}
+  .side .sidebody{padding:10px 14px 14px;opacity:0;transition:opacity .16s ease}
+  .side.on .sidebody{opacity:1;transition-delay:.14s}
+  .side .sidehead{display:flex;align-items:center;gap:10px;padding:14px 14px 0}
+  .side .sidehead .sico{width:30px;height:30px;border-radius:10px;background:rgba(255,255,255,.08);
+    display:flex;align-items:center;justify-content:center;color:var(--pac);flex:none}
+  .side .sidehead .sico svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .side .sidehead b{display:block;font-size:13px;font-weight:600;color:#F5EEEE}
+  .side .sidehead em{display:block;font-style:normal;font-size:10px;color:rgba(245,238,238,.5);margin-top:2px}
+  .menu.has-side .item{opacity:.62}
+  .menu.has-side .item.active{opacity:1;border-color:color-mix(in srgb,var(--ac) 70%,transparent)}
+
+  /* ---------- 面板内容（A/B/C 共用） ---------- */
+  .field{display:flex;align-items:center;gap:7px;height:32px;padding:0 9px;border-radius:8px;margin-top:8px;
+    background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.10);transition:border-color .16s ease}
+  .field:focus-within{border-color:color-mix(in srgb,var(--pac) 55%,transparent);background:rgba(255,255,255,.08)}
+  .field .fico{width:14px;height:14px;flex:none;color:var(--pac);opacity:.85;display:flex;align-items:center}
+  .field .fico svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .field input{flex:1;min-width:0;height:100%;border:0;outline:none;background:transparent;
+    color:#F5EEEE;font-size:11.5px;letter-spacing:.01em;padding:0}
+  .field input::placeholder{color:rgba(245,238,238,.36)}
+  .plabel{margin:10px 0 5px;font-size:9.5px;color:rgba(245,238,238,.45)}
+  .chips{display:flex;gap:6px}
+  .chip{flex:1;height:42px;border-radius:9px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;transition:background .15s,border-color .15s}
+  .chip:hover{background:rgba(255,255,255,.11);border-color:rgba(255,255,255,.18)}
+  .chip b{font-size:10.5px;font-weight:600}
+  .chip em{font-style:normal;font-size:8.5px;color:rgba(245,238,238,.45);font-family:"Bahnschrift",sans-serif}
+  .save{width:100%;height:34px;margin-top:10px;border-radius:9px;background:var(--pac);color:#171111;
+    font-size:11.5px;font-weight:600;transition:filter .15s ease}
+  .save:hover{filter:brightness(1.06)}
+  .more{margin-top:9px;display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--pac);opacity:.9}
+  .more svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .swatches{display:grid;grid-template-columns:repeat(4,44px);justify-content:space-between;row-gap:10px;margin-top:10px}
+  .sw{position:relative;width:44px;height:26px;border-radius:6px;background:linear-gradient(180deg,var(--st),var(--sbm));
+    overflow:hidden;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 2px 6px rgba(0,0,0,.28);transition:transform .16s ease}
+  .sw::after{content:"";position:absolute;left:2px;right:2px;bottom:2px;height:3px;border-radius:2px;background:var(--sa)}
+  .sw::before{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.16),transparent 55%)}
+  .sw:hover{transform:translateY(-1px) scale(1.04)}
+  .sw.sel{box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 0 0 2px var(--pac)}
+  .row{display:flex;align-items:center;gap:9px;width:100%;height:40px;padding:0 11px;border-radius:11px;margin-top:8px;
+    background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.07);color:#F5EEEE;font-size:12px;
+    transition:background .15s,border-color .15s}
+  .row:first-child{margin-top:10px}
+  .row:hover{background:rgba(255,255,255,.11);border-color:rgba(255,255,255,.18)}
+  .row .ricon{width:18px;height:18px;color:var(--pac);flex:none;display:flex;align-items:center}
+  .row .ricon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .row .kbd{margin-left:auto;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:rgba(255,255,255,.1);
+    font:600 10px/20px "Bahnschrift",sans-serif;text-align:center;color:rgba(255,255,255,.72)}
+  .fine{margin:9px 0 0;font-size:9.5px;line-height:1.5;color:rgba(245,238,238,.38)}
+
+  /* 窄版（方案 B）：字段和胶囊都纵向排 */
+  .stage[data-scheme="b"] .chips{flex-direction:column;gap:6px}
+  .stage[data-scheme="b"] .chip{flex:none;height:34px}
+  .stage[data-scheme="b"] .field{gap:5px;padding:0 7px}
+  .stage[data-scheme="b"] .field input{font-size:10.5px}
+  .stage[data-scheme="b"] .save{margin-top:8px;height:32px;font-size:11px}
+  .stage[data-scheme="b"] .more{font-size:9.5px}
+
+  /* ---------- toast ---------- */
+  .toast{position:absolute;left:50%;bottom:34px;z-index:6;transform:translate(-50%,10px);
+    display:flex;align-items:center;gap:8px;height:34px;padding:0 15px;border-radius:999px;
+    background:rgba(20,16,16,.94);border:1px solid rgba(255,255,255,.1);color:#F5EEEE;font-size:11.5px;
+    box-shadow:0 14px 34px rgba(8,12,20,.35);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .toast svg{width:14px;height:14px;color:#7FE08A;flex:none;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  .hint{position:absolute;right:18px;bottom:16px;z-index:2;font-size:11px;color:rgba(27,34,48,.4)}
+  .hint b{color:rgba(27,34,48,.62);font-weight:600}
+
+  /* ---------- 说明 ---------- */
+  .notes{max-width:1010px;margin:30px auto 44px;padding:16px 20px;background:#fff;border-radius:10px;
+    font-size:12.5px;line-height:1.95;color:#5C6779}
+  .notes b{color:#1B2230}
+  .notes ul{margin:6px 0 0;padding-left:18px}
+  .notes code{font:600 11.5px/1.4 "Bahnschrift",monospace;color:#1B2230}
+  .notes .row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+  /* ---------- 单屏 ---------- */
+  body.snap .head,body.snap .shead,body.snap .cap,body.snap .notes{display:none}
+  body.snap .stage{padding:0;margin:0;max-width:none}
+  body.snap .viewport{width:1280px;height:720px;border-radius:0;box-shadow:none}
+  body.snap .view{transform:none}
+  body.only-a .stage-b,body.only-a .stage-c,body.only-b .stage-a,body.only-b .stage-c,
+  body.only-c .stage-a,body.only-c .stage-b{display:none}
+
+  body.static .item,body.static .body,body.static .side,body.static .sidebody,body.static .toast,body.static .sw{transition:none!important}
+  body.static .item.open .body{opacity:1}
+</style>
+</head>
+<body>
+<div class="head">
+  <div class="kicker">WORK COUNTDOWN · CARD SHORTCUT · TAKE 2</div>
+  <h1>胶囊自己长成面板：参考视频的动作，三版对比</h1>
+  <p class="lede">视频里的关键不是「在旁边再弹一块」，而是<b>被点的胶囊原地长成一块大圆角卡片</b>：宽度 235→430、高度 72→170，
+    它下面的胶囊被顶下去，文字晚半拍淡入；再点另一颗时，原来那张先缩回胶囊。下面三版都按这个动作做，只差「长多宽」和「推不推后面的胶囊」。
+    新日程面板这次带<b>真输入框</b>：标题可以直接改，地点可以加。</p>
+  <div class="tips">
+    <span>点胶囊 → 长开；再点标题/地点就能输入</span>
+    <span>点另一颗胶囊：旧的先缩回</span>
+    <span>点卡片空白处收起（点卡片本身 = 切大卡）</span>
+  </div>
+</div>
+
+<section class="stage stage-a" data-scheme="a">
+  <div class="shead"><span class="no">A</span><h2>长开成 246 宽 · 推下后面的胶囊</h2><p>视频同款：宽高一起长，下面的依次让位</p></div>
+  <div class="viewport"><div class="view"><div class="screen"></div></div></div>
+  <p class="cap"><b>推荐。</b>被点的胶囊原地向右向下长成一块卡片，标题和图标留在左上角当表头，输入框、时间、保存都在卡片里；其余胶囊被顶下去，列表不会跳。</p>
+</section>
+
+<section class="stage stage-b" data-scheme="b">
+  <div class="shead"><span class="no">B</span><h2>只长高 · 124 宽</h2><p>宽度不变，内容纵向堆，后面的胶囊照样往下让</p></div>
+  <div class="viewport"><div class="view"><div class="screen"></div></div></div>
+  <p class="cap">最省横向空间，垂直长开和视频同一个手感；代价是表单只有 100 宽，标题和地点都窄，时间块要竖着排。</p>
+</section>
+
+<section class="stage stage-c" data-scheme="c">
+  <div class="shead"><span class="no">C</span><h2>右侧单独延展一块（现状）</h2><p>胶囊不动，面板从右边长出来</p></div>
+  <div class="viewport"><div class="view"><div class="screen"></div></div></div>
+  <p class="cap">留作对照：胶囊位置完全不动，面板从右往左「拉」出来；列表里的其他胶囊只淡下去，不会被顶开。表单宽度和 A 一样是 246。</p>
+</section>
+
+<div class="notes">
+  <b>从视频里抄下来的几个细节</b>
+  <ul>
+    <li><b>几何：</b>闭合是胶囊（高 40）；展开是同一块圆角卡片（圆角 20→18），左上角不动，宽度和高度一起长。</li>
+    <li><b>节奏：</b>宽/高 340ms，<code>cubic-bezier(.22,.9,.28,1)</code>（先窜出去再落定，和抽屉同一条）；内容晚 140ms 淡入。</li>
+    <li><b>列表：</b>被顶开的胶囊跟着变高，后面的胶囊没有自己的动画，靠 flex 自然让位——和视频里那条「下面的胶囊被推下去」的感觉一致。</li>
+    <li><b>切换：</b>点另一颗时，旧卡片先缩回 40，再长新的；两张卡的高度动画同时走，列表上下都顺。</li>
+    <li><b>置顶：</b>没有面板，点一下直接切，文字变「已置顶」。</li>
+  </ul>
+  <div class="row2" style="margin-top:12px">
+    <div><b>新日程表单</b><br>标题是真 input（默认「临时日程」，点进去直接改）；地点是真 input（提示「添加地点（可选）」）；
+      +15 / +30 / +60 分钟直接选开始时间；「保存日程」把标题、地点、时间一起提交；「详细编辑…」进设置里的提醒页。</div>
+    <div><b>落地到 C# 要确认的一件事</b><br>分层窗里做「带输入法的真输入框」有两个做法：① 在面板上盖一个真 WinForms 文本框（位置贴合，输入法正常，但要跟着面板缩放走）；
+      ② 点标题/地点弹出一个小编辑气泡。HTML 里是真 input；C# 走哪种，你确认一下。</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var ICONS = {
+    schedule:'<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3.5"/><path d="M8 3v4M16 3v4M3.5 9.5h17"/><path d="M12 13.4v4.6M9.7 15.7h4.6"/></svg>',
+    theme:'<svg viewBox="0 0 24 24"><path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.15 0 1.9-.78 1.9-1.82 0-.55-.26-.98-.55-1.35-.3-.38-.52-.76-.52-1.22 0-.94.78-1.62 1.74-1.62h1.55c1.95 0 3.48-1.48 3.48-3.52 0-4.1-3.42-7.67-7.6-7.67Z"/><circle cx="8.1" cy="10.2" r="1.15"/><circle cx="12" cy="7.7" r="1.15"/><circle cx="15.9" cy="10.2" r="1.15"/></svg>',
+    clock:'<svg viewBox="0 0 24 24"><circle cx="10.6" cy="12" r="7.4"/><path d="M10.6 8v4.2l2.7 1.6"/><path d="M18.4 13.6h3.4M19.6 11.2l2.4 2.4-2.4 2.4"/></svg>',
+    pin:'<svg viewBox="0 0 24 24"><path d="M4.2 5.2h15.6"/><path d="M12 19.2V9.4"/><path d="M7.6 13.8 12 9.4l4.4 4.4"/></svg>',
+    pencil:'<svg viewBox="0 0 24 24"><path d="M4 20h4l10.2-10.2a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="M13.6 7.4l3 3"/></svg>',
+    arrow:'<svg viewBox="0 0 24 24"><path d="M5 12h13M13.5 6.8 18.7 12l-5.2 5.2"/></svg>',
+    check:'<svg viewBox="0 0 24 24"><path d="M20 6.5 9.4 17.1 4 11.7"/></svg>'
+  };
+
+  var THEMES = [
+    {name:'我的主题', top:'#140B0B', bottom:'#1F1212', ac:'#FFFFFF'},
+    {name:'经典 · 午夜蓝', top:'#12161F', bottom:'#1B2130', ac:'#4C8DFF'},
+    {name:'经典 · 极光青', top:'#0E1A1C', bottom:'#15292A', ac:'#2FD4C4'},
+    {name:'经典 · 落日橙', top:'#211610', bottom:'#2E2019', ac:'#FF9A5A'},
+    {name:'经典 · 樱花粉', top:'#20141A', bottom:'#2E1E27', ac:'#FF7FA8'},
+    {name:'经典 · 松林绿', top:'#101C15', bottom:'#18291F', ac:'#5FD08A'},
+    {name:'绿 · 孔雀', top:'#001109', bottom:'#001E0F', ac:'#0FA35C'},
+    {name:'白 · 鱼肚', top:'#F7F4ED', bottom:'#E6E3DC', ac:'#8A6A4F'}
+  ];
+
+  var ACTS = [
+    {id:'schedule', label:'新增日程'},
+    {id:'theme',    label:'修改主题'},
+    {id:'clock',    label:'触发上下班'},
+    {id:'pin',      label:'窗口置顶'}
+  ];
+
+  var state = { theme:0, pinned:false, open:null };
+
+  function qs(s,r){ return (r||document).querySelector(s); }
+  function qsa(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); }
+  function pad2(n){ return n<10 ? '0'+n : ''+n; }
+  function hhmm(d){ return pad2(d.getHours())+':'+pad2(d.getMinutes()); }
+
+  /* ---------- 主题换算（和 Models.Themes 同一套规则） ---------- */
+  function hex2rgb(h){ h=String(h||'').replace('#',''); return {r:parseInt(h.substr(0,2),16),g:parseInt(h.substr(2,2),16),b:parseInt(h.substr(4,2),16)}; }
+  function mix(a,b,t){ return {r:Math.round(a.r+(b.r-a.r)*t),g:Math.round(a.g+(b.g-a.g)*t),b:Math.round(a.b+(b.b-a.b)*t)}; }
+  function rgb(c){ return 'rgb('+c.r+','+c.g+','+c.b+')'; }
+  function rgba(c,a){ return 'rgba('+c.r+','+c.g+','+c.b+','+a+')'; }
+  function applyTheme(screen, t){
+    var top=hex2rgb(t.top), bottom=hex2rgb(t.bottom);
+    var W={r:255,g:255,b:255}, B={r:0,g:0,b:0};
+    var lum=(0.2126*top.r+0.7152*top.g+0.0722*top.b)/255;
+    var light=lum>0.56;
+    var text=light?mix(top,B,.86):mix(top,W,.90);
+    var ac=hex2rgb(t.ac);
+    var acLum=(0.2126*ac.r+0.7152*ac.g+0.0722*ac.b)/255;
+    var pac=acLum<0.42?mix(ac,W,.55):ac;
+    screen.style.setProperty('--ct',rgb(top));
+    screen.style.setProperty('--cb',rgb(bottom));
+    screen.style.setProperty('--tx',rgb(text));
+    screen.style.setProperty('--mu',rgba(text,light?.55:.62));
+    screen.style.setProperty('--dm',rgba(text,light?.38:.44));
+    screen.style.setProperty('--trk',rgba(text,light?.18:.16));
+    screen.style.setProperty('--ac',t.ac);
+    screen.style.setProperty('--pac',rgb(pac));
+  }
+
+  /* ---------- 内容 ---------- */
+  function bodySchedule(){
+    var now=new Date();
+    function t(m){ return hhmm(new Date(now.getTime()+m*60000)); }
+    var mins=[15,30,60], caps=['+15 分钟','+30 分钟','+1 小时'];
+    return ''+
+      '<div class="field"><span class="fico">'+ICONS.pencil+'</span><input class="inp title" value="临时日程" maxlength="40" placeholder="标题"></div>'+
+      '<div class="field"><span class="fico">'+ICONS.pin+'</span><input class="inp place" placeholder="添加地点" maxlength="30"></div>'+
+      '<div class="plabel">从什么时候开始</div>'+
+      '<div class="chips">'+mins.map(function(m,i){
+        return '<button class="chip" data-min="'+m+'" type="button"><b>'+caps[i]+'</b><em>'+t(m)+'</em></button>';
+      }).join('')+'</div>'+
+      '<button class="save" type="button">保存日程</button>'+
+      '<button class="more" type="button">详细编辑…'+ICONS.arrow+'</button>';
+  }
+
+  function bodyTheme(){
+    return '<div class="swatches">'+THEMES.map(function(t,i){
+      return '<button class="sw'+(i===0?' sel':'')+'" data-i="'+i+'" title="'+t.name+'" type="button" '+
+        'style="--st:'+t.top+';--sbm:'+t.bottom+';--sa:'+t.ac+'"></button>';
+    }).join('')+'</div>'+
+    '<button class="more" type="button">全部 39 套主题…'+ICONS.arrow+'</button>';
+  }
+
+  function bodyClock(){
+    return '<button class="row" data-k="1" data-l="上班打卡" type="button"><span class="ricon">'+ICONS.clock+'</span><span>上班打卡</span><span class="kbd">1</span></button>'+
+      '<button class="row" data-k="2" data-l="下班打卡" type="button"><span class="ricon">'+ICONS.clock+'</span><span>下班打卡</span><span class="kbd">2</span></button>'+
+      '<p class="fine">没配飞书会话时会提示先去设置里填。</p>';
+  }
+
+  function bodyHTML(act){
+    if(act==='schedule') return bodySchedule();
+    if(act==='theme') return bodyTheme();
+    return bodyClock();
+  }
+
+  function iconOf(act){
+    return ICONS[act==='schedule'?'schedule':act==='theme'?'theme':act==='clock'?'clock':'pin'];
+  }
+
+  /* ---------- 舞台 ---------- */
+  function screenHTML(scheme){
+    return ''+
+      '<div class="win w1"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody">'+
+        '<b class="h"></b><b style="width:88%"></b><b style="width:74%"></b><b style="width:81%"></b></div></div>'+
+      '<div class="win w2"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody">'+
+        '<b class="h" style="width:30%"></b><b style="width:64%"></b><b style="width:52%"></b></div></div>'+
+      '<div class="card"><div class="mini">'+
+        '<span class="dot"></span><span class="lab">距离下班</span><span class="rt">下班 20:04</span>'+
+        '<div class="num">05:30:56</div><div class="bar"><i style="width:62%"></i></div>'+
+      '</div></div>'+
+      '<div class="menu">'+ACTS.map(function(a,i){
+        return '<div class="item" data-act="'+a.id+'" data-i="'+i+'">'+
+          '<div class="ihead"><span class="ico">'+iconOf(a.id)+'</span><span class="lbl">'+a.label+'</span></div>'+
+          (scheme==='c' ? '' : '<div class="body">'+bodyHTML(a.id)+'</div>')+
+        '</div>';
+      }).join('')+'</div>'+
+      (scheme==='c' ? '<div class="side"><div class="sidehead"><span class="sico"></span><div><b></b><em></em></div></div><div class="sidebody"></div></div>' : '')+
+      '<div class="toast"></div>'+
+      '<div class="hint">点胶囊试试 · <b>Esc</b> 收起</div>';
+  }
+
+  function toast(screen, msg){
+    var el=qs('.toast',screen);
+    el.innerHTML=ICONS.check+'<span>'+msg+'</span>';
+    el.classList.add('show');
+    clearTimeout(screen._tt);
+    screen._tt=setTimeout(function(){ el.classList.remove('show'); },1900);
+  }
+
+  function closeItem(item){
+    item.classList.remove('open');
+    item.style.height='40px';
+    var screen=item.closest?item.closest('.screen'):null;
+    if(screen) relayout(screen);
+  }
+
+  // 展开后整列可能超出屏幕：把整列往上挪，别让最后一颗掉出可视区
+  function relayout(screen){
+    var menu=qs('.menu',screen);
+    if(!menu) return;
+    var base=screen.classList.contains('bigcard')?329:268;
+    var h=menu.scrollHeight;
+    menu.style.top=Math.max(12,Math.min(base,700-h))+'px';
+  }
+
+  function openItem(screen, item){
+    qsa('.item.open',screen).forEach(closeItem);
+    item.classList.add('open');
+    var body=qs('.body',item);
+    // 身体量出来再给高度，和视频一样「宽高一起长、内容后出现」
+    item.style.height=(40+body.offsetHeight)+'px';
+    relayout(screen);
+    state.open=item;
+  }
+
+  function closeSide(screen){
+    var side=qs('.side',screen);
+    if(side){ side.classList.remove('on'); }
+    qsa('.item',screen).forEach(function(x){ x.classList.remove('active'); });
+    qs('.menu',screen).classList.remove('has-side');
+    state.open=null;
+  }
+
+  function openSide(screen, item){
+    var side=qs('.side',screen);
+    if(!side) return;
+    var act=item.dataset.act;
+    var isPin=act==='pin';
+    if(isPin){
+      state.pinned=!state.pinned;
+      var lbl=qs('.lbl',item);
+      lbl.textContent=state.pinned?'已置顶':'窗口置顶';
+      qs('.ico',item).style.color=state.pinned?'var(--ac)':'';
+      toast(screen, state.pinned?'已置顶 · 窗口会保持最上层':'已取消置顶 · 跟随普通窗口');
+      return;
+    }
+    qsa('.item',screen).forEach(function(x){ x.classList.toggle('active',x===item); });
+    qs('.menu',screen).classList.add('has-side');
+    qs('.sico',side).innerHTML=iconOf(act);
+    qs('.sidehead b',side).textContent=item.querySelector('.lbl').textContent;
+    qs('.sidehead em',side).textContent=act==='schedule'?'默认 30 分钟 · 可再详细编辑':act==='theme'?'点色卡立刻换':'以你本人身份发飞书消息';
+    qs('.sidebody',side).innerHTML=bodyHTML(act);
+    side.classList.remove('on');
+    side.style.visibility='hidden';
+    side.style.top='0px';
+    var menu=qs('.menu',screen);
+    var wanted=menu.offsetTop+item.offsetTop;
+    var h=side.offsetHeight;
+    side.style.top=Math.max(12,Math.min(wanted,700-h))+'px';
+    side.style.visibility='';
+    void side.offsetWidth;
+    requestAnimationFrame(function(){ side.classList.add('on'); });
+    state.open=item;
+  }
+
+  function wire(screen, scheme){
+    var menu=qs('.menu',screen);
+    menu.addEventListener('click', function(e){
+      var item=e.target.closest('.item');
+      if(!item) return;
+      if(e.target.closest('.body')) return;         // 表单里的点击不收起
+      if(scheme==='c'){ openSide(screen,item); return; }
+      if(item.classList.contains('open')) closeItem(item);
+      else openItem(screen,item);
+    });
+
+    screen.addEventListener('click', function(e){
+      if(e.target.closest('.menu')||e.target.closest('.side')) return;
+      if(e.target.closest('.card')){ screen.classList.toggle('bigcard'); return; }
+      qsa('.item.open',screen).forEach(closeItem);
+      closeSide(screen);
+    });
+
+    document.addEventListener('keydown', function(e){
+      if(e.key==='Escape'){ qsa('.item.open',screen).forEach(closeItem); closeSide(screen); }
+    });
+
+    // 面板里的交互
+    screen.addEventListener('click', function(e){
+      var sw=e.target.closest('.sw');
+      if(sw){
+        var i=parseInt(sw.dataset.i,10);
+        state.theme=i;
+        applyTheme(screen, THEMES[i]);
+        qsa('.sw',screen).forEach(function(x,j){ x.classList.toggle('sel',j===i); });
+        toast(screen,'已切换主题 · '+THEMES[i].name);
+        return;
+      }
+      var chip=e.target.closest('.chip');
+      if(chip){
+        var m=parseInt(chip.dataset.min,10);
+        var start=new Date(Date.now()+m*60000);
+        var end=new Date(start.getTime()+30*60000);
+        toast(screen,'已选 +'+m+' 分钟 · '+hhmm(start)+'–'+hhmm(end));
+        return;
+      }
+      var save=e.target.closest('.save');
+      if(save){
+        var root=e.target.closest('.item')||qs('.side',screen);
+        var title=(qs('.inp.title',root)||{}).value||'临时日程';
+        var place=(qs('.inp.place',root)||{}).value||'';
+        toast(screen,'已保存：'+title+(place?' · '+place:'')+' · 30 分钟');
+        return;
+      }
+      var row=e.target.closest('.row');
+      if(row){ toast(screen,'已发送「'+row.dataset.k+'」· '+row.dataset.l); return; }
+      var more=e.target.closest('.more');
+      if(more){ toast(screen,'将打开完整设置（原型演示）'); }
+    });
+
+    // 输入框：点进去不要冒泡到收起
+    qsa('input',screen).forEach(function(inp){
+      inp.addEventListener('click', function(e){ e.stopPropagation(); });
+    });
+  }
+
+  var stages=qsa('.stage');
+  stages.forEach(function(stage){
+    var scheme=stage.dataset.scheme;
+    var screen=qs('.screen',stage);
+    screen.classList.add('scheme-'+scheme);
+    screen.innerHTML=screenHTML(scheme);
+    qsa('.item',screen).forEach(function(it){ it.style.height='40px'; });
+    wire(screen,scheme);
+  });
+
+  // 打开页面先替用户展开「新增日程」，好直接看到表单和长开动作
+  if(new URLSearchParams(location.search).get('snap')!=='1'){
+    setTimeout(function(){
+      var first=qs('.stage-a .item[data-act="schedule"]');
+      if(first) openItem(qs('.stage-a .screen'), first);
+    }, 500);
+  }
+
+  /* ---------- 单屏 / 指定状态 ---------- */
+  (function(){
+    var q=new URLSearchParams(location.search);
+    if(q.get('snap')==='1') document.body.classList.add('snap');
+    if(q.get('static')==='1') document.body.classList.add('static');
+    var v=q.get('v');
+    if(v) document.body.classList.add('only-'+v);
+    var st=q.get('state');
+    if(!st) return;
+    var stage=qs('.stage'+(v?'.stage-'+v:'')+'' )||qs('.stage');
+    if(!stage) return;
+    var screen=qs('.screen',stage);
+    var scheme=stage.dataset.scheme;
+    setTimeout(function(){
+      var act=st==='pin'?'pin':st;
+      var item=qs('.item[data-act="'+act+'"]',screen);
+      if(!item) return;
+      if(act==='pin'){
+        state.pinned=true;
+        qs('.lbl',item).textContent='已置顶';
+        qs('.ico',item).style.color='var(--ac)';
+      } else if(scheme==='c') openSide(screen,item);
+      else openItem(screen,item);
+      var pick=q.get('pick');
+      if(pick!==null) setTimeout(function(){
+        var sw=qs('.sw[data-i="'+pick+'"]',screen);
+        if(sw){ applyTheme(screen,THEMES[parseInt(pick,10)]); qsa('.sw',screen).forEach(function(x,j){x.classList.toggle('sel',j===parseInt(pick,10));}); }
+      },220);
+    },40);
+  })();
+})();
+</script>
+</body>
+</html>

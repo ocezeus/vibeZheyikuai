@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>设置 · 小纸条（设计稿）</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#C9CFD8;font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;color:#1B2230}
+  button{font-family:inherit;border:0;background:none;padding:0;color:inherit;cursor:pointer}
+  input{font-family:inherit;outline:none;border:0;background:none;color:inherit}
+  .win{width:792px;height:1000px;margin:0 auto;background:#F0F0F0;border:1px solid #B8BEC8;
+    box-shadow:0 22px 60px rgba(20,28,44,.28);display:flex;flex-direction:column}
+  .title{height:36px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;background:#F7F7F7;
+    border-bottom:1px solid #D7D9DE;font-size:12px;color:#3A3F48}
+  .title .x{margin-left:auto;width:26px;height:22px;display:flex;align-items:center;justify-content:center;color:#666;font-size:15px}
+  .tabs{display:flex;flex:none;height:38px;background:#F0F0F0;border-bottom:1px solid #D0D3D9;padding:5px 6px 0}
+  .tab{position:relative;width:64px;height:33px;display:flex;align-items:center;justify-content:center;
+    font-size:12px;color:#3F4653;border:1px solid transparent;border-bottom:0;border-radius:4px 4px 0 0}
+  .tab.on{background:#fff;border-color:#D0D3D9;color:#1B2230}
+  .tab.on::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;background:#4C8DFF}
+  .body{flex:1;min-height:0;overflow:auto;padding:14px 16px 8px}
+  .card{background:#fff;border:1px solid #D9DCE2;border-radius:7px;padding:14px 16px;margin-bottom:12px}
+  .card h3{margin:0 0 4px;font-size:14px;font-weight:600}
+  .card .hint{margin:6px 0 0;font-size:11px;line-height:1.7;color:#6B7380}
+  .styles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+  .style{border:2px solid #DDE1E8;border-radius:9px;padding:9px;cursor:pointer;background:#FAFBFD}
+  .style.on{border-color:#4C8DFF;background:#F4F8FF;box-shadow:0 0 0 3px rgba(76,141,255,.12)}
+  .thumb{position:relative;height:104px;border-radius:6px;background:linear-gradient(160deg,#F3F5FA,#E7EBF3);overflow:hidden}
+  .thumb .tcard{position:absolute;right:8px;top:14px;width:82px;height:76px;border-radius:6px;
+    background:linear-gradient(180deg,#1D1802,#302904);box-shadow:0 6px 14px rgba(20,16,4,.3)}
+  .thumb .tpanel{position:absolute;border-radius:6px;background:linear-gradient(180deg,#201B06,#2C2504);
+    border:1px solid rgba(242,204,19,.55)}
+  .thumb .tline{position:absolute;height:3px;border-radius:2px;background:rgba(254,250,231,.25)}
+  .thumb .tac{position:absolute;height:3px;border-radius:2px;background:#F2CC13}
+  .thumb .badge{position:absolute;left:8px;top:8px;font-size:10px;color:#fff;background:rgba(27,34,48,.62);
+    border-radius:999px;padding:2px 7px}
+  .style .nm{display:flex;align-items:center;gap:7px;margin-top:8px;font-size:12.5px;font-weight:600}
+  .style .nm .dot{width:14px;height:14px;border-radius:50%;border:1.5px solid #B9C2D0;background:#fff;display:flex;align-items:center;justify-content:center}
+  .style.on .nm .dot{border-color:#4C8DFF;background:#4C8DFF}
+  .style.on .nm .dot::after{content:"";width:5px;height:5px;border-radius:50%;background:#fff}
+  .style .ds{font-size:11px;color:#6B7380;line-height:1.65;margin-top:3px}
+  .row{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .lbl{font-size:12px;color:#4A5260;flex:none;width:70px}
+  .idbig{font:700 20px/1 Consolas,monospace;letter-spacing:.24em;color:#1B2230;background:#F3F6FB;
+    border:1px solid #DCE2EA;border-radius:6px;padding:9px 12px}
+  .btn{height:30px;padding:0 12px;border-radius:5px;border:1px solid #C9D0DB;background:#fff;font-size:12px;color:#2A313D}
+  .btn:hover{border-color:#A9B5C7}
+  .btn.primary{background:#4C8DFF;border-color:#4C8DFF;color:#fff}
+  .field{display:flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:1px solid #D3D9E2;border-radius:5px;background:#fff;font-size:12px}
+  .field input{flex:1;min-width:0;font-size:12.5px}
+  .field .port{width:44px;text-align:center;border-left:1px solid #E4E8EF;padding-left:6px;font-family:Consolas,monospace}
+  .status{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#2C8B5A;margin-left:auto}
+  .status i{width:7px;height:7px;border-radius:50%;background:#3AA76A;box-shadow:0 0 6px #3AA76A}
+  .contacts{margin-top:8px;border:1px solid #E3E7EE;border-radius:6px;overflow:hidden}
+  .ct{display:flex;align-items:center;gap:10px;height:38px;padding:0 10px;border-bottom:1px solid #EDF0F5;font-size:12px}
+  .ct:last-child{border-bottom:0}
+  .ct .av{width:22px;height:22px;border-radius:6px;background:#EEF3FF;color:#3D6BFF;font-size:10.5px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .ct .nm{width:58px;font-weight:600}
+  .ct .cid{width:78px;font-family:Consolas,monospace;font-size:11px;color:#5C6779}
+  .ct .last{flex:1;min-width:0;color:#6B7380;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ct .del{color:#9AA4B4;font-size:11.5px}
+  .foot{flex:none;height:56px;display:flex;align-items:center;gap:10px;padding:0 16px;border-top:1px solid #D7D9DE;background:#F7F7F7}
+  .foot .path{font-size:10.5px;color:#8A93A2;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .foot .btn{height:32px;min-width:96px;font-size:12.5px}
+  .note{width:792px;margin:8px auto 0;font-size:11px;color:#5C6472;text-align:center}
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="title">上班工具箱 · 设置 <span class="x">✕</span></div>
+  <div class="tabs">
+    <div class="tab">考勤</div><div class="tab">固定</div><div class="tab">提醒</div><div class="tab">外观</div>
+    <div class="tab">日程</div><div class="tab">工资</div><div class="tab on">纸条</div>
+  </div>
+  <div class="body">
+    <div class="card">
+      <h3>会话面板样式</h3>
+      <div class="hint">选 A 抽屉式（和卡片同一族）或 C 极简双栏（更像桌面 IM）；立刻生效，动画两边一致。</div>
+      <div class="styles">
+        <div class="style on">
+          <div class="thumb">
+            <span class="badge">A · 抽屉式</span>
+            <div class="tcard"></div>
+            <div class="tpanel" style="right:96px;top:24px;width:96px;height:56px">
+              <div class="tline" style="left:8px;top:10px;width:38px"></div>
+              <div class="tline" style="left:8px;top:18px;width:56px;opacity:.6"></div>
+              <div class="tline" style="left:8px;top:26px;width:48px;opacity:.4"></div>
+              <div class="tac" style="left:8px;top:40px;width:44px"></div>
+            </div>
+          </div>
+          <div class="nm"><span class="dot"></span>抽屉式（A）</div>
+          <div class="ds">392 宽抽屉、横排联系人胶囊、紧凑轮列表；和右键胶囊菜单同一套边线。</div>
+        </div>
+        <div class="style">
+          <div class="thumb">
+            <span class="badge">C · 极简双栏</span>
+            <div class="tcard"></div>
+            <div class="tpanel" style="right:96px;top:16px;width:112px;height:72px;display:flex">
+              <div style="width:32px;border-right:1px solid rgba(242,204,19,.22);padding:7px 4px">
+                <div class="tline" style="position:static;margin-bottom:5px;width:22px"></div>
+                <div class="tline" style="position:static;margin-bottom:5px;width:18px;opacity:.6"></div>
+                <div class="tline" style="position:static;width:20px;opacity:.4"></div>
+              </div>
+              <div style="flex:1;padding:8px 6px">
+                <div class="tline" style="position:static;margin-bottom:5px;width:40px"></div>
+                <div class="tline" style="position:static;margin-bottom:5px;width:32px;opacity:.6"></div>
+                <div class="tac" style="position:static;width:28px;margin-top:6px"></div>
+              </div>
+            </div>
+          </div>
+          <div class="nm"><span class="dot"></span>极简双栏（C）</div>
+          <div class="ds">470 宽双栏、左栏竖排胶囊、右栏对话；留白更大，联系人多了更好扫。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>本机 ID</h3>
+      <div class="row">
+        <span class="lbl">我的 ID</span>
+        <span class="idbig">48372</span>
+        <button class="btn">复制</button>
+        <button class="btn">重新生成…</button>
+      </div>
+      <p class="hint">每台安装的电脑一个 5 位数，没有账号；别人在小纸条里输入它就能加你。重装 / 重新生成后 ID 会变，旧联系人需要重新加。</p>
+    </div>
+
+    <div class="card">
+      <h3>公共中继</h3>
+      <div class="row">
+        <span class="lbl">中继地址</span>
+        <div class="field" style="flex:1"><input value="broker.hivemq.com"><span class="port">1883</span></div>
+        <button class="btn">测试连接</button>
+        <span class="status"><i></i>已连接</span>
+      </div>
+      <p class="hint">默认用公共 MQTT 中继：只按 ID 转发消息，不做账号、不保存聊天记录；换自己的服务器就改地址。消息内容在公共网络上不加密，别发密码等敏感内容。</p>
+    </div>
+
+    <div class="card">
+      <h3>联系人</h3>
+      <div class="contacts">
+        <div class="ct"><span class="av">哲</span><span class="nm">阿哲</span><span class="cid">62015</span><span class="last">晚上的评审推迟到 8 点 · 17:41</span><button class="del">删除</button></div>
+        <div class="ct"><span class="av">满</span><span class="nm">小满</span><span class="cid">11788</span><span class="last">文档我改完了，你再看下 · 16:58</span><button class="del">删除</button></div>
+        <div class="ct"><span class="av">周</span><span class="nm">老周</span><span class="cid">90554</span><span class="last">楼下咖啡机又坏了 · 15:20</span><button class="del">删除</button></div>
+      </div>
+      <div class="row"><button class="btn">＋ 添加联系人…</button><span class="hint" style="margin:0">添加时填对方的 5 位 ID 和备注；每对 ID 只留最近 8 条消息。</span></div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="path">配置存在 C:\Users\xlean\AppData\Roaming\WorkCountdown\settings.json</span>
+    <button class="btn">取消</button>
+    <button class="btn primary">保存</button>
+  </div>
+</div>
+<div class="note">设置 → 纸条（第 7 个页签）：样式 A/C、我的 ID、公共中继、联系人。页签宽度从 84 调到 64，7 个刚好放下。</div>
+</body>
+</html>

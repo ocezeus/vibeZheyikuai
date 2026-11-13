@@ -1,7 +1,7 @@
 ﻿param(
     [string]$Out = 'dlg.png',
     [int]$Tab = 0,
-    [string]$Title = '下班倒计时 · 设置'
+    [string]$Title = '上班工具箱 · 设置'
 )
 
 # 打开设置对话框并把它打印成图片（不做真实截屏，窗口被遮挡也没关系）
@@ -51,7 +51,7 @@ function Find-Window([string]$want) {
     return $script:found
 }
 
-$widget = Find-Window '下班倒计时'
+$widget = Find-Window '上班工具箱'
 if ($widget -eq [IntPtr]::Zero) { throw '没有找到悬浮窗' }
 
 # 点右上角齿轮（未展开先点一下卡片展开）

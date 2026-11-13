@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>右键气泡菜单 · 竖排胶囊</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#EDF0F6;font-family:"Microsoft YaHei","Segoe UI",sans-serif;color:#1B2230}
+  button{font-family:inherit;border:0;background:none;padding:0;color:inherit;cursor:pointer}
+  .bubble,.panel,.sw,.row,.chip,.more,.card{user-select:none}
+
+  /* ---------- 页头 ---------- */
+  .head{max-width:1010px;margin:0 auto;padding:34px 24px 4px}
+  .kicker{font:600 11px/1 "Bahnschrift",sans-serif;letter-spacing:.28em;color:#7A8498}
+  h1{margin:12px 0 8px;font-size:26px;letter-spacing:-.01em}
+  .lede{margin:0;color:#5C6779;font-size:13.5px;line-height:1.85;max-width:880px}
+  .lede b{color:#1B2230;font-weight:600}
+  .lede code{font:600 11.5px/1.4 "Bahnschrift",monospace;color:#1B2230;background:#E2E7F0;border-radius:4px;padding:1px 5px}
+  .tips{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0 2px}
+  .tips span{font-size:11.5px;color:#5C6779;background:#fff;border-radius:999px;padding:6px 12px;box-shadow:0 1px 2px rgba(20,28,44,.06)}
+  .tips b{color:#1B2230}
+
+  /* ---------- 舞台 ---------- */
+  .stage{max-width:1010px;margin:0 auto;padding:0 24px}
+  .shead{display:flex;align-items:baseline;gap:10px;margin:26px 0 10px}
+  .shead .no{font:700 11px/1 "Bahnschrift",sans-serif;color:#8B94A6;letter-spacing:.14em}
+  .shead h2{margin:0;font-size:16px;letter-spacing:-.01em}
+  .shead p{margin:0;font-size:12.5px;color:#5C6779}
+  .viewport{width:960px;height:540px;overflow:hidden;border-radius:14px;box-shadow:0 18px 50px rgba(15,20,32,.2)}
+  .view{width:1280px;height:720px;transform:scale(.75);transform-origin:0 0}
+  .cap{margin:9px 0 0;font-size:12.5px;line-height:1.75;color:#5C6779}
+  .cap b{color:#1B2230}
+
+  /* ---------- 屏幕 / 桌面 ---------- */
+  .screen{--cw:224px;--ch:68px;--ct:#140B0B;--cb:#1F1212;--tx:#F5EEEE;--mu:rgba(245,238,238,.62);--dm:rgba(245,238,238,.4);--ac:#ffffff;--pac:#ffffff;--trk:rgba(255,255,255,.16);
+    position:relative;width:1280px;height:720px;overflow:hidden;
+    background:
+      radial-gradient(70% 80% at 6% 0%,rgba(255,255,255,.96),transparent 58%),
+      radial-gradient(55% 65% at 96% 92%,rgba(190,208,236,.78),transparent 60%),
+      linear-gradient(152deg,#F3F5F9 0%,#E6EAF2 52%,#DCE2EC 100%)}
+  .screen::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+    background:radial-gradient(120% 90% at 50% 42%,transparent 55%,rgba(76,92,120,.12) 100%)}
+  .win{position:absolute;z-index:0;border-radius:12px;background:rgba(255,255,255,.7);
+    border:1px solid rgba(255,255,255,.92);box-shadow:0 22px 46px rgba(30,42,64,.13)}
+  .win .wbar{height:36px;display:flex;align-items:center;gap:6px;padding:0 14px;border-bottom:1px solid rgba(20,28,44,.06)}
+  .win .wbar i{width:8px;height:8px;border-radius:50%;background:#CBD3E1}
+  .win .wbody{padding:18px 20px;display:flex;flex-direction:column;gap:11px}
+  .win .wbody b{display:block;height:9px;border-radius:5px;background:#E4E9F1}
+  .win .wbody b.h{height:15px;background:#D8DFEA;width:42%!important}
+  .w1{left:664px;top:96px;width:560px;height:330px}
+  .w2{left:836px;top:466px;width:420px;height:200px;background:rgba(255,255,255,.55)}
+
+  /* ---------- 卡片 ---------- */
+  .card{position:absolute;left:0;top:326px;width:var(--cw);height:var(--ch);border-radius:14px;z-index:3;
+    background:linear-gradient(180deg,var(--ct),var(--cb));color:var(--tx);
+    box-shadow:0 18px 42px rgba(18,24,38,.36),inset 0 1px 0 rgba(255,255,255,.07);
+    transition:width .34s cubic-bezier(.22,.9,.28,1),height .34s cubic-bezier(.22,.9,.28,1)}
+  .screen.bigcard{--cw:280px;--ch:190px}
+  .mini{position:absolute;inset:0;opacity:1;transition:opacity .18s ease}
+  .card.big .mini{opacity:0}
+  .mini .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:var(--ac);
+    box-shadow:0 0 7px var(--ac)}
+  .mini .lab{position:absolute;left:24px;top:8px;font-size:9.5px;color:var(--mu);letter-spacing:.02em}
+  .mini .rt{position:absolute;right:14px;top:8px;font-size:9.5px;color:var(--mu)}
+  .mini .num{position:absolute;left:12px;top:22px;font:700 23px/27px "Consolas",monospace;letter-spacing:.01em}
+  .bar{position:absolute;left:14px;right:14px;bottom:7px;height:3px;border-radius:2px;background:var(--trk);overflow:hidden}
+  .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,transparent),var(--ac))}
+
+  .card.big{width:280px;height:190px}
+  .bigface{position:absolute;inset:0;padding:12px 16px;display:flex;flex-direction:column;opacity:0;transition:opacity .18s ease}
+  .card.big .bigface{opacity:1;transition-delay:.07s}
+  .bigface .status{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--tx)}
+  .bigface .status .dot{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac)}
+  .bigface .tools{margin-left:auto;display:flex;gap:11px;color:var(--dm);font-size:12px}
+  .bigface .cap2{margin-top:9px;font-size:10.5px;color:var(--mu)}
+  .bigface .num2{font:700 34px/36px "Consolas",monospace;letter-spacing:.01em;margin-top:1px}
+  .bigface .bar2{margin-top:9px;position:relative;height:5px;border-radius:3px;background:var(--trk);overflow:hidden}
+  .bigface .bar2 i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,transparent),var(--ac))}
+  .bigface .sub{margin-top:7px;font-size:10.5px;color:var(--mu);display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .bigface .sub b{color:var(--tx);font-weight:600}
+  .bigface .sub .sd{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.5}
+  .bigface .extra{margin-top:auto;font-size:9.5px;color:var(--dm)}
+
+  /* ---------- 胶囊气泡：竖排，icon + 文字在同一个胶囊里 ---------- */
+  .bubbles{position:absolute;z-index:4;display:flex;flex-direction:column;gap:8px;pointer-events:none;
+    left:calc(var(--cw) + 14px);top:360px;transform:translateY(-50%)}
+  .screen[data-v="u"] .bubbles{width:124px}
+  .screen.bigcard .bubbles{top:421px}
+  .screen[data-v="u"] .bubble{width:100%}
+  .screen[data-v="h"] .bubbles{width:max-content;align-items:flex-start}
+  .bubble{position:relative;display:flex;align-items:center;gap:9px;height:40px;padding:0 14px 0 12px;
+    border-radius:20px;border:1px solid rgba(255,255,255,.12);
+    background:linear-gradient(180deg,rgba(46,38,38,.93),rgba(19,14,14,.96));
+    box-shadow:0 8px 22px rgba(10,14,22,.32),inset 0 1px 0 rgba(255,255,255,.12);
+    color:rgba(245,238,238,.9);font-size:11.5px;letter-spacing:.01em;white-space:nowrap;
+    opacity:0;transform:translateX(-12px) scale(.92);transition:none}
+  .bubbles.on .bubble{opacity:1;transform:none;pointer-events:auto;
+    transition:opacity .18s ease,transform .4s cubic-bezier(.2,1.45,.36,1),
+      background .16s ease,border-color .16s ease,color .16s ease}
+  .bubbles.on .bubble:nth-child(1){transition-delay:.03s}
+  .bubbles.on .bubble:nth-child(2){transition-delay:.10s}
+  .bubbles.on .bubble:nth-child(3){transition-delay:.17s}
+  .bubbles.on .bubble:nth-child(4){transition-delay:.24s}
+  .bubbles.has-panel .bubble{opacity:.62}
+  .bubbles.has-panel .bubble:nth-child(n){transition-delay:0s}
+  .bubbles.has-panel .bubble.active{opacity:1;border-color:color-mix(in srgb,var(--ac) 70%,transparent);
+    box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 38%,transparent),0 8px 22px rgba(10,14,22,.32),inset 0 1px 0 rgba(255,255,255,.12)}
+  .bubbles.has-panel .bubble.active .pico{color:var(--ac)}
+  .bubbles.on .bubble:hover{transform:translateX(3px);border-color:rgba(255,255,255,.28);
+    background:linear-gradient(180deg,rgba(64,52,52,.96),rgba(27,20,20,.98))}
+  .bubble .pico{width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center;
+    color:rgba(245,238,238,.72);transition:color .16s ease}
+  .bubble .pico svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .bubble:hover .pico{color:var(--ac)}
+  .bubble .ptxt{line-height:1}
+  .bubble.on{border-color:color-mix(in srgb,var(--ac) 70%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 38%,transparent),0 8px 22px rgba(10,14,22,.32),inset 0 1px 0 rgba(255,255,255,.12);color:rgba(245,238,238,1)}
+  .bubble.on .pico{color:var(--ac)}
+
+  /* ---------- 延展窗口：从被点胶囊的右侧长出来，胶囊本身留着 ---------- */
+  .panel{position:absolute;z-index:5;width:246px;height:var(--ph,178px);border-radius:18px;overflow:hidden;
+    background:linear-gradient(180deg,rgba(40,32,32,.975),rgba(15,11,11,.985));
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:0 26px 64px rgba(8,12,20,.48),inset 0 1px 0 rgba(255,255,255,.1);
+    opacity:0;pointer-events:none;transform-origin:0 30px;transform:scale(.18,.22);
+    transition:transform .34s cubic-bezier(.22,.9,.28,1),opacity .16s ease}
+  .panel.on{opacity:1;pointer-events:auto;transform:none}
+  .pbody{padding:14px;opacity:0;transition:opacity .16s ease}
+  .panel.on .pbody{opacity:1;transition-delay:.14s}
+  .ph{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .ph .pico{width:30px;height:30px;border-radius:10px;background:rgba(255,255,255,.08);color:var(--pac);
+    display:flex;align-items:center;justify-content:center;flex:none}
+  .ph .pico svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .ph b{display:block;font-size:13px;font-weight:600;color:#F5EEEE;line-height:1.25}
+  .ph em{display:block;font-style:normal;font-size:10px;color:rgba(245,238,238,.5);line-height:1.4;margin-top:2px}
+
+  .swatches{display:grid;grid-template-columns:repeat(4,44px);justify-content:space-between;row-gap:10px}
+  .sw{position:relative;width:44px;height:26px;border-radius:6px;
+    background:linear-gradient(180deg,var(--st),var(--sbm));overflow:hidden;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 2px 6px rgba(0,0,0,.28);
+    transition:transform .16s ease}
+  .sw::after{content:"";position:absolute;left:2px;right:2px;bottom:2px;height:3px;border-radius:2px;background:var(--sa)}
+  .sw::before{content:"";position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(255,255,255,.16),transparent 55%)}
+  .sw:hover{transform:translateY(-1px) scale(1.04)}
+  .sw.sel{box-shadow:inset 0 0 0 1px rgba(255,255,255,.2),0 0 0 2px var(--pac)}
+  .more{display:flex;align-items:center;gap:5px;margin-top:12px;font-size:11px;color:var(--pac);opacity:.92}
+  .more svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .more:hover{opacity:1}
+
+  .row{display:flex;align-items:center;gap:9px;width:100%;height:40px;padding:0 11px;border-radius:11px;
+    background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.07);color:#F5EEEE;
+    font-size:12px;margin-top:8px;transition:background .15s ease,border-color .15s ease}
+  .row:first-of-type{margin-top:0}
+  .row:hover{background:rgba(255,255,255,.11);border-color:rgba(255,255,255,.18)}
+  .row .ricon{width:18px;height:18px;color:var(--pac);flex:none;display:flex;align-items:center}
+  .row .ricon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .row em{font-style:normal;font-size:9.5px;color:rgba(245,238,238,.45);margin-left:2px}
+  .row .kbd{margin-left:auto;min-width:20px;height:20px;padding:0 5px;border-radius:6px;
+    background:rgba(255,255,255,.1);font:600 10px/20px "Bahnschrift",sans-serif;text-align:center;
+    color:rgba(255,255,255,.72)}
+  .fine{margin:10px 0 0;font-size:9.5px;line-height:1.5;color:rgba(245,238,238,.38)}
+
+  .field{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border-radius:9px;
+    background:rgba(255,255,255,.05);border:1px dashed rgba(255,255,255,.17);color:#F5EEEE;font-size:11.5px}
+  .field span{font-size:9.5px;color:rgba(245,238,238,.45)}
+  .field b{font-weight:600}
+  .field .pencil{margin-left:auto;color:var(--pac);opacity:.85;display:flex}
+  .field .pencil svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .plabel{margin:10px 0 0;font-size:9.5px;color:rgba(245,238,238,.42)}
+  .chips{display:flex;gap:7px;margin-top:6px}
+  .chip{flex:1;height:46px;border-radius:10px;background:rgba(255,255,255,.055);
+    border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:1px;color:#F5EEEE;transition:background .15s ease,border-color .15s ease}
+  .chip b{font-size:11px;font-weight:600}
+  .chip em{font-style:normal;font-size:9px;color:rgba(245,238,238,.45);font-family:"Bahnschrift",sans-serif}
+  .chip:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.2)}
+
+  /* ---------- toast / 提示 ---------- */
+  .toast{position:absolute;left:50%;bottom:34px;z-index:6;transform:translate(-50%,10px);
+    display:flex;align-items:center;gap:8px;height:34px;padding:0 15px;border-radius:999px;
+    background:rgba(20,16,16,.94);border:1px solid rgba(255,255,255,.1);color:#F5EEEE;font-size:11.5px;
+    box-shadow:0 14px 34px rgba(8,12,20,.35);opacity:0;pointer-events:none;
+    transition:opacity .18s ease,transform .18s ease}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .toast svg{width:14px;height:14px;color:#7FE08A;flex:none;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  .hint{position:absolute;right:18px;bottom:16px;z-index:2;font-size:11px;color:rgba(27,34,48,.4);letter-spacing:.02em}
+  .hint b{color:rgba(27,34,48,.62);font-weight:600}
+
+  /* ---------- 说明 ---------- */
+  .notes{max-width:1010px;margin:30px auto 44px;padding:16px 20px;background:#fff;border-radius:10px;
+    font-size:12.5px;line-height:1.95;color:#5C6779}
+  .notes b{color:#1B2230}
+  .notes ul{margin:6px 0 0;padding-left:18px}
+  .notes code{font:600 11.5px/1.4 "Bahnschrift",monospace;color:#1B2230}
+  .notes .row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+  /* ---------- 单屏模式 ---------- */
+  body.snap .head,body.snap .shead,body.snap .cap,body.snap .notes{display:none}
+  body.snap .stage{padding:0;margin:0;max-width:none}
+  body.snap .viewport{width:1280px;height:720px;border-radius:0;box-shadow:none}
+  body.snap .view{transform:none}
+  body.only-u .stage-h{display:none}
+  body.only-h .stage-u{display:none}
+
+  /* 出图用：关掉补间，免得无头浏览器把过渡停在第一帧 */
+  body.static .card,body.static .bubbles,body.static .bubble,body.static .panel,body.static .pbody,body.static .toast{transition:none!important}
+</style>
+</head>
+<body>
+<div class="head">
+  <div class="kicker">WORK COUNTDOWN · CARD SHORTCUT CAPSULES</div>
+  <h1>右键气泡菜单：竖排胶囊，图标和文字在同一个气泡里</h1>
+  <p class="lede">在卡片上<b>右键</b>（小卡、大卡都行），贴着卡片右侧竖排弹出 <b>4 个胶囊气泡</b>，间隔 70ms 依次从卡片方向滑出：
+    新增日程 / 修改主题 / 触发上下班 / 窗口置顶。点<b>有选项</b>的胶囊，<b>胶囊本身留着</b>，从它右侧延展出一块面板，其余胶囊稍微淡一点；
+    点<b>没有选项</b>的（窗口置顶）直接切换，文字变成「已置顶」，只给一条 toast。点面板外、再右键或 Esc 收起。
+    胶囊颜色全部从当前主题取，换主题时卡片和胶囊一起变。</p>
+  <div class="tips">
+    <span>先<b>右键左边卡片</b>，再点胶囊试试</span>
+    <span>左键卡片 = 展开 / 收起</span>
+    <span>主题面板里点色卡会<b>真的换主题</b></span>
+    <span>Esc / 点空白处收起</span>
+  </div>
+</div>
+
+<section class="stage stage-u" data-v="u">
+  <div class="shead"><span class="no">A</span><h2>统一宽度</h2><p>4 个胶囊同宽 124，右端对齐，竖排更像一条动作清单</p></div>
+  <div class="viewport"><div class="view"><div class="screen"></div></div></div>
+  <p class="cap"><b>推荐。</b>胶囊宽度一致，竖排的右边缘是一条直线；icon 在左、文字在右，扫读顺序固定，和卡片只隔 14px。</p>
+</section>
+
+<section class="stage stage-h" data-v="h">
+  <div class="shead"><span class="no">B</span><h2>随内容宽度</h2><p>胶囊包住文字，长短不一，右端参差</p></div>
+  <div class="viewport"><div class="view"><div class="screen"></div></div></div>
+  <p class="cap">更轻、更像聊天气泡，但 4 个胶囊右端不齐，竖排时会显得松散；「触发上下班」比「新增日程」宽一截。</p>
+</section>
+
+<div class="notes">
+  <b>这版的行为</b>
+  <ul>
+    <li><b>胶囊：</b>40px 高、20 圆角，18px 线性图标 + 11.5px 文字，左右内边距 12 / 14，间距 8；深色玻璃 + 1px 内高光 + 投影，什么壁纸/主题上都读得清。</li>
+    <li><b>弹出：</b>每个胶囊从卡片方向 <code>translateX(-12px) + scale .92</code> 滑到位，<code>cubic-bezier(.2,1.5,.36,1)</code> 带一点回弹，相邻间隔 70ms；关闭时一起淡出。</li>
+    <li><b>延展：</b>胶囊不消失，被点的那颗点亮成强调色；246px 面板从它右侧「拉」出来（340ms，<code>cubic-bezier(.22,.9,.28,1)</code>，和抽屉同一条曲线），内容晚 140ms 淡入；其余胶囊降到 62%。</li>
+    <li><b>窗口置顶：</b>没有二级选项，点一下直接切换；胶囊文字变「已置顶」、边框和图标点亮，并给一条 toast。</li>
+    <li><b>主题：</b>面板里 8 个色卡（当前主题 + 7 套常用，另留「全部 39 套主题…」），点一下立刻换，卡片、胶囊、面板强调色一起变。</li>
+    <li><b>上下班：</b>两行「上班打卡 / 下班打卡」，右边标着飞书里要发的「1 / 2」；没配好会话时回到设置提示。</li>
+    <li><b>新增日程：</b>默认标题「临时日程」+ 30 分钟，点 +15 / +30 / +60 分钟直接建；标题、地点、时长留给「详细编辑…」。</li>
+  </ul>
+  <div class="row2" style="margin-top:12px">
+    <div><b>落地方式</b><br>新增 <code>src/BubbleMenuForm.cs</code> 分层窗（和 DrawerForm 同一套 ULW 渲染）；4 个胶囊命中区 + 一个可长大的面板。主题直接写 <code>settings.ui.theme</code>；上下班复用 <code>SendClock</code>；日程写 <code>settings.events</code>；置顶改 <code>ui.alwaysOnTop</code> 后调 <code>KeepTopMost()</code>。托盘右键仍走原来的 <code>BuildMenu</code>。</div>
+    <div><b>还需要你定</b><br>① 统一宽度（A）还是随内容宽（B）；② 主题面板是 8 个常用 + 「全部…」，还是直接铺 39 套；③ 胶囊文字要不要再大一号（当前 11.5px）。</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var ICONS = {
+    schedule:'<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3.5"/><path d="M8 3v4M16 3v4M3.5 9.5h17"/><path d="M12 13.4v4.6M9.7 15.7h4.6"/></svg>',
+    theme:'<svg viewBox="0 0 24 24"><path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.15 0 1.9-.78 1.9-1.82 0-.55-.26-.98-.55-1.35-.3-.38-.52-.76-.52-1.22 0-.94.78-1.62 1.74-1.62h1.55c1.95 0 3.48-1.48 3.48-3.52 0-4.1-3.42-7.67-7.6-7.67Z"/><circle cx="8.1" cy="10.2" r="1.15"/><circle cx="12" cy="7.7" r="1.15"/><circle cx="15.9" cy="10.2" r="1.15"/></svg>',
+    clock:'<svg viewBox="0 0 24 24"><circle cx="10.6" cy="12" r="7.4"/><path d="M10.6 8v4.2l2.7 1.6"/><path d="M18.4 13.6h3.4M19.6 11.2l2.4 2.4-2.4 2.4"/></svg>',
+    pin:'<svg viewBox="0 0 24 24"><path d="M4.2 5.2h15.6"/><path d="M12 19.2V9.4"/><path d="M7.6 13.8 12 9.4l4.4 4.4"/></svg>',
+    pencil:'<svg viewBox="0 0 24 24"><path d="M4 20h4l10.2-10.2a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="M13.6 7.4l3 3"/></svg>',
+    arrow:'<svg viewBox="0 0 24 24"><path d="M5 12h13M13.5 6.8 18.7 12l-5.2 5.2"/></svg>',
+    check:'<svg viewBox="0 0 24 24"><path d="M20 6.5 9.4 17.1 4 11.7"/></svg>'
+  };
+
+  var THEMES = [
+    {name:'我的主题', top:'#140B0B', bottom:'#1F1212', ac:'#FFFFFF'},
+    {name:'经典 · 午夜蓝', top:'#12161F', bottom:'#1B2130', ac:'#4C8DFF'},
+    {name:'经典 · 极光青', top:'#0E1A1C', bottom:'#15292A', ac:'#2FD4C4'},
+    {name:'经典 · 落日橙', top:'#211610', bottom:'#2E2019', ac:'#FF9A5A'},
+    {name:'经典 · 樱花粉', top:'#20141A', bottom:'#2E1E27', ac:'#FF7FA8'},
+    {name:'经典 · 松林绿', top:'#101C15', bottom:'#18291F', ac:'#5FD08A'},
+    {name:'绿 · 孔雀', top:'#001109', bottom:'#001E0F', ac:'#0FA35C'},
+    {name:'白 · 鱼肚', top:'#F7F4ED', bottom:'#E6E3DC', ac:'#8A6A4F'}
+  ];
+
+  var ACTS = [
+    {id:'schedule', label:'新增日程'},
+    {id:'theme',    label:'修改主题'},
+    {id:'clock',    label:'触发上下班'},
+    {id:'pin',      label:'窗口置顶'}
+  ];
+
+  var PH = {theme:178, clock:196, schedule:226};
+
+  function qs(s, r){ return (r||document).querySelector(s); }
+  function qsa(s, r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); }
+
+  function pad2(n){ return n<10 ? '0'+n : ''+n; }
+  function hhmm(d){ return pad2(d.getHours())+':'+pad2(d.getMinutes()); }
+
+  function cardHTML(){
+    return '<div class="card">'+
+      '<div class="mini">'+
+        '<span class="dot"></span><span class="lab">距离下班</span><span class="rt">下班 20:04</span>'+
+        '<div class="num">05:30:56</div>'+
+        '<div class="bar"><i style="width:62%"></i></div>'+
+      '</div>'+
+      '<div class="bigface">'+
+        '<div class="status"><span class="dot"></span>工作中'+
+          '<span class="tools"><span>⚙</span><span>⟳</span><span>›</span></span></div>'+
+        '<div class="cap2">距离下班</div>'+
+        '<div class="num2">05:30:43</div>'+
+        '<div class="bar2"><i style="width:62%"></i></div>'+
+        '<div class="sub">上班 <b>09:34</b> · 预计下班 <b>20:04</b></div>'+
+        '<div class="sub"><span style="width:5px;height:5px;border-radius:50%;background:var(--ac)"></span>午休 <b>11:50–13:30</b><span class="sd"></span>已结束</div>'+
+        '<div class="extra">已工作 4h59m · 应勤 10h30m</div>'+
+      '</div>'+
+    '</div>';
+  }
+
+  function bubblesHTML(){
+    return '<div class="bubbles">'+ACTS.map(function(a){
+      return '<button class="bubble" data-act="'+a.id+'" type="button">'+
+        '<span class="pico">'+ICONS[a.id]+'</span>'+
+        '<span class="ptxt">'+a.label+'</span>'+
+      '</button>';
+    }).join('')+'</div>';
+  }
+
+  function screenHTML(){
+    return (
+      '<div class="win w1"><div class="wbar"><i></i><i></i><i></i></div>'+
+        '<div class="wbody"><b class="h"></b><b style="width:88%"></b><b style="width:74%"></b><b style="width:81%"></b><b style="width:56%"></b></div></div>'+
+      '<div class="win w2"><div class="wbar"><i></i><i></i><i></i></div>'+
+        '<div class="wbody"><b class="h" style="width:30%"></b><b style="width:64%"></b><b style="width:52%"></b></div></div>'+
+      cardHTML()+bubblesHTML()+
+      '<div class="panel"><div class="pbody"></div></div>'+
+      '<div class="toast"></div>'+
+      '<div class="hint">右键卡片打开气泡 · <b>Esc</b> 收起</div>'
+    );
+  }
+
+  /* ---------- 主题换算：和 Models.Themes 同一套规则 ---------- */
+  function hex2rgb(h){
+    h = String(h||'').replace('#','');
+    return {r:parseInt(h.substr(0,2),16), g:parseInt(h.substr(2,2),16), b:parseInt(h.substr(4,2),16)};
+  }
+  function mix(a,b,t){
+    return {r:Math.round(a.r+(b.r-a.r)*t), g:Math.round(a.g+(b.g-a.g)*t), b:Math.round(a.b+(b.b-a.b)*t)};
+  }
+  function rgb(c){ return 'rgb('+c.r+','+c.g+','+c.b+')'; }
+  function rgba(c,a){ return 'rgba('+c.r+','+c.g+','+c.b+','+a+')'; }
+  function applyTheme(screen, t){
+    var top = hex2rgb(t.top), bottom = hex2rgb(t.bottom);
+    var W = {r:255,g:255,b:255}, B = {r:0,g:0,b:0};
+    var lum = (0.2126*top.r + 0.7152*top.g + 0.0722*top.b) / 255;
+    var light = lum > 0.56;
+    var text = light ? mix(top,B,.86) : mix(top,W,.90);
+    // 面板永远是深色玻璃：浅色主题里偏暗的强调色要先提亮，否则图标和链接读不出来
+    var ac = hex2rgb(t.ac);
+    var acLum = (0.2126*ac.r + 0.7152*ac.g + 0.0722*ac.b) / 255;
+    var pac = acLum < 0.42 ? mix(ac, W, .55) : ac;
+    screen.style.setProperty('--ct', rgb(top));
+    screen.style.setProperty('--cb', rgb(bottom));
+    screen.style.setProperty('--tx', rgb(text));
+    screen.style.setProperty('--mu', rgba(text, light?.55:.62));
+    screen.style.setProperty('--dm', rgba(text, light?.38:.44));
+    screen.style.setProperty('--trk', rgba(text, light?.18:.16));
+    screen.style.setProperty('--ac', t.ac);
+    screen.style.setProperty('--pac', rgb(pac));
+  }
+
+  /* ---------- 面板内容 ---------- */
+  function header(icon, title, sub){
+    return '<div class="ph"><span class="pico">'+ICONS[icon]+'</span><div><b>'+title+'</b><em>'+sub+'</em></div></div>';
+  }
+
+  function panelTheme(screen){
+    var cur = screen._st.theme;
+    return header('theme','修改主题','当前：'+THEMES[cur].name)+
+      '<div class="swatches">'+THEMES.map(function(t,i){
+        return '<button class="sw'+(i===cur?' sel':'')+'" data-theme="'+i+'" title="'+t.name+'" type="button" '+
+          'style="--st:'+t.top+';--sbm:'+t.bottom+';--sa:'+t.ac+'"></button>';
+      }).join('')+'</div>'+
+      '<button class="more" type="button"><span>全部 39 套主题…</span>'+ICONS.arrow+'</button>';
+  }
+
+  function panelClock(){
+    return header('clock','触发上下班','以你本人身份发飞书消息')+
+      '<button class="row" data-k="1" data-label="上班打卡" type="button">'+
+        '<span class="ricon">'+ICONS.clock+'</span><span>上班打卡</span><em>09:34 已打</em><span class="kbd">1</span></button>'+
+      '<button class="row" data-k="2" data-label="下班打卡" type="button">'+
+        '<span class="ricon">'+ICONS.clock+'</span><span>下班打卡</span><span class="kbd">2</span></button>'+
+      '<p class="fine">没配飞书会话时会提示先去设置里填。</p>';
+  }
+
+  function panelSchedule(screen){
+    var now = new Date();
+    function t(m){ return hhmm(new Date(now.getTime()+m*60000)); }
+    return header('schedule','新增日程','默认 30 分钟 · 可再详细编辑')+
+      '<div class="field"><span>标题</span><b>临时日程</b><span class="pencil">'+ICONS.pencil+'</span></div>'+
+      '<p class="plabel">从什么时候开始</p>'+
+      '<div class="chips">'+
+        '<button class="chip" data-min="15" type="button"><b>+15 分钟</b><em>'+t(15)+'</em></button>'+
+        '<button class="chip" data-min="30" type="button"><b>+30 分钟</b><em>'+t(30)+'</em></button>'+
+        '<button class="chip" data-min="60" type="button"><b>+1 小时</b><em>'+t(60)+'</em></button>'+
+      '</div>'+
+      '<button class="more" type="button"><span>详细编辑（标题 / 时长 / 地点）…</span>'+ICONS.arrow+'</button>';
+  }
+
+  var PANELS = { theme: panelTheme, clock: panelClock, schedule: panelSchedule };
+
+  /* ---------- 状态 ---------- */
+  function st(screen){ return screen._st; }
+
+  function toast(screen, msg){
+    var el = qs('.toast', screen);
+    el.innerHTML = ICONS.check + '<span>'+msg+'</span>';
+    el.classList.add('show');
+    clearTimeout(screen._toastT);
+    screen._toastT = setTimeout(function(){ el.classList.remove('show'); }, 1800);
+  }
+
+  function syncPin(screen){
+    var b = qs('.bubble[data-act="pin"]', screen);
+    if (!b) return;
+    b.classList.toggle('on', st(screen).pinned);
+    qs('.ptxt', b).textContent = st(screen).pinned ? '已置顶' : '窗口置顶';
+  }
+
+  function closePanel(screen){
+    qs('.panel', screen).classList.remove('on');
+    screen._st.act = null;
+  }
+
+  function closeAll(screen){
+    var bubbles = qs('.bubbles', screen);
+    bubbles.classList.remove('on','has-panel');
+    qsa('.bubble', screen).forEach(function(b){ b.classList.remove('active','dim'); });
+    closePanel(screen);
+    clearTimeout(screen._pinT);
+  }
+
+  function openMenu(screen){
+    var bubbles = qs('.bubbles', screen);
+    closeAll(screen);
+    void bubbles.offsetWidth;                 // 重放逐个滑出的动画
+    bubbles.classList.add('on');
+    syncPin(screen);
+  }
+
+  function placePanel(screen, act){
+    var panel = qs('.panel', screen);
+    var bubbles = qs('.bubbles', screen);
+    var sr = screen.getBoundingClientRect();
+    var k = sr.width / 1280;
+    var W = 246, H = PH[act];
+    var ur = bubbles.getBoundingClientRect();
+    var br = qs('.bubble[data-act="'+act+'"]', screen).getBoundingClientRect();
+    var bubblesRight = (ur.right - sr.left) / k;
+    var by = (br.top - sr.top) / k;
+    var bh = br.height / k;
+    var x = bubblesRight + 10;
+    var y = by + bh/2 - 30;
+    x = Math.max(12, Math.min(x, 1280 - W - 12));
+    y = Math.max(12, Math.min(y, 720 - H - 12));
+    panel.style.left = x + 'px';
+    panel.style.top = y + 'px';
+    panel.style.setProperty('--ph', H + 'px');
+  }
+
+  function openPanel(screen, act, bubble){
+    var panel = qs('.panel', screen);
+    var pbody = qs('.pbody', panel);
+    screen._st.act = act;
+    pbody.innerHTML = PANELS[act](screen);
+    var bubbles = qs('.bubbles', screen);
+    bubbles.classList.add('has-panel');
+    qsa('.bubble', screen).forEach(function(b){
+      b.classList.toggle('active', b === bubble);
+      b.classList.toggle('dim', b !== bubble);
+    });
+    panel.classList.remove('on');
+    placePanel(screen, act);
+    void panel.offsetWidth;
+    requestAnimationFrame(function(){ panel.classList.add('on'); });
+  }
+
+  function pickTheme(screen, idx){
+    var t = THEMES[idx];
+    screen._st.theme = idx;
+    applyTheme(screen, t);
+    qsa('.sw', screen).forEach(function(s,i){ s.classList.toggle('sel', i===idx); });
+    var em = qs('.panel .ph em', screen);
+    if (em) em.textContent = '当前：' + t.name;
+    toast(screen, '已切换主题 · ' + t.name);
+  }
+
+  function wire(screen){
+    screen._st = {pinned:false, theme:0, act:null};
+    var card = qs('.card', screen);
+    var bubbles = qs('.bubbles', screen);
+    var panel = qs('.panel', screen);
+
+    card.addEventListener('contextmenu', function(e){
+      e.preventDefault();
+      openMenu(screen);
+    });
+
+    card.addEventListener('click', function(){
+      card.classList.toggle('big');
+      screen.classList.toggle('bigcard');
+      closeAll(screen);
+    });
+
+    bubbles.addEventListener('click', function(e){
+      var b = e.target.closest('.bubble');
+      if (!b) return;
+      var act = b.dataset.act;
+      if (act === 'pin'){
+        screen._st.pinned = !screen._st.pinned;
+        syncPin(screen);
+        toast(screen, screen._st.pinned ? '已置顶 · 窗口会保持最上层' : '已取消置顶 · 跟随普通窗口');
+        clearTimeout(screen._pinT);
+        screen._pinT = setTimeout(function(){ closeAll(screen); }, 1200);
+        return;
+      }
+      openPanel(screen, act, b);
+    });
+
+    panel.addEventListener('click', function(e){
+      var sw = e.target.closest('.sw');
+      if (sw){ pickTheme(screen, parseInt(sw.dataset.theme, 10)); return; }
+
+      var row = e.target.closest('.row');
+      if (row){
+        toast(screen, '已发送「'+row.dataset.k+'」· '+row.dataset.label);
+        clearTimeout(screen._pinT);
+        screen._pinT = setTimeout(function(){ closeAll(screen); }, 1100);
+        return;
+      }
+
+      var chip = e.target.closest('.chip');
+      if (chip){
+        var m = parseInt(chip.dataset.min, 10);
+        var start = new Date(Date.now() + m*60000);
+        var end = new Date(start.getTime() + 30*60000);
+        toast(screen, '已添加：临时日程 ' + hhmm(start) + '–' + hhmm(end));
+        clearTimeout(screen._pinT);
+        screen._pinT = setTimeout(function(){ closeAll(screen); }, 1200);
+        return;
+      }
+
+      if (e.target.closest('.more')) toast(screen, '将打开完整设置（原型演示）');
+    });
+
+    document.addEventListener('click', function(e){
+      if (!screen.contains(e.target)) return;    // 只收拾自己这块舞台
+      if (e.target.closest('.bubble') || e.target.closest('.panel') || e.target.closest('.card')) return;
+      closeAll(screen);
+    });
+
+    document.addEventListener('keydown', function(e){
+      if (e.key === 'Escape') closeAll(screen);
+    });
+  }
+
+  /* ---------- 初始化 ---------- */
+  var stageList = qsa('.stage');
+  stageList.forEach(function(stage){
+    var v = stage.dataset.v;
+    var screen = qs('.screen', stage);
+    screen.dataset.v = v;
+    screen.innerHTML = screenHTML();
+    wire(screen);
+  });
+
+  // 打开页面就先替用户右键一次：两版各自弹出胶囊，右键 / 点击照样能玩
+  if (new URLSearchParams(location.search).get('snap') !== '1'){
+    stageList.forEach(function(stage, i){
+      setTimeout(function(){ openMenu(qs('.screen', stage)); }, 350 + i * 220);
+    });
+  }
+
+  /* ---------- 单屏 / 指定状态（出图用） ---------- */
+  (function(){
+    var q = new URLSearchParams(location.search);
+    if (q.get('snap') === '1') document.body.classList.add('snap');
+    if (q.get('static') === '1') document.body.classList.add('static');
+    var v = q.get('v');
+    if (v) document.body.classList.add('only-' + v);
+
+    var state = q.get('state');
+    if (!state) return;
+    var stage = qs('.stage' + (v ? '.stage-' + v : '.stage-u'));
+    if (!stage) return;
+    var screen = qs('.screen', stage);
+
+    if (q.get('card') === 'big'){
+      qs('.card', screen).classList.add('big');
+      screen.classList.add('bigcard');
+    }
+
+    setTimeout(function(){
+      if (state === 'bubbles'){
+        openMenu(screen);
+      } else if (state === 'pin'){
+        openMenu(screen);
+        screen._st.pinned = true;
+        syncPin(screen);
+      } else {
+        openMenu(screen);
+        var b = qs('.bubble[data-act="'+state+'"]', screen);
+        if (b) openPanel(screen, state, b);
+      }
+      var pick = q.get('pick');
+      if (pick !== null) setTimeout(function(){ pickTheme(screen, parseInt(pick,10)); }, 260);
+    }, 40);
+  })();
+})();
+</script>
+</body>
+</html>

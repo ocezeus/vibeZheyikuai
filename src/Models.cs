@@ -8,6 +8,12 @@ using System.Web.Script.Serialization;
 
 namespace WorkCountdown
 {
+    /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
+    public static class AppInfo
+    {
+        public const string Version = "3.6.0";
+    }
+
     public class HolidayEntry
     {
         public string date { get; set; }   // yyyy-MM-dd
@@ -31,10 +37,46 @@ namespace WorkCountdown
     {
         public const string DateFormat = "yyyy-MM-dd HH:mm";
 
+        // 四类日程
+        public const string KindFixed = "fixed";       // 午休 / 晚休 / 下班 / 自建重复日程
+        public const string KindLark = "lark";         // 飞书日历里的会
+        public const string KindLocal = "local";       // 手动加的普通日程
+        public const string KindOutlook = "outlook";   // Outlook/Exchange 订阅来的
+
+        public static readonly string[] Kinds = new string[] { KindFixed, KindLark, KindLocal, KindOutlook };
+
+        public static string KindName(string kind)
+        {
+            if (kind == KindLark) return "飞书会议";
+            if (kind == KindOutlook) return "Outlook 日程";
+            if (kind == KindFixed) return "固定日程";
+            return "普通日程";
+        }
+
+        /// <summary>这条提醒属于哪一类日程（决定用哪套通知样式）。</summary>
+        public static string KindOf(ReminderEvent e)
+        {
+            if (e == null) return KindLocal;
+            if (e.source == "lark") return KindLark;
+            if (e.source == "outlook") return KindOutlook;
+            if (e.source == "break" || e.source == "alert") return KindFixed;
+            return KindLocal;
+        }
+
         /// <summary>飞书日历里的会算会议，手动加的是日程。</summary>
         public static bool IsMeeting(ReminderEvent e)
         {
             return e != null && e.source == "lark";
+        }
+
+        /// <summary>
+        /// 一条提醒用哪套配色：固定日程优先用它自己选的那套（旧规则），
+        /// 其余三类用「该类日程」的配色设置。
+        /// </summary>
+        public static string ColorIdOf(Settings s, ReminderEvent e, FixedSchedule fixedSched)
+        {
+            if (fixedSched != null && !string.IsNullOrWhiteSpace(fixedSched.styleId)) return fixedSched.styleId;
+            return s == null ? ReminderStyles.Follow : s.StyleOf(KindOf(e)).color;
         }
 
         public static DateTime ParseStart(ReminderEvent e)
@@ -78,8 +120,13 @@ namespace WorkCountdown
             return Math.Max(0, s.eventLeadMinutes);
         }
 
-        /// <summary>手动日程 + 飞书日程，按开始时间排序。</summary>
+        /// <summary>手动日程 + 飞书日程 + Outlook 日程，按开始时间排序。</summary>
         public static List<ReminderEvent> Merge(Settings s, List<ReminderEvent> larkEvents)
+        {
+            return Merge(s, larkEvents, null);
+        }
+
+        public static List<ReminderEvent> Merge(Settings s, List<ReminderEvent> larkEvents, List<ReminderEvent> outlookEvents)
         {
             var list = new List<ReminderEvent>();
             if (s.events != null)
@@ -90,6 +137,11 @@ namespace WorkCountdown
             if (s.calendarEnabled && larkEvents != null)
             {
                 foreach (var e in larkEvents)
+                    if (e != null && ParseStart(e) != DateTime.MinValue) list.Add(e);
+            }
+            if (s.outlook != null && s.outlook.HasEnabled && outlookEvents != null)
+            {
+                foreach (var e in outlookEvents)
                     if (e != null && ParseStart(e) != DateTime.MinValue) list.Add(e);
             }
             list.Sort(delegate (ReminderEvent a, ReminderEvent b) { return ParseStart(a).CompareTo(ParseStart(b)); });
@@ -103,6 +155,22 @@ namespace WorkCountdown
             if (start == DateTime.MinValue) return false;
             DateTime fire = start.AddMinutes(-LeadOf(s, e));
             return now >= fire && now < start.AddSeconds(60);
+        }
+
+        /// <summary>
+        /// 「补提醒」：日历同步/程序启动晚于开始时间时，严格窗口已经错过，
+        /// 但只要日程还没结束、且开始不超过 60 分钟，就补放一次（文案会显示「正在进行」）。
+        /// 这样 Outlook/飞书在会开始后才同步下来时，不会整场会都没有提醒。
+        /// </summary>
+        public static bool IsLateDue(Settings s, ReminderEvent e, DateTime now)
+        {
+            DateTime start = ParseStart(e);
+            if (start == DateTime.MinValue) return false;
+            if (now < start.AddSeconds(60)) return false;       // 还在正常窗口里
+            DateTime end = ParseEnd(e);
+            if (end == DateTime.MinValue || end <= start) end = start.AddMinutes(60);
+            if (now >= end) return false;                       // 已经结束了，不补
+            return (now - start).TotalMinutes <= 60;
         }
 
         public static ReminderEvent Next(Settings s, List<ReminderEvent> all, DateTime now)
@@ -141,6 +209,271 @@ namespace WorkCountdown
             botName = "考勤";  // 只是文案占位，设置里会改
             pollMinutes = 5;
             command = "lark-cli";
+        }
+    }
+
+    /// <summary>
+    /// 一个被订阅的日历。多份日历各自存来源、提前量和上次同步结果，
+    /// 一条拉失败不会影响其它日历。
+    /// </summary>
+    public class CalendarSource
+    {
+        public string id { get; set; }
+        public string name { get; set; }
+        public bool enabled { get; set; }
+        public string source { get; set; }      // url | file | graph
+        public string url { get; set; }         // 订阅地址（发布日历给的 .ics 链接）
+        public string path { get; set; }        // 本地 .ics 路径
+        public int leadMinutes { get; set; }    // 0 = 用全局默认
+        public string lastSync { get; set; }    // yyyy-MM-dd HH:mm
+        public string lastError { get; set; }
+        /// <summary>这个日历上次同步下来的日程（未来 14 天），存盘，重启后先拿它顶着。</summary>
+        public List<ReminderEvent> cached { get; set; }
+
+        public CalendarSource()
+        {
+            id = "";
+            name = "";
+            enabled = true;
+            source = "url";
+            url = "";
+            path = "";
+            leadMinutes = 0;
+            lastSync = "";
+            lastError = "";
+            cached = new List<ReminderEvent>();
+        }
+
+        public bool HasSource
+        {
+            get
+            {
+                if (source == "file") return !string.IsNullOrWhiteSpace(path);
+                if (source == "graph") return true;      // 登录状态在 OutlookSettings 上
+                return !string.IsNullOrWhiteSpace(url);
+            }
+        }
+
+        public string SourceName
+        {
+            get
+            {
+                if (source == "file") return "本地 .ics";
+                if (source == "graph") return "Outlook 登录";
+                return "订阅";
+            }
+        }
+
+        /// <summary>下拉 / 列表里的一行：名字 · 类型 · 提前 N 分。</summary>
+        public string DisplayName
+        {
+            get
+            {
+                string n = string.IsNullOrWhiteSpace(name) ? "未命名日历" : name;
+                string tail = leadMinutes > 0 ? "提前 " + leadMinutes + " 分" : "跟随默认提前";
+                return n + " · " + SourceName + " · " + tail;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Outlook / Exchange 日历：既可以订阅多份 .ics（发布日历链接 / 本地导出），
+    /// 也可以登录 Graph 读主日历。登录凭据是账号级的，日历列表在 calendars 里。
+    /// </summary>
+    public class OutlookSettings
+    {
+        public bool enabled { get; set; }       // 派生字段：只要有一份日历在同步就是 true
+        public string source { get; set; }      // 老配置字段（url | file | graph），只为迁移保留
+        public string url { get; set; }         // 老配置字段
+        public string path { get; set; }        // 老配置字段
+        public int leadMinutes { get; set; }    // 默认提前分钟数
+        public string lastSync { get; set; }    // yyyy-MM-dd HH:mm（所有日历里最近一次成功）
+        public string lastError { get; set; }
+        // Graph（登录）用：Azure 应用注册的 client ID、租户、账号显示名、DPAPI 加密的刷新令牌
+        public string clientId { get; set; }
+        public string tenant { get; set; }
+        public string account { get; set; }
+        public string refreshToken { get; set; }
+        public string tokenAt { get; set; }
+        /// <summary>所有日历的日程汇总（未来 14 天），给旧版本 / 托盘读缓存用。</summary>
+        public List<ReminderEvent> cached { get; set; }
+        /// <summary>订阅的日历列表（2.16 起：一份或多份）。</summary>
+        public List<CalendarSource> calendars { get; set; }
+
+        public OutlookSettings()
+        {
+            enabled = false;
+            source = "url";
+            url = "";
+            path = "";
+            leadMinutes = 10;
+            lastSync = "";
+            lastError = "";
+            clientId = "";
+            tenant = "common";
+            account = "";
+            refreshToken = "";
+            tokenAt = "";
+            cached = new List<ReminderEvent>();
+            calendars = new List<CalendarSource>();
+        }
+
+        public bool HasEnabled
+        {
+            get
+            {
+                if (calendars == null) return false;
+                foreach (var c in calendars)
+                    if (c != null && c.enabled && c.HasSource) return true;
+                return false;
+            }
+        }
+
+        public List<CalendarSource> Active
+        {
+            get
+            {
+                var list = new List<CalendarSource>();
+                if (calendars == null) return list;
+                foreach (var c in calendars)
+                    if (c != null && c.enabled && c.HasSource) list.Add(c);
+                return list;
+            }
+        }
+
+        public int CachedCount
+        {
+            get
+            {
+                int n = 0;
+                if (calendars != null)
+                    foreach (var c in calendars) if (c != null && c.cached != null) n += c.cached.Count;
+                return n;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 把 OutlookSettings 里所有启用的日历拉一遍：.ics 走网络/本地文件，graph 走登录令牌。
+    /// 每份日历各自更新 lastSync / lastError / cached，最后把结果汇总给调用方；
+    /// 一份失败不影响其它日历，错误串会带上日历名。
+    /// </summary>
+    public static class CalendarSync
+    {
+        public static List<ReminderEvent> Poll(OutlookSettings cfg, DateTime from, DateTime to, int timeoutMs, out string error)
+        {
+            var all = new List<ReminderEvent>();
+            error = "";
+            if (cfg == null) return all;
+            if (cfg.calendars == null) cfg.calendars = new List<CalendarSource>();
+
+            var errors = new List<string>();
+            int okCount = 0;
+            string newest = "";
+            foreach (var c in cfg.calendars)
+            {
+                if (c == null || !c.enabled || !c.HasSource) continue;
+                string oneError;
+                var list = Fetch(cfg, c, from, to, timeoutMs, out oneError);
+                if (list != null)
+                {
+                    c.cached = list;
+                    c.lastSync = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                    c.lastError = "";
+                    okCount++;
+                    if (c.lastSync.CompareTo(newest) > 0) newest = c.lastSync;
+                }
+                else
+                {
+                    c.lastError = oneError ?? "同步失败";
+                    errors.Add((string.IsNullOrWhiteSpace(c.name) ? "日历" : c.name) + "：" + c.lastError);
+                }
+            }
+
+            // 汇总用每份日历「最后一次成功」的缓存：某一份这次失败，也不该把它的日程从提醒池里抹掉
+            foreach (var c in cfg.calendars)
+            {
+                if (c == null || !c.enabled || !c.HasSource || c.cached == null) continue;
+                foreach (var e in c.cached) if (e != null) all.Add(e);
+            }
+            // 同一个 id 可能被两份日历都推下来（比如同一份日历订阅了两次），只留一条
+            all = Dedupe(all);
+            if (okCount > 0)
+            {
+                cfg.cached = all;
+                cfg.lastSync = newest;
+            }
+            cfg.lastError = errors.Count == 0 ? "" : string.Join("；", errors.ToArray());
+            cfg.enabled = cfg.HasEnabled;
+            if (errors.Count > 0) error = cfg.lastError;
+            return all;
+        }
+
+        /// <summary>拉单份日历。成功返回日程列表（可能是空表），失败返回 null。</summary>
+        public static List<ReminderEvent> Fetch(OutlookSettings cfg, CalendarSource c, DateTime from, DateTime to,
+            int timeoutMs, out string error)
+        {
+            error = "";
+            List<ReminderEvent> list = null;
+            try
+            {
+                if (c.source == "graph")
+                {
+                    string refresh = OutlookGraph.Unprotect(cfg.refreshToken);
+                    if (refresh.Length == 0) { error = "还没登录 Outlook"; return null; }
+                    OutlookGraph.TokenInfo tk;
+                    string err;
+                    if (!OutlookGraph.Refresh(cfg.clientId, cfg.tenant, refresh, timeoutMs, out tk, out err))
+                    {
+                        error = err.IndexOf("invalid_grant", StringComparison.OrdinalIgnoreCase) >= 0
+                            ? "登录已失效，去设置里重新登录 Outlook" : err;
+                        return null;
+                    }
+                    if (!string.IsNullOrEmpty(tk.refreshToken))
+                    {
+                        cfg.refreshToken = OutlookGraph.Protect(tk.refreshToken);
+                        cfg.tokenAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                    }
+                    if (!OutlookGraph.FetchCalendar(tk.accessToken, from, to, timeoutMs, out list, out err))
+                    {
+                        error = err;
+                        return null;
+                    }
+                }
+                else
+                {
+                    string text = Ics.ReadText(c.source, c.url, c.path, timeoutMs, out error);
+                    if (text == null) return null;
+                    list = Ics.Parse(text, from, to);
+                }
+                int lead = c.leadMinutes > 0 ? c.leadMinutes : Math.Max(0, cfg.leadMinutes);
+                foreach (var e in list) e.leadMinutes = lead;
+                return list;
+            }
+            catch (Exception ex)
+            {
+                error = "读取失败：" + ex.Message;
+                return null;
+            }
+        }
+
+        private static List<ReminderEvent> Dedupe(List<ReminderEvent> list)
+        {
+            var seen = new Dictionary<string, ReminderEvent>();
+            var order = new List<ReminderEvent>();
+            foreach (var e in list)
+            {
+                if (e == null) continue;
+                string key = (string.IsNullOrEmpty(e.id) ? e.title + "@" + e.start : e.id);
+                if (seen.ContainsKey(key)) continue;
+                seen[key] = e;
+                order.Add(e);
+            }
+            order.Sort(delegate (ReminderEvent a, ReminderEvent b)
+            {
+                return Reminders.ParseStart(a).CompareTo(Reminders.ParseStart(b));
+            });
+            return order;
         }
     }
 
@@ -402,6 +735,36 @@ namespace WorkCountdown
         }
     }
 
+    /// <summary>
+    /// 一类日程的提醒样式：扩散范围（卡内 / 全屏）+ 扩散样式（圆形柔光 / 进度条拉伸 / 警戒带）+ 配色。
+    /// 四类日程（固定 / 飞书会议 / 普通 / Outlook）各存一份。
+    /// </summary>
+    public class ReminderStyleDef
+    {
+        public string spread { get; set; }   // card | screen
+        public string shape { get; set; }    // circle | bar | tape
+        public string color { get; set; }    // ReminderStyles 的 id；"theme" = 跟随当前主题
+
+        public ReminderStyleDef() { }
+
+        public ReminderStyleDef(string spread, string shape, string color)
+        {
+            this.spread = spread;
+            this.shape = shape;
+            this.color = color;
+        }
+
+        public ReminderStyleDef Clone()
+        {
+            return new ReminderStyleDef(spread, shape, color);
+        }
+
+        public bool SameAs(ReminderStyleDef o)
+        {
+            return o != null && spread == o.spread && shape == o.shape && color == o.color;
+        }
+    }
+
     public class UiSettings
     {
         public int x { get; set; }
@@ -418,11 +781,20 @@ namespace WorkCountdown
         public bool reducedMotion { get; set; }
         public int reminderHoldSeconds { get; set; } // 3..20
         public string reminderSpread { get; set; }      // card | screen：提醒扩散范围
-        public string reminderSpreadStyle { get; set; } // circle | bar：提醒扩散样式
+        public string reminderSpreadStyle { get; set; } // circle | bar | tape：提醒扩散样式（tape=全屏警戒带）
         public string cardGlow { get; set; }            // classic | corner | bar | all：卡片背景光效
+        public string bgStyle { get; set; }             // solid | glass：主题背景风格（glass = 磨砂玻璃）
         public string lunchReminderStyle { get; set; }   // 午休提醒配色（ReminderStyles 的 id）
         public string eveningReminderStyle { get; set; } // 晚休提醒配色
         public string offReminderStyle { get; set; }     // 下班提醒配色
+        public string textFont { get; set; }             // 中文字体族，空 = 跟随默认（苹方 / Noto / 雅黑）
+        public string numberFont { get; set; }           // 数字字体族，默认 Consolas
+
+        // 四类日程各自的通知样式：固定 / 飞书会议 / 普通 / Outlook
+        public ReminderStyleDef styleFixed { get; set; }
+        public ReminderStyleDef styleLark { get; set; }
+        public ReminderStyleDef styleLocal { get; set; }
+        public ReminderStyleDef styleOutlook { get; set; }
 
         public UiSettings()
         {
@@ -442,9 +814,321 @@ namespace WorkCountdown
             reminderSpread = "card";
             reminderSpreadStyle = "circle";
             cardGlow = "classic";
+            bgStyle = "solid";
             lunchReminderStyle = "lan-yuming";
             eveningReminderStyle = "zi-jiegeng";
             offReminderStyle = "forest";
+            styleFixed = new ReminderStyleDef("card", "circle", ReminderStyles.Follow);
+            styleLark = new ReminderStyleDef("card", "circle", ReminderStyles.Follow);
+            styleLocal = new ReminderStyleDef("card", "circle", ReminderStyles.Follow);
+            styleOutlook = new ReminderStyleDef("card", "circle", ReminderStyles.Follow);
+            textFont = "";
+            numberFont = "Consolas";
+        }
+    }
+
+    /// <summary>工资计算器：月薪 + 发薪日。应出勤天数按「考勤」页的工作日 / 节假日 / 调休自动算。</summary>
+    public class SalarySettings
+    {
+        public decimal monthly { get; set; }    // 月工资
+        public int payday { get; set; }         // 发薪日 1..31（当月没有这一天时按最后一天）
+
+        public SalarySettings()
+        {
+            monthly = 0m;
+            payday = 15;
+        }
+    }
+
+    // ---------------- 小纸条（会话） ----------------
+
+    /// <summary>
+    /// 小纸条的一个「对话」：5 位数字 = 和某个人的 1:1 对话（id 是对方 ID）；
+    /// 其它任意 5 位字符 = 对话码，输同一个码的人自动进同一个对话（id 就是对话码）。
+    /// 两种都只在本机存备注。
+    /// </summary>
+    public class NoteContact
+    {
+        public string id { get; set; }
+        public string remark { get; set; }      // 本机给对方起的备注（只存在本机）
+        public string nick { get; set; }        // 对方自己设置的昵称（从在线状态 / 消息里自动拿到，不是本机备注）
+
+        public NoteContact() { id = ""; remark = ""; nick = ""; }
+
+        /// <summary>是不是「对话码」对话（同一码的人共处一个对话），而不是按个人 ID 的 1:1。</summary>
+        public bool IsRoom { get { return NoteSettings.ValidCode(id) && !NoteSettings.ValidId(id); } }
+
+        /// <summary>
+        /// 列表里显示的名字：本机备注 &gt; 对方自己起的昵称 &gt; ID / 对话码。
+        /// 对话码房间没有昵称概念，昵称为空时和以前一模一样。
+        /// </summary>
+        public string Display()
+        {
+            if (!string.IsNullOrWhiteSpace(remark)) return remark;
+            if (!string.IsNullOrWhiteSpace(nick)) return nick;
+            return NoteSettings.ValidId(id) ? "ID " + id : "对话 " + id;
+        }
+    }
+
+    /// <summary>一条小纸条消息；本地只留最近 8 条。</summary>
+    public class NoteMessage
+    {
+        public string from { get; set; }        // 发送方 5 位 ID
+        public string to { get; set; }          // 接收方 5 位 ID
+        public string text { get; set; }        // 一行文字，最长 200 字
+        public long ts { get; set; }            // Unix 秒
+        public string fromNick { get; set; }    // 发送方自己设置的昵称（没有就是 ""）
+
+        public NoteMessage() { from = ""; to = ""; text = ""; fromNick = ""; }
+
+        public NoteMessage(string from, string to, string text, long ts)
+        {
+            this.from = from; this.to = to; this.text = text; this.ts = ts;
+            this.fromNick = "";
+        }
+
+        public NoteMessage(string from, string to, string text, long ts, string fromNick)
+        {
+            this.from = from; this.to = to; this.text = text; this.ts = ts;
+            this.fromNick = fromNick ?? "";
+        }
+
+        public bool IsMine(string myId)
+        {
+            return string.Equals(from, myId, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>和某一个联系人的会话：最多 8 条消息 + 未读数。</summary>
+    public class NoteThread
+    {
+        public string contact { get; set; }
+        public List<NoteMessage> messages { get; set; }
+        public int unread { get; set; }
+
+        public NoteThread() { contact = ""; messages = new List<NoteMessage>(); unread = 0; }
+    }
+
+    /// <summary>小纸条设置：本机 ID、面板样式、公共中继、对话（个人 ID / 对话码）、8 条消息。</summary>
+    public class NoteSettings
+    {
+        public const int MaxMessages = 8;
+        public const int MaxText = 200;
+        public const int MaxRemark = 8;
+        public const int MaxNick = 12;
+        public const int CodeLen = 5;
+
+        public string id { get; set; }              // 本机 5 位 ID
+        public string nickname { get; set; }        // 本机昵称（对方添加我 / 群聊里直接看到）
+        public string style { get; set; }           // drawer（A 抽屉式）| columns（C 极简双栏）
+        public string relayHost { get; set; }       // 公共 MQTT 中继
+        public int relayPort { get; set; }
+        public List<NoteContact> contacts { get; set; }   // 已保存的对话（个人 ID 或对话码）
+        public List<NoteThread> threads { get; set; }
+
+        public NoteSettings()
+        {
+            id = "";
+            nickname = "";
+            style = "drawer";
+            relayHost = "broker.hivemq.com";
+            relayPort = 1883;
+            contacts = new List<NoteContact>();
+            threads = new List<NoteThread>();
+        }
+
+        /// <summary>昵称统一处理：null → ""、去首尾空白、最长 MaxNick 个字。</summary>
+        public static string CleanNick(string nick)
+        {
+            nick = (nick ?? "").Trim();
+            if (nick.Length > MaxNick) nick = nick.Substring(0, MaxNick);
+            return nick;
+        }
+
+        /// <summary>第一次用 / 重新生成时给一个 5 位数。</summary>
+        public static string GenerateId()
+        {
+            var rnd = new Random(Guid.NewGuid().GetHashCode());
+            return rnd.Next(10000, 100000).ToString(CultureInfo.InvariantCulture);
+        }
+
+        public static bool ValidId(string id)
+        {
+            if (string.IsNullOrEmpty(id) || id.Length != 5) return false;
+            for (int i = 0; i < id.Length; i++) if (id[i] < '0' || id[i] > '9') return false;
+            return id[0] != '0';
+        }
+
+        /// <summary>
+        /// 对话码：正好 5 个字符（中文 / 字母 / 数字 / 混合都行），不含空白和控制字符。
+        /// 纯 5 位数字也是合法码，但那种按「个人 ID」处理（见 IsRoom）。
+        /// </summary>
+        public static bool ValidCode(string code)
+        {
+            if (string.IsNullOrEmpty(code) || code.Length != 5) return false;
+            for (int i = 0; i < code.Length; i++)
+            {
+                char ch = code[i];
+                if (char.IsWhiteSpace(ch) || char.IsControl(ch)) return false;
+            }
+            return true;
+        }
+
+        /// <summary>去掉首尾空白（面板 / 设置页输入框用）。</summary>
+        public static string NormalizeCode(string code)
+        {
+            return (code ?? "").Trim();
+        }
+
+        /// <summary>这个 5 位码是「对话码」对话（同码的人进同一个对话），不是按个人 ID 的 1:1。</summary>
+        public bool IsRoom(string code)
+        {
+            code = NormalizeCode(code);
+            return ValidCode(code) && !ValidId(code);
+        }
+
+        public void Normalize()
+        {
+            if (!ValidId(id)) id = GenerateId();
+            nickname = CleanNick(nickname);
+            if (style != "columns") style = "drawer";
+            if (string.IsNullOrWhiteSpace(relayHost)) relayHost = "broker.hivemq.com";
+            if (relayPort <= 0 || relayPort > 65535) relayPort = 1883;
+            if (contacts == null) contacts = new List<NoteContact>();
+            if (threads == null) threads = new List<NoteThread>();
+            foreach (var c in contacts)
+            {
+                if (c == null) continue;
+                if (c.remark == null) c.remark = "";
+                if (c.remark.Length > MaxRemark) c.remark = c.remark.Substring(0, MaxRemark);
+                c.nick = CleanNick(c.nick);
+            }
+            var seen = new HashSet<string>();
+            contacts.RemoveAll(delegate(NoteContact c) { return c == null || !ValidCode(c.id) || !seen.Add(c.id); });
+            foreach (var t in threads)
+            {
+                if (t == null) continue;
+                if (t.messages == null) t.messages = new List<NoteMessage>();
+                if (t.messages.Count > MaxMessages)
+                    t.messages.RemoveRange(0, t.messages.Count - MaxMessages);
+                foreach (var m in t.messages)
+                {
+                    if (m == null) continue;
+                    if (m.text == null) m.text = "";
+                    if (m.text.Length > MaxText) m.text = m.text.Substring(0, MaxText);
+                    m.fromNick = CleanNick(m.fromNick);
+                }
+                t.messages.RemoveAll(delegate(NoteMessage m) { return m == null; });
+                if (t.unread < 0) t.unread = 0;
+            }
+            threads.RemoveAll(delegate(NoteThread t) { return t == null || !ValidCode(t.contact); });
+            // 收到陌生人的纸条后，会话里可能还没有对应联系人：补一个（显示 ID），不然读不到
+            foreach (var t in threads)
+            {
+                if (Contact(t.contact) != null) continue;
+                var c = new NoteContact();
+                c.id = t.contact;
+                c.remark = "";
+                c.nick = "";
+                contacts.Add(c);
+            }
+        }
+
+        public NoteContact Contact(string contactId)
+        {
+            foreach (var c in contacts) if (c.id == contactId) return c;
+            return null;
+        }
+
+        /// <summary>
+        /// 记录某个联系人「对方自己设置的昵称」（从在线状态 / 消息里拿到的）。
+        /// 昵称统一 trim + 截 MaxNick；有变化返回 true，联系人不存在或昵称没变返回 false。
+        /// 本机备注（remark）不受影响。
+        /// </summary>
+        public bool SetContactNick(string contactId, string nick)
+        {
+            var c = Contact(NormalizeCode(contactId));
+            if (c == null) return false;
+            nick = CleanNick(nick);
+            if (string.Equals(c.nick ?? "", nick, StringComparison.Ordinal)) return false;
+            c.nick = nick;
+            return true;
+        }
+
+        public NoteThread Thread(string contactId)
+        {
+            foreach (var t in threads) if (t.contact == contactId) return t;
+            var nt = new NoteThread();
+            nt.contact = contactId;
+            threads.Add(nt);
+            return nt;
+        }
+
+        /// <summary>
+        /// 收到 / 发出时把消息塞进对应会话，超过 8 条从最旧的丢。返回 true 表示会话里新增了。
+        /// 对话码消息的 to 是 5 位码（from 仍是发送者的个人 ID），会话键就是那个码。
+        /// </summary>
+        public bool Append(NoteMessage m, bool incoming)
+        {
+            if (m == null) return false;
+            bool toRoom = IsRoom(m.to);
+            bool fromRoom = IsRoom(m.from);
+            if (!toRoom && !ValidId(m.to)) return false;
+            if (!fromRoom && !ValidId(m.from)) return false;
+            string other = toRoom ? m.to
+                : fromRoom ? m.from
+                : (string.Equals(m.from, id, StringComparison.Ordinal) ? m.to : m.from);
+            var t = Thread(other);
+            t.messages.Add(m);
+            while (t.messages.Count > MaxMessages) t.messages.RemoveAt(0);
+            if (incoming) t.unread++;
+            return true;
+        }
+
+        public int TotalUnread()
+        {
+            int n = 0;
+            foreach (var t in threads) n += t.unread;
+            return n;
+        }
+
+        public void MarkRead(string contactId)
+        {
+            var t = Thread(contactId);
+            t.unread = 0;
+        }
+
+        /// <summary>
+        /// 新建一个对话：5 位数字 = 和这个 ID 的人 1:1；其它任意 5 位字符 = 对话码（同码的人进同一个对话）。
+        /// 已存在就只更新备注，返回 false。会话线程一并建好。
+        /// </summary>
+        public bool AddConversation(string code, string remark)
+        {
+            code = NormalizeCode(code);
+            if (!ValidCode(code)) return false;
+            remark = (remark ?? "").Trim();
+            if (remark.Length > MaxRemark) remark = remark.Substring(0, MaxRemark);
+            var c = Contact(code);
+            if (c != null) { c.remark = remark; return false; }
+            c = new NoteContact();
+            c.id = code;
+            c.remark = remark;
+            contacts.Add(c);
+            Thread(code);
+            return true;
+        }
+
+        /// <summary>兼容旧调用：按个人 ID 加对话（必须是 5 位数字）。</summary>
+        public bool AddContact(string contactId, string remark)
+        {
+            if (!ValidId(NormalizeCode(contactId))) return false;
+            return AddConversation(contactId, remark);
+        }
+
+        public void RemoveContact(string contactId)
+        {
+            contacts.RemoveAll(delegate(NoteContact c) { return c.id == contactId; });
+            threads.RemoveAll(delegate(NoteThread t) { return t.contact == contactId; });
         }
     }
 
@@ -472,6 +1156,9 @@ namespace WorkCountdown
         public List<CustomTheme> customThemes { get; set; }
 
         public LarkSettings lark { get; set; }
+        public OutlookSettings outlook { get; set; }
+        public SalarySettings salary { get; set; }
+        public NoteSettings note { get; set; }
         public UiSettings ui { get; set; }
         /// <summary>把另一份设置整体拷过来（导入配置 / 恢复默认用）。</summary>
         public void CopyFrom(Settings o)
@@ -493,6 +1180,9 @@ namespace WorkCountdown
             schedules = o.schedules;
             customThemes = o.customThemes;
             lark = o.lark;
+            outlook = o.outlook;
+            salary = o.salary;
+            note = o.note;
             ui = o.ui;
             calendarEnabled = o.calendarEnabled;
             calendarLeadMinutes = o.calendarLeadMinutes;
@@ -527,6 +1217,9 @@ namespace WorkCountdown
             schedules = null;                     // 第一次 Normalize 时从班次/午休/晚休长出来
             customThemes = new List<CustomTheme>();
             lark = new LarkSettings();
+            outlook = new OutlookSettings();
+            salary = new SalarySettings();
+            note = new NoteSettings();
             ui = new UiSettings();
             calendarEnabled = true;
             calendarLeadMinutes = 5;
@@ -610,7 +1303,10 @@ namespace WorkCountdown
                         var loaded = ser.Deserialize<Settings>(text);
                         if (loaded != null)
                         {
+                            int rawVersion = loaded.version;
                             loaded.Normalize();
+                            // v3.5 的工作日错位迁移生效后立刻落盘，免得下次启动又按旧数据算
+                            if (loaded.version != rawVersion) Save(loaded);
                             return loaded;
                         }
                     }
@@ -794,6 +1490,57 @@ namespace WorkCountdown
 
     public static class SettingsExtensions
     {
+        /// <summary>一类日程当前的通知样式（spread / shape / color）。</summary>
+        public static ReminderStyleDef StyleOf(this Settings s, string kind)
+        {
+            UiSettings ui = s == null ? null : s.ui;
+            if (ui == null) return new ReminderStyleDef("card", "circle", ReminderStyles.Follow);
+            ReminderStyleDef d = kind == Reminders.KindFixed ? ui.styleFixed
+                : kind == Reminders.KindLark ? ui.styleLark
+                : kind == Reminders.KindOutlook ? ui.styleOutlook
+                : ui.styleLocal;
+            if (d == null) return new ReminderStyleDef(s.ui.reminderSpread, s.ui.reminderSpreadStyle, ReminderStyles.Follow);
+            return d;
+        }
+
+        /// <summary>把某一类的通知样式写回去（设置页改了立刻生效）。</summary>
+        public static void SetStyleOf(this Settings s, string kind, ReminderStyleDef d)
+        {
+            if (s == null || s.ui == null || d == null) return;
+            if (kind == Reminders.KindFixed) s.ui.styleFixed = d;
+            else if (kind == Reminders.KindLark) s.ui.styleLark = d;
+            else if (kind == Reminders.KindOutlook) s.ui.styleOutlook = d;
+            else s.ui.styleLocal = d;
+        }
+
+        public static ReminderStyleDef NormalizeStyle(ReminderStyleDef d, string fallbackSpread, string fallbackShape)
+        {
+            if (d == null) d = new ReminderStyleDef();
+            if (d.spread != "card" && d.spread != "screen")
+                d.spread = fallbackSpread == "screen" ? "screen" : "card";
+            if (d.shape != "circle" && d.shape != "bar" && d.shape != "tape")
+                d.shape = (fallbackShape == "bar" || fallbackShape == "tape") ? fallbackShape : "circle";
+            d.color = ReminderStyles.Normalize(d.color, ReminderStyles.Follow);
+            return d;
+        }
+
+        /// <summary>
+        /// v3.5 之前设置页把「周一..周日」的勾选状态直接按下标写进 workdays（0=周日..6=周六），差一天：
+        /// 「周一到周五上班」会被存成「周日 + 周一到周四上班、周五和周六休息」。这里按 schema 版本修一次：
+        /// version &lt; 2 的旧配置里，如果看到「周日上班、周一到周四都上班、周六休息」这种明显的错位形态，
+        /// 就把数组右移一位还原成真实意图（例如 [日一二三四,五,六]=上班 → 周一~周五）。正常配置不受影响，
+        /// 迁移后 version 升到 2，只做一次。
+        /// </summary>
+        public static bool[] MigrateLegacyWorkdays(bool[] w, int version)
+        {
+            if (w == null || w.Length != 7 || version >= 2) return w;
+            bool shifted = w[0] && w[1] && w[2] && w[3] && w[4] && !w[6];
+            if (!shifted) return w;
+            var fixedDays = new bool[7];
+            for (int i = 0; i < 7; i++) fixedDays[(i + 1) % 7] = w[i];
+            return fixedDays;
+        }
+
         public static void Normalize(this Settings s)
         {
             if (s.mode != "fixed" && s.mode != "flex") s.mode = "flex";
@@ -805,6 +1552,8 @@ namespace WorkCountdown
             if (string.IsNullOrWhiteSpace(s.eveningStart)) s.eveningStart = "18:00";
             if (string.IsNullOrWhiteSpace(s.eveningEnd)) s.eveningEnd = "18:45";
             if (s.workdays == null || s.workdays.Length != 7) s.workdays = new bool[] { false, true, true, true, true, true, false };
+            s.workdays = MigrateLegacyWorkdays(s.workdays, s.version);
+            if (s.version < 2) s.version = 2;    // 工作日索引迁移只做一次（v3.5 起 schema = 2）
             if (s.exceptions == null) s.exceptions = new List<HolidayEntry>();
             if (s.events == null) s.events = new List<ReminderEvent>();
             if (s.calendarLeadMinutes < 0) s.calendarLeadMinutes = 0;
@@ -832,16 +1581,96 @@ namespace WorkCountdown
                 s.ui.reminderEffect = "glow";
             s.ui.reminderHoldSeconds = Math.Max(3, Math.Min(20, s.ui.reminderHoldSeconds));
             if (s.ui.reminderSpread != "screen") s.ui.reminderSpread = "card";
-            if (s.ui.reminderSpreadStyle != "bar") s.ui.reminderSpreadStyle = "circle";
+            if (s.ui.reminderSpreadStyle != "bar" && s.ui.reminderSpreadStyle != "tape")
+                s.ui.reminderSpreadStyle = "circle";
             if (s.ui.cardGlow != "corner" && s.ui.cardGlow != "bar"
                 && s.ui.cardGlow != "all")
                 s.ui.cardGlow = "classic";
+            if (s.ui.bgStyle != "glass") s.ui.bgStyle = "solid";
             s.ui.lunchReminderStyle = ReminderStyles.Normalize(s.ui.lunchReminderStyle, "lan-yuming");
             s.ui.eveningReminderStyle = ReminderStyles.Normalize(s.ui.eveningReminderStyle, "zi-jiegeng");
             s.ui.offReminderStyle = ReminderStyles.Normalize(s.ui.offReminderStyle, "forest");
+            // 四类日程的通知样式：老配置里没有这几项，按旧的全局设置补齐，行为不变
+            s.ui.styleFixed = NormalizeStyle(s.ui.styleFixed, s.ui.reminderSpread, s.ui.reminderSpreadStyle);
+            s.ui.styleLark = NormalizeStyle(s.ui.styleLark, s.ui.reminderSpread, s.ui.reminderSpreadStyle);
+            s.ui.styleLocal = NormalizeStyle(s.ui.styleLocal, s.ui.reminderSpread, s.ui.reminderSpreadStyle);
+            s.ui.styleOutlook = NormalizeStyle(s.ui.styleOutlook, s.ui.reminderSpread, s.ui.reminderSpreadStyle);
+            if (s.ui.textFont == null) s.ui.textFont = "";
+            if (string.IsNullOrWhiteSpace(s.ui.numberFont)) s.ui.numberFont = "Consolas";
+            if (s.outlook == null) s.outlook = new OutlookSettings();
+            if (string.IsNullOrWhiteSpace(s.outlook.tenant)) s.outlook.tenant = OutlookGraph.DefaultTenant;
+            if (s.outlook.clientId == null) s.outlook.clientId = "";
+            if (s.outlook.account == null) s.outlook.account = "";
+            if (s.outlook.refreshToken == null) s.outlook.refreshToken = "";
+            s.outlook.leadMinutes = Math.Max(0, Math.Min(120, s.outlook.leadMinutes));
+            if (s.outlook.cached == null) s.outlook.cached = new List<ReminderEvent>();
+            NormalizeCalendars(s.outlook);
+            s.outlook.enabled = s.outlook.HasEnabled;
+            if (s.salary == null) s.salary = new SalarySettings();
+            s.salary.monthly = Math.Max(0m, Math.Min(10000000m, s.salary.monthly));
+            if (s.salary.payday < 1 || s.salary.payday > 31) s.salary.payday = 15;
+            if (s.note == null) s.note = new NoteSettings();
+            s.note.Normalize();
             s.ui.x = s.ui.x < -30000 ? -1 : s.ui.x;
             s.NormalizeSchedules();
             s.NormalizeCustomThemes();
+        }
+
+        /// <summary>
+        /// 老配置（单份日历存在 outlook.url / path / source）迁移到 calendars 列表；
+        /// 之后每份日历的 id/名称/来源/提前量都补齐。停用的日历保留着，用户还能再打开。
+        /// </summary>
+        public static void NormalizeCalendars(OutlookSettings o)
+        {
+            if (o == null) return;
+            if (o.calendars == null) o.calendars = new List<CalendarSource>();
+
+            // 老配置迁移：只有一份来源且列表为空时才做，避免每次 Normalize 重复添加
+            if (o.calendars.Count == 0)
+            {
+                bool legacyGraph = o.source == "graph" && !string.IsNullOrWhiteSpace(o.refreshToken);
+                bool legacyFile = o.source == "file" && !string.IsNullOrWhiteSpace(o.path);
+                bool legacyUrl = o.source != "file" && o.source != "graph" && !string.IsNullOrWhiteSpace(o.url);
+                if (legacyGraph || legacyFile || legacyUrl)
+                {
+                    var c = new CalendarSource();
+                    c.id = "cal-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                    c.name = legacyGraph ? (string.IsNullOrWhiteSpace(o.account) ? "Outlook 登录日历" : o.account)
+                        : legacyFile ? "本地 .ics" : "Outlook 订阅";
+                    c.source = legacyGraph ? "graph" : legacyFile ? "file" : "url";
+                    c.url = legacyUrl ? o.url : "";
+                    c.path = legacyFile ? o.path : "";
+                    c.enabled = o.enabled;
+                    c.leadMinutes = 0;
+                    c.lastSync = o.lastSync;
+                    c.lastError = o.lastError;
+                    c.cached = o.cached ?? new List<ReminderEvent>();
+                    o.calendars.Add(c);
+                }
+            }
+
+            var seen = new HashSet<string>();
+            foreach (var c in o.calendars)
+            {
+                if (c == null) continue;
+                if (string.IsNullOrWhiteSpace(c.id)) c.id = "cal-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                if (!seen.Add(c.id)) c.id = "cal-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                if (c.name == null) c.name = "";
+                if (string.IsNullOrWhiteSpace(c.name))
+                    c.name = c.source == "file" ? "本地 .ics" : c.source == "graph" ? "Outlook 登录日历" : "Outlook 订阅";
+                if (c.source != "file" && c.source != "graph") c.source = "url";
+                if (c.url == null) c.url = "";
+                if (c.path == null) c.path = "";
+                c.leadMinutes = Math.Max(0, Math.Min(120, c.leadMinutes));
+                if (c.cached == null) c.cached = new List<ReminderEvent>();
+                if (c.lastSync == null) c.lastSync = "";
+                if (c.lastError == null) c.lastError = "";
+                if (!c.HasSource) c.enabled = false;
+                if (c.source == "graph" && string.IsNullOrWhiteSpace(o.refreshToken)) c.enabled = false;
+            }
+
+            // 没有来源、也没有登录的旧配置：整个开关关掉
+            if (o.calendars.Count == 0) o.enabled = false;
         }
 
         /// <summary>
@@ -1413,6 +2242,165 @@ namespace WorkCountdown
         }
     }
 
+    /// <summary>某一刻的工资面板数据。</summary>
+    public class SalarySnapshot
+    {
+        public bool configured { get; set; }
+        public decimal monthly { get; set; }
+        public decimal daily { get; set; }
+        public decimal hourly { get; set; }
+        public decimal today { get; set; }
+        public decimal month { get; set; }
+        public decimal attendedDays { get; set; }
+        public int requiredWorkdays { get; set; }
+        public int elapsedWorkdays { get; set; }
+        public int payday { get; set; }
+        public DateTime paydayDate { get; set; }
+        public int daysToPayday { get; set; }
+        public bool isWorkday { get; set; }
+        public bool clockedIn { get; set; }
+        public bool clockedOut { get; set; }
+        public bool capped { get; set; }
+        public string note { get; set; }
+        public double progress { get; set; }
+        public TimeSpan worked { get; set; }
+        public TimeSpan required { get; set; }
+    }
+
+    /// <summary>
+    /// 工资计算：日薪 = 月薪 ÷ 本月应出勤天数；时薪 = 日薪 ÷ 当日应勤小时数。
+    /// 今日收入 = 时薪 × 今日已工作小时（扣午休/晚休，最多到日薪）。
+    /// 本月收入 = 日薪 × 本月已完成的工作日 + 今日收入。
+    /// 没有历史打卡记录，所以只按「日期 + 今天这一次打卡」推算，这一点在设置页写清楚。
+    /// </summary>
+    public static class SalaryCalc
+    {
+        public static string Money3(decimal v)
+        {
+            return v.ToString("N3", CultureInfo.InvariantCulture);
+        }
+
+        public static SalarySnapshot Compute(Settings s, AttendanceSnapshot snap, DateTime now)
+        {
+            var r = new SalarySnapshot();
+            if (s == null || s.salary == null || s.salary.monthly <= 0m) return r;
+            r.configured = true;
+            r.monthly = s.salary.monthly;
+            r.payday = Math.Max(1, Math.Min(31, s.salary.payday));
+            r.note = "";
+
+            DateTime monthStart = new DateTime(now.Year, now.Month, 1);
+            int reqDays = RequiredWorkdays(s, monthStart);
+            r.requiredWorkdays = reqDays;
+            r.daily = s.salary.monthly / reqDays;
+            r.hourly = r.daily / (DailyMinutes(s, now) / 60m);
+
+            var plan = Policy.Build(s, now);
+            r.isWorkday = plan.isWorkday;
+            r.required = TimeSpan.FromMinutes(DailyMinutes(s, now));
+
+            // 今天这次打卡（和卡片用的是同一个快照；没接飞书就按班次时间算）
+            DateTime? inT = snap != null ? snap.clockIn : null;
+            DateTime? outT = snap != null ? snap.clockOut : null;
+            if (!s.lark.enabled || string.IsNullOrWhiteSpace(s.lark.chatId))
+                inT = plan.isWorkday ? plan.suggestStart : (DateTime?)null;
+            if (inT.HasValue && inT.Value.Date != now.Date) inT = null;
+            if (outT.HasValue && (outT.Value.Date != now.Date || outT.Value > now)) outT = null;
+            if (inT.HasValue && inT.Value > now) inT = null;
+
+            if (plan.isWorkday && inT.HasValue)
+            {
+                r.clockedIn = true;
+                DateTime end = outT.HasValue ? outT.Value : now;
+                if (end < inT.Value) end = inT.Value;
+                // 收入按秒累计（面板以 18fps 重绘，后三位小数才会高速跳）；显示工时仍按分钟
+                double workedSec = Math.Max(0, (end - inT.Value).TotalSeconds
+                    - BreakMinutes(s, plan, inT.Value, end) * 60.0);
+                r.worked = TimeSpan.FromSeconds(workedSec);
+                double requiredSec = Math.Max(1.0, r.required.TotalSeconds);
+                r.progress = Math.Min(1.0, workedSec / requiredSec);
+                r.today = r.hourly * ((decimal)workedSec / 3600m);
+                if (r.today > r.daily) { r.today = r.daily; r.capped = true; }
+                if (outT.HasValue) { r.clockedOut = true; r.note = "已下班"; }
+            }
+            else if (plan.isWorkday) r.note = "还没打卡";
+            else r.note = "今天休息";
+
+            // 本月已经完整过去的工作日（今天单独按打卡算，不重复计）
+            int elapsed = 0;
+            for (DateTime d = monthStart; d < now.Date; d = d.AddDays(1))
+                if (Policy.Build(s, d).isWorkday) elapsed++;
+            r.elapsedWorkdays = elapsed;
+            r.attendedDays = elapsed + (r.daily > 0m ? r.today / r.daily : 0m);
+            r.month = r.daily * elapsed + r.today;
+
+            r.paydayDate = PaydayDate(now, r.payday);
+            r.daysToPayday = (r.paydayDate - now.Date).Days;
+            return r;
+        }
+
+        /// <summary>本月应出勤天数：按工作日 + 节假日 / 调休算。整月都是休息日时兜底 21 天。</summary>
+        public static int RequiredWorkdays(Settings s, DateTime month)
+        {
+            int days = DateTime.DaysInMonth(month.Year, month.Month);
+            int n = 0;
+            for (int d = 1; d <= days; d++)
+                if (Policy.Build(s, new DateTime(month.Year, month.Month, d)).isWorkday) n++;
+            return n > 0 ? n : 21;
+        }
+
+        /// <summary>发薪日：当月没有这一天（比如 31 号）就按当月最后一天；已经过了就取下一月。</summary>
+        public static DateTime PaydayDate(DateTime now, int payday)
+        {
+            int p = Math.Max(1, Math.Min(31, payday));
+            DateTime thisMonth = new DateTime(now.Year, now.Month,
+                Math.Min(p, DateTime.DaysInMonth(now.Year, now.Month)));
+            if (thisMonth.Date >= now.Date) return thisMonth;
+            DateTime next = now.AddMonths(1);
+            return new DateTime(next.Year, next.Month,
+                Math.Min(p, DateTime.DaysInMonth(next.Year, next.Month)));
+        }
+
+        /// <summary>今天应勤多少分钟：固定班次扣掉午休/晚休，弹性班次用用户填的应勤时长。</summary>
+        private static int DailyMinutes(Settings s, DateTime now)
+        {
+            var plan = Policy.Build(s, now);
+            if (s.mode != "fixed")
+                return plan.requiredMinutes > 0 ? plan.requiredMinutes : 480;
+            double total = (plan.fixedEnd - plan.suggestStart).TotalMinutes;
+            if (total <= 0) return 480;
+            total -= BreakMinutes(s, plan, plan.suggestStart, plan.fixedEnd);
+            if (total < 60) total = 480;
+            return (int)Math.Round(total);
+        }
+
+        /// <summary>与 [from,to] 重叠的午休 + 晚休分钟数。</summary>
+        private static int BreakMinutes(Settings s, DayPlan plan, DateTime from, DateTime to)
+        {
+            int sum = Overlap(from, to, plan.lunchStart, plan.lunchEnd);
+            if (s.eveningEnabled)
+            {
+                int a, b;
+                if (SettingsExtensions.TryParseTime(s.eveningStart, out a)
+                    && SettingsExtensions.TryParseTime(s.eveningEnd, out b) && b > a)
+                {
+                    DateTime day = to.Date;
+                    sum += Overlap(from, to, day.AddMinutes(a), day.AddMinutes(b));
+                }
+            }
+            int cap = (int)Math.Max(0, (to - from).TotalMinutes);
+            return Math.Min(sum, cap);
+        }
+
+        private static int Overlap(DateTime from, DateTime to, DateTime breakStart, DateTime breakEnd)
+        {
+            DateTime a = from > breakStart ? from : breakStart;
+            DateTime b = to < breakEnd ? to : breakEnd;
+            if (b <= a) return 0;
+            return (int)Math.Round((b - a).TotalMinutes);
+        }
+    }
+
     public enum CardState { Rest, BeforeWork, NotClockedIn, Working, Overtime, Done }
 
     public enum LunchState { None, Before, During, After, EveningBefore, EveningDuring, OffSoon }
@@ -1449,41 +2437,38 @@ namespace WorkCountdown
         {
             var lunchSched = s.ScheduleOf("lunch");
             var eveningSched = s.ScheduleOf("evening");
-            // 这条固定日程今天不该出现（单/双周、截止日期、停用）就不显示这一行
-            if (lunchSched != null && (!lunchSched.enabled || !lunchSched.OccursOn(now)))
-            {
-                st.lunch = LunchState.None;
-                st.lunchLabel = "";
-                st.lunchValue = "";
-                return;
-            }
-            int a, b;
-            if (!SettingsExtensions.TryParseTime(s.lunchStart, out a) || !SettingsExtensions.TryParseTime(s.lunchEnd, out b) || b <= a)
-            {
-                st.lunch = LunchState.None;
-                st.lunchLabel = "";
-                st.lunchValue = "";
-                return;
-            }
 
-            DateTime start = now.Date.AddMinutes(a);
-            DateTime end = now.Date.AddMinutes(b);
+            // 午休这一段：固定日程被停用/今天不生效就不显示，但**不影响晚休**（这是之前的 bug：
+            // 午休时间没填好会直接 return，把晚休也一起吞掉）
+            bool lunchOn = lunchSched == null || (lunchSched.enabled && lunchSched.OccursOn(now));
+            int a = 0, b = 0;
+            bool lunchOk = lunchOn
+                && SettingsExtensions.TryParseTime(s.lunchStart, out a)
+                && SettingsExtensions.TryParseTime(s.lunchEnd, out b)
+                && b > a;
+            // 内置午休只填了开始、没填结束（或填反）时，拿午休时段的一条普通日程顶上
+            if (lunchOn && !lunchOk) lunchOk = FindLunchWindow(s, now, out a, out b);
 
-            if (now < start)
+            if (lunchOk)
             {
-                st.lunch = LunchState.Before;
-                st.lunchLabel = "距午休";
-                st.lunchValue = Policy.CompactDuration(start - now);
-                st.lunchCounting = true;
-                return;
-            }
-            if (now < end)
-            {
-                st.lunch = LunchState.During;
-                st.lunchLabel = "午休中";
-                st.lunchValue = "还剩 " + Policy.CompactDuration(end - now);
-                st.lunchCounting = true;
-                return;
+                DateTime start = now.Date.AddMinutes(a);
+                DateTime end = now.Date.AddMinutes(b);
+                if (now < start)
+                {
+                    st.lunch = LunchState.Before;
+                    st.lunchLabel = "距午休";
+                    st.lunchValue = Policy.CompactDuration(start - now);
+                    st.lunchCounting = true;
+                    return;
+                }
+                if (now < end)
+                {
+                    st.lunch = LunchState.During;
+                    st.lunchLabel = "午休中";
+                    st.lunchValue = "还剩 " + Policy.CompactDuration(end - now);
+                    st.lunchCounting = true;
+                    return;
+                }
             }
 
             int ea = 0, eb = 0;
@@ -1518,10 +2503,48 @@ namespace WorkCountdown
                 return;
             }
 
+            if (!lunchOn && !evening)
+            {
+                // 午休这一行被明确关掉、也没配晚休：第二行整行不显示
+                st.lunch = LunchState.None;
+                st.lunchLabel = "";
+                st.lunchValue = "";
+                st.lunchCounting = false;
+                return;
+            }
+
             st.lunch = LunchState.After;
             st.lunchLabel = "";
             st.lunchValue = "";
             st.lunchCounting = false;
+        }
+
+        /// <summary>
+        /// 内置午休没配好时，从普通日程里找一条「午休时段」的：今天生效、10:30–14:30 之间开始、有结束时间。
+        /// 用户把午休时段写成普通日程（老版本就是这么加的）也能正常显示「距午休」。
+        /// </summary>
+        private static bool FindLunchWindow(Settings s, DateTime now, out int a, out int b)
+        {
+            a = 0;
+            b = 0;
+            if (s.schedules == null) return false;
+            int bestA = int.MaxValue, bestB = 0;
+            foreach (var f in s.schedules)
+            {
+                if (f == null || !f.enabled) continue;
+                if (f.role == "lunch" || f.role == "evening" || f.role == "offwork") continue;
+                if (!f.OccursOn(now)) continue;
+                int fa, fb;
+                if (!SettingsExtensions.TryParseTime(f.start, out fa)) continue;
+                if (!SettingsExtensions.TryParseTime(f.end, out fb)) continue;
+                if (fb <= fa) continue;
+                if (fa < 10 * 60 + 30 || fa > 14 * 60 + 30) continue;   // 10:30–14:30
+                if (fa < bestA) { bestA = fa; bestB = fb; }
+            }
+            if (bestA == int.MaxValue) return false;
+            a = bestA;
+            b = bestB;
+            return true;
         }
 
         /// <summary>没开晚休时：午休结束后这一行显示距下班；到了下班点就写「马上下班」。</summary>
@@ -1673,6 +2696,8 @@ namespace WorkCountdown
     public static class UiFont
     {
         private static string regular, bold;
+        private static string textOverride = "";
+        private static string numberFamily = "Consolas";
         private static System.Drawing.Text.PrivateFontCollection privateFonts;
         // 苹方在 Windows 上注册成「苹方 常规 / 苹方 粗体」两个族，macOS 上才叫 PingFang SC，都要认
         private static readonly string[] Prefer = new string[]
@@ -1686,12 +2711,79 @@ namespace WorkCountdown
             "Noto Sans SC", "Microsoft YaHei UI"
         };
 
+        /// <summary>设置里选的字体：空白 = 跟随默认中文字体；number = 数字字体，默认 Consolas。</summary>
+        public static void Configure(string textFamily, string number)
+        {
+            string t = (textFamily ?? "").Trim();
+            if (!string.Equals(t, textOverride, StringComparison.OrdinalIgnoreCase))
+            {
+                textOverride = t;
+                regular = null;
+                bold = null;
+            }
+            numberFamily = string.IsNullOrWhiteSpace(number) ? "Consolas" : number.Trim();
+        }
+
+        public static string TextFamily
+        {
+            get
+            {
+                if (regular == null) Resolve();
+                return regular;
+            }
+            set { Configure(value, numberFamily); }
+        }
+
+        public static string NumberFamily
+        {
+            get { return numberFamily; }
+            set { Configure(textOverride, value); }
+        }
+
         public static string Family
         {
             get
             {
                 if (regular == null) Resolve();
                 return regular;
+            }
+        }
+
+        /// <summary>系统 / fonts 目录里能用的字族，给设置页的字体下拉用。</summary>
+        public static string[] Families()
+        {
+            if (privateFonts == null) Resolve();
+            var set = new List<string>();
+            try
+            {
+                if (privateFonts != null)
+                    foreach (var fam in privateFonts.Families)
+                        if (!set.Contains(fam.Name)) set.Add(fam.Name);
+            }
+            catch { }
+            try
+            {
+                var installed = new System.Drawing.Text.InstalledFontCollection();
+                foreach (var fam in installed.Families)
+                    if (!set.Contains(fam.Name)) set.Add(fam.Name);
+            }
+            catch { }
+            set.Sort(StringComparer.CurrentCultureIgnoreCase);
+            return set.ToArray();
+        }
+
+        /// <summary>数字字体（时:分:秒、工资等）。选成非等宽也允许，只是倒计时会不那么齐。</summary>
+        public static Font MakeNumber(float size, FontStyle style = FontStyle.Regular)
+        {
+            try { return new Font(numberFamily, size, style, GraphicsUnit.Point); }
+            catch
+            {
+                try { return new Font("Consolas", size, style, GraphicsUnit.Point); }
+                catch
+                {
+                    try { return new Font(FontFamily.GenericMonospace, size, style, GraphicsUnit.Point); }
+                    catch { return SystemFonts.DefaultFont; }
+                }
             }
         }
 
@@ -1743,6 +2835,11 @@ namespace WorkCountdown
 
         private static void Resolve()
         {
+            if (privateFonts != null)
+            {
+                try { privateFonts.Dispose(); } catch { }
+                privateFonts = null;
+            }
             var names = new List<string>();
             // 1) exe 旁边 fonts\ 里的字体文件（PingFang.ttc 丢进去即可，不用装到系统）
             try
@@ -1772,6 +2869,20 @@ namespace WorkCountdown
                     if (!names.Contains(fam.Name)) names.Add(fam.Name);
             }
             catch { }
+
+            if (!string.IsNullOrWhiteSpace(textOverride))
+            {
+                // 用户在设置里明确选了一个字族：系统中找得到就用它，找不到退回默认
+                string picked = null;
+                foreach (var name in names)
+                    if (string.Equals(name, textOverride, StringComparison.OrdinalIgnoreCase)) { picked = name; break; }
+                if (picked != null)
+                {
+                    regular = picked;
+                    bold = null;      // 单字族用 FontStyle.Bold 合成，不再找独立粗体族
+                    return;
+                }
+            }
 
             regular = First(names, Prefer);
             if (regular == null) regular = "Microsoft YaHei UI";

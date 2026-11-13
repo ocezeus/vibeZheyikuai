@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>上班工具箱 · 一图说明书</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#141b28; --panel2:#101722;
+    --ink:#ecf1fa; --muted:#9aa6bd; --dim:#6f7b92;
+    --line:rgba(236,241,250,.08);
+    --blue:#4c8dff; --gold:#f2b34c; --green:#4fd1a1;
+    --purple:#b18cff; --orange:#ff9f6e; --cyan:#64d6e8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    width:1600px;background:var(--bg);color:var(--ink);
+    font-family:"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:46px 52px 56px;
+  }
+  h1,h2,h3,p,ul{margin:0}
+  h1{font-size:46px;letter-spacing:1px;line-height:1.15}
+  h2{font-size:22px;letter-spacing:.5px;display:flex;align-items:center;gap:12px}
+  h3{font-size:15px;color:var(--ink);font-weight:600;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:15px;line-height:1.7}
+  .small{font-size:12px;line-height:1.65;color:var(--muted)}
+  .tiny{font-size:11px;line-height:1.6;color:var(--dim)}
+  .num{font-family:Consolas,"SFMono-Regular",monospace;font-variant-numeric:tabular-nums}
+
+  header{display:flex;align-items:flex-end;justify-content:space-between;gap:30px;padding-bottom:24px;border-bottom:1px solid var(--line)}
+  header .lead{max-width:1050px}
+  header .lead .sub{margin-top:10px}
+  .version{text-align:right;flex:none}
+  .version .v{font-family:Consolas,monospace;font-size:22px;color:var(--gold);font-weight:700}
+  .version .build{font-size:11px;color:var(--dim);margin-top:5px}
+
+  .section{
+    margin-top:26px;background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:18px;padding:24px 26px;position:relative;
+  }
+  .section::before{
+    content:attr(data-n);position:absolute;right:24px;top:18px;
+    font-family:Consolas,monospace;font-size:46px;font-weight:700;
+    color:rgba(255,255,255,.04);letter-spacing:2px;
+  }
+  .section-head{display:flex;align-items:baseline;gap:14px;margin-bottom:18px}
+  .section-head .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:3px 9px}
+  .rule{height:1px;background:var(--line);margin:14px 0}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .stack{display:flex;flex-direction:column;gap:12px}
+  .rowline{display:flex;gap:10px;align-items:flex-start}
+  .dotmark{width:7px;height:7px;border-radius:50%;background:var(--blue);margin-top:6px;flex:none}
+  .dotmark.gold{background:var(--gold)} .dotmark.green{background:var(--green)}
+  .dotmark.purple{background:var(--purple)} .dotmark.orange{background:var(--orange)}
+  .dotmark.cyan{background:var(--cyan)}
+
+  .info-list{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px}
+  .info-list .item{padding:9px 0;border-bottom:1px dashed rgba(255,255,255,.065)}
+  .info-list .item b{font-size:13.5px;font-weight:600}
+  .info-list .item p{font-size:11.5px;color:var(--muted);line-height:1.55;margin-top:3px}
+
+  .kbd{display:inline-block;font-family:Consolas,monospace;font-size:11px;color:#cfe1ff;background:rgba(76,141,255,.12);border:1px solid rgba(76,141,255,.22);border-radius:5px;padding:1px 5px}
+
+  /* 迷你卡片 */
+  .minicard{width:340px;height:102px;border-radius:14px;background:linear-gradient(180deg,#1a202e,#262e40);border:1px solid rgba(255,255,255,.04);padding:10px 14px;position:relative}
+  .minicard .st{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px}
+  .minicard .st i{width:5px;height:5px;border-radius:50%;background:var(--blue);display:inline-block}
+  .minicard .big{font-family:Consolas,monospace;font-size:32px;font-weight:700;letter-spacing:.5px;margin-top:3px}
+  .minicard .bar{height:4px;border-radius:4px;background:rgba(255,255,255,.1);margin-top:6px;overflow:hidden}
+  .minicard .bar>i{display:block;height:100%;width:62%;background:linear-gradient(90deg,#3d7ff0,#64a0ff);border-radius:4px}
+  .minicard .right{position:absolute;right:14px;top:12px;font-size:10px;color:var(--dim);text-align:right}
+  .bigcard-shot{width:360px;border-radius:16px;border:1px solid rgba(255,255,255,.06);display:block}
+  .shotwrap{display:flex;gap:18px;align-items:flex-start}
+  .shotwrap figure{margin:0}
+  .shotwrap figcaption{font-size:10.5px;color:var(--dim);margin-top:7px;text-align:center}
+
+  .toolbar{display:flex;gap:8px;align-items:center;margin:14px 0 0}
+  .tool{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;border:1px solid var(--line);color:var(--muted);font-size:13px;font-family:Consolas,monospace}
+  .tool.salary{color:var(--gold);border-color:rgba(242,179,76,.35);background:rgba(242,179,76,.08)}
+  .tool .mini-ico{font-size:12px}
+
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);font-size:12px;line-height:1.55}
+  th{color:var(--dim);font-weight:500;background:rgba(255,255,255,.018)}
+  td b{font-weight:600;color:var(--ink)}
+  .pill{display:inline-block;font-size:10.5px;border-radius:20px;padding:2px 8px;border:1px solid var(--line);color:var(--muted);margin:2px 3px 2px 0;white-space:nowrap}
+  .pill.blue{color:#a9c7ff;border-color:rgba(76,141,255,.3);background:rgba(76,141,255,.08)}
+  .pill.gold{color:#ffd489;border-color:rgba(242,179,76,.3);background:rgba(242,179,76,.08)}
+  .pill.green{color:#8fe8c6;border-color:rgba(79,209,161,.28);background:rgba(79,209,161,.07)}
+  .pill.purple{color:#d4c2ff;border-color:rgba(177,140,255,.3);background:rgba(177,140,255,.08)}
+  .pill.orange{color:#ffc4a8;border-color:rgba(255,159,110,.3);background:rgba(255,159,110,.08)}
+
+  .tabcard{background:rgba(8,13,21,.32);border:1px solid var(--line);border-radius:12px;padding:14px;min-height:250px}
+  .tabcard h3{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:14px}
+  .tabcard h3 .idx{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:10px;color:#0b0f17;font-weight:700}
+  .tabcard .li{display:flex;gap:7px;font-size:11.5px;color:var(--muted);line-height:1.55;padding:3px 0}
+  .tabcard .li b{color:#cfd9ea;font-weight:500;white-space:nowrap}
+  .tabcard .li span{color:var(--dim)}
+
+  .bubble{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+  .capsule{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(255,255,255,.015)}
+  .capsule .ic{font-size:16px;color:var(--blue);margin-bottom:6px}
+  .capsule b{font-size:12.5px;display:block;margin-bottom:4px}
+  .capsule p{font-size:10.5px;color:var(--muted);line-height:1.55}
+
+  .kv{display:grid;grid-template-columns:130px 1fr;gap:6px 12px;font-size:11.5px;color:var(--muted);line-height:1.55}
+  .kv b{color:#cfd9ea;font-weight:500}
+
+  .note{font-size:11.5px;color:var(--dim);line-height:1.6;margin-top:10px}
+  .accent{color:var(--blue)} .gold{color:var(--gold)} .green{color:var(--green)}
+  .ink{color:var(--ink)}
+  .purple{color:var(--purple)} .orange{color:var(--orange)} .cyan{color:var(--cyan)}
+
+  .footer{margin-top:28px;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid var(--line);padding-top:16px;color:var(--dim);font-size:11px}
+  .footer b{color:var(--muted);font-weight:500}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="lead">
+    <h1>上班工具箱 · 一图说明书</h1>
+    <p class="sub">一个贴在屏幕边缘的 Windows 悬浮窗：看下班、看日程、看工资，还能用 5 位数字找同事、用 5 位字符开一个对话发两句「小纸条」。接不接飞书都能用；不联网时按班次推算。</p>
+  </div>
+  <div class="version">
+    <div class="v">v3.6.0</div>
+    <div class="build">Windows · 单实例 · 150% DPI · 离线可用</div>
+  </div>
+</header>
+
+<!-- 01 界面 -->
+<section class="section" data-n="01">
+  <div class="section-head">
+    <h2><span class="pill blue">界面</span> 一张卡片，两种形态</h2>
+    <span class="tag">收起 336×102 · 展开 420×282 · 含工资 420×456（150%）</span>
+  </div>
+  <div class="grid2">
+    <div class="shotwrap">
+      <figure>
+        <div class="minicard">
+          <div class="st"><i></i>工作中</div>
+          <div class="right">下班 20:04</div>
+          <div class="big">05:30:56</div>
+          <div class="bar"><i></i></div>
+        </div>
+        <figcaption>收起态：只留倒计时和下班时间</figcaption>
+      </figure>
+      <figure>
+        <img class="bigcard-shot" src="../test/visual/expanded-current.png" alt="展开卡片">
+        <figcaption>展开态：状态 / 倒计时 / 进度 / 午休 / 工时</figcaption>
+      </figure>
+    </div>
+    <div>
+      <h3>卡片上能直接看到</h3>
+      <div class="info-list">
+        <div class="item"><b>状态点 + 状态词</b><p>工作中 / 已达标 / 还没打卡 / 休息日 / 已下班</p></div>
+        <div class="item"><b>大号倒计时</b><p>距下班、距上班；最后 1 小时切「分:秒.厘秒」</p></div>
+        <div class="item"><b>主进度条</b><p>今日时间进度；最后 30 分钟自动变彩色</p></div>
+        <div class="item"><b>上班 → 预计下班</b><p>按打卡 + 应勤推算，固定在第二行</p></div>
+        <div class="item"><b>午休 / 晚休倒计时</b><p>可关；显示「距午休 / 午休中 / 距晚休」</p></div>
+        <div class="item"><b>已工作 / 应勤</b><p>最后一行提示工时是否达标</p></div>
+        <div class="item"><b>下一个日程</b><p>托盘菜单可看；提醒前会提前弹卡片</p></div>
+        <div class="item"><b>小纸条入口</b><p>右上角 ✈，见第 03 节</p></div>
+        <div class="item"><b>工资入口</b><p>右上角 ¥，见第 02 节</p></div>
+      </div>
+      <div class="rule"></div>
+      <div class="rowline" style="align-items:center;gap:12px">
+        <div class="toolbar">
+          <span class="tool">✈</span><span class="tool salary">¥</span><span class="tool">⚙</span><span class="tool">↻</span><span class="tool">›</span>
+        </div>
+        <div class="small">
+          <b class="purple">✈ 小纸条</b>&nbsp;·&nbsp;
+          <b class="gold">¥ 工资</b>（单击展开 / 收起）&nbsp;·&nbsp;
+          <b>⚙ 设置</b>&nbsp;·&nbsp;<b>↻ 刷新飞书</b>&nbsp;·&nbsp;<b>› 收起</b>
+        </div>
+      </div>
+      <div class="note">单击收起条展开；拖动可移动并自动吸附左右边缘；展开 20 秒没动静自动收起（可调为 0 = 不自动）。</div>
+    </div>
+  </div>
+</section>
+
+<!-- 02 工资 -->
+<section class="section" data-n="02">
+  <div class="section-head">
+    <h2><span class="pill gold">工资</span> 今日收入，实时跳动</h2>
+    <span class="tag">设置 → 工资：月工资 + 发薪日</span>
+  </div>
+  <div style="display:grid;grid-template-columns:360px 1fr;gap:30px;align-items:start">
+    <figure style="margin:0">
+      <img src="../test/visual/salary-live-huang.png" style="width:340px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="工资面板">
+      <figcaption class="tiny" style="margin-top:7px;text-align:center">金色主题：整数位金色渐变 + 常驻柔光，小数位白色</figcaption>
+    </figure>
+    <div>
+      <div class="grid3">
+        <div class="tabcard" style="min-height:0">
+          <h3><span class="idx" style="background:var(--gold)">¥</span> 今日收入</h3>
+          <div class="small">时薪 × 今日已工作秒数，最多到日薪；<b class="ink">保留 3 位小数</b>，18fps 高速跳动。</div>
+        </div>
+        <div class="tabcard" style="min-height:0">
+          <h3><span class="idx" style="background:var(--blue)">月</span> 本月收入</h3>
+          <div class="small">日薪 × 本月已完成工作日 + 今日收入；只按日期 + 今天这一次打卡推算。</div>
+        </div>
+        <div class="tabcard" style="min-height:0">
+          <h3><span class="idx" style="background:var(--green)">薪</span> 发薪日</h3>
+          <div class="small">1–31 号；当月没有 31 号按最后一天，显示「N 天后 / 今天发薪」。</div>
+        </div>
+      </div>
+      <div class="rule"></div>
+      <h3 style="margin-bottom:8px">数字效果</h3>
+      <div class="small">
+        <span class="pill gold">整数位</span> 主题色渐变 + 轻一档常驻柔光 + <b>6.5 秒一轮</b>流动高光<br>
+        <span class="pill" style="color:#fff">小数位</span> 深色主题白色，浅色主题自动切深色文字<br>
+        <span class="pill">浅色主题</span> 整数位自动压深、柔光减弱、流光降亮，白底也看得清<br>
+        <span class="pill blue">展开</span> 430ms 高度缓动，header / 数字 / 本月收入三行按 180 / 220 / 220ms 依次浮现<br>
+        <span class="pill">收起</span> 300ms 反向淡出；没有双击固定，再点 ¥ 直接收起
+      </div>
+      <div class="rule"></div>
+      <h3 style="margin-bottom:8px">计算口径</h3>
+      <div class="kv">
+        <b>本月应出勤</b><span>按「考勤」页工作日 + 节假日 / 调休自动算</span>
+        <b>日薪 / 时薪</b><span>日薪 = 月薪 ÷ 应出勤；时薪 = 日薪 ÷ 当日应勤（固定班次扣午休 / 晚休）</span>
+        <b>今日收入</b><span>时薪 × 已工作秒数（扣休息），封顶日薪；休息日为 0</span>
+        <b>本月收入</b><span>日薪 × 已完成工作日 + 今日收入</span>
+        <b>没填月薪</b><span>点 ¥ 直接打开「设置 → 工资」</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 03 小纸条 -->
+<section class="section" data-n="03">
+  <div class="section-head">
+    <h2><span class="pill purple">小纸条</span> 不装账号：5 位数字找人，5 位字符开一个对话</h2>
+    <span class="tag">入口：卡片右上角 ✈（¥ 左边）· 公共 MQTT 中继</span>
+  </div>
+  <div class="grid2">
+    <div>
+      <div class="shotwrap">
+        <figure style="margin:0">
+          <img src="../note-drawer.png" style="width:372px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="小纸条 抽屉式">
+          <figcaption>抽屉式（A，默认）：群聊气泡前先显示「昵称：」，没昵称才用 ID</figcaption>
+        </figure>
+        <figure style="margin:0">
+          <img src="../note-columns.png" style="width:262px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="小纸条 极简双栏">
+          <figcaption>极简双栏（C）：左边对话列表（名字 + 对方 ID），右边 8 条历史</figcaption>
+        </figure>
+      </div>
+      <div class="shotwrap" style="margin-top:14px">
+        <figure style="margin:0">
+          <img src="../note-delete.png" style="width:372px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="小纸条 对话多了 右键删除">
+          <figcaption>对话多了：滚轮往下翻；右键对话 → 红色「删除」，连本机 8 条一起删</figcaption>
+        </figure>
+      </div>
+      <div class="shotwrap" style="margin-top:14px">
+        <figure style="margin:0">
+          <img src="../note-flash.png" style="width:340px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="收到小纸条 卡片边框闪光">
+          <figcaption>收到时：卡片圆角边框连闪 2 次；没读每 5 秒轻闪，读完即停</figcaption>
+        </figure>
+      </div>
+    </div>
+    <div>
+      <h3>怎么用</h3>
+      <div class="info-list">
+        <div class="item"><b>本机 ID</b><p>第一次启动生成 5 位数字；设置 → 纸条 可复制 / 重新生成</p></div>
+        <div class="item"><b>新建对话</b><p>5 位纯数字 = 和这个 ID 的人单独对话（自动查在线）；其它任意 5 位字符 = 对话码，别人输入同一个码就进同一个对话</p></div>
+        <div class="item"><b>昵称</b><p>设置 → 纸条「本机 ID 与昵称」里填（≤12 字）；别人按你的 5 位数字 ID 添加对话，会自动拿到并直接显示昵称</p></div>
+        <div class="item"><b>卡片页改昵称</b><p>v3.6：面板里「＋ 新建对话」左边那颗昵称胶囊，<b>双击</b>就地改本机昵称，不用进设置页；单击只提示一句</p></div>
+        <div class="item"><b>消息前缀</b><p>对话码群聊里，别人的消息前缀直接是「昵称：内容」，没填昵称才退回「ID 12345：」</p></div>
+        <div class="item"><b>备注优先</b><p>本机给对话写的备注优先级最高：备注 ＞ 对方昵称 ＞ ID / 对话码</p></div>
+        <div class="item"><b>改名 / 备注</b><p>双击对话名字就地改（≤8 字）；这段备注会优先显示在对话列表和聊天头部</p></div>
+        <div class="item"><b>保留 ID</b><p>历史行左边、双栏标题里始终能看到对方 ID，看到就能用「＋ 新建对话」按 5 位数字建一对一</p></div>
+        <div class="item"><b>看消息</b><p>点 / hover 对话看最后一条 + 输入框；点输入框长高看最近 8 条</p></div>
+        <div class="item"><b>对话多了</b><p>v3.6：抽屉式列表页一屏<b>两排</b>（4×2 = 8 个，≤4 个对话时还是一排），滚轮往下翻，右边有滚动提示；双栏竖排一屏 5 行</p></div>
+        <div class="item"><b>右键删除</b><p>右键某个对话 → 右半边出红色「删除」，点一下连本机这段 8 条消息一起删</p></div>
+        <div class="item"><b>发消息</b><p>回车发一行（最多 200 字），发完输入框留着可以接着打；未读角标同步</p></div>
+        <div class="item"><b>收到时</b><p>卡片圆角边框连闪 2 次；没读时每 5 秒轻闪，读完即停</p></div>
+        <div class="item"><b>两套样式</b><p>抽屉式 A / 极简双栏 C，设置 → 纸条 里切，数据一致</p></div>
+      </div>
+      <div class="rule"></div>
+      <h3>尺寸与传输</h3>
+      <div class="small">
+        <span class="pill">抽屉</span> 392×282 DIP（未选对话收成 124，对话 &gt;4 个铺两排 158、历史 476），150% 下 588×423 像素<br>
+        <span class="pill">双栏</span> 470×298 DIP（历史 512），150% 下 705×768 像素<br>
+        <span class="pill purple">字号</span> 聊天正文 9.4pt、标题 10.5pt，和卡片正文同级（之前只有 6.25pt）<br>
+        <span class="pill">边框</span> 卡片外描边 1.8 DIP（比之前粗一点，原来 1 DIP）<br>
+        <span class="pill">主题</span> 一对一走对方 ID；对话码走房间主题 <span class="kbd">xzt/v1/room/&lt;hex&gt;</span><br>
+        <span class="pill">中继</span> 默认 <span class="kbd">broker.hivemq.com:1883</span>，设置里可改地址 / 端口 + 测试连接<br>
+        <span class="pill">边界</span> 明文转发、不存离线消息；每个对话只留最近 8 条
+      </div>
+      <div class="note">对话码没有密码，谁输入同一个码谁就进这个对话，别用公司名 / 工号这类猜得到的码；公共中继明文、不存离线消息。</div>
+    </div>
+  </div>
+</section>
+
+<!-- 04 日程与提醒 -->
+<section class="section" data-n="04">
+  <div class="section-head">
+    <h2><span class="pill green">日程</span> 四类日程，每类独立提醒</h2>
+    <span class="tag">固定 / 飞书会议 / 普通日程 / Outlook</span>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <h3>四类来源</h3>
+      <table>
+        <tr><th style="width:92px">类型</th><th>从哪来</th><th style="width:150px">能不能改</th></tr>
+        <tr><td><b class="blue">固定日程</b></td><td>午休 / 晚休 / 下班 + 自建重复日程（每天 / 单周 / 双周）</td><td>设置 → 固定，每条可单独配色</td></tr>
+        <tr><td><b class="green">飞书会议</b></td><td>飞书日历 <span class="kbd">calendar +agenda</span>，只读</td><td>设置 → 提醒 → 读取飞书日程</td></tr>
+        <tr><td><b class="orange">普通日程</b></td><td>手动添加：胶囊菜单「新增日程」或设置页</td><td>随便改</td></tr>
+        <tr><td><b class="purple">Outlook</b></td><td>.ics 订阅 / 本地 .ics / Graph 登录；可多份日历</td><td>只读，跟着订阅走</td></tr>
+      </table>
+      <div class="note">全天事件不提醒；<span class="kbd">CANCELLED</span>、<span class="kbd">RECURRENCE-ID</span> 改单次的跳过；只同步未来 14 天。</div>
+    </div>
+    <div>
+      <h3>提醒样式（每类独立）</h3>
+      <div class="grid3">
+        <div class="tabcard" style="min-height:0"><h3 style="font-size:12.5px">提醒范围</h3><div class="small">卡内 / 全屏</div></div>
+        <div class="tabcard" style="min-height:0"><h3 style="font-size:12.5px">扩散样式</h3><div class="small">圆形柔光 / 进度条拉伸 / 警戒带</div></div>
+        <div class="tabcard" style="min-height:0"><h3 style="font-size:12.5px">配色</h3><div class="small">跟随主题 + 39 套内置主题</div></div>
+      </div>
+      <div class="rule"></div>
+      <h3>提醒行为</h3>
+      <div class="small">
+        <span class="pill">提前量</span> 飞书会议 / 普通日程 / Outlook 各自设，Outlook 每份日历可覆盖<br>
+        <span class="pill">停留</span> 3–20 秒最短停留，之后常驻到时段结束；点卡片或 × 关闭<br>
+        <span class="pill">午休 / 晚休</span> 开始、结束各响一次；中途打开会补「午休中」常驻卡<br>
+        <span class="pill">下班</span> 到点没打卡 → 常驻「该下班啦」，每 5 分钟重播，打卡后消失<br>
+        <span class="pill">补提醒</span> 开始后 ≤60 分钟且未结束 → 补一次「正在进行」，晚同步 / 睡眠醒来都不漏
+      </div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="grid3">
+    <div class="tabcard" style="min-height:0">
+      <h3><span class="idx" style="background:var(--purple)">O</span> Outlook / Exchange</h3>
+      <div class="small">
+        · 多份日历，逐份启停 / 提前量 / 立即同步<br>
+        · 来源：订阅地址 / 本地 .ics / Graph 登录<br>
+        · 一份失败只影响它自己，保留上次缓存<br>
+        · Graph 走设备码登录，刷新令牌 DPAPI 加密<br>
+        · 每 15 分钟拉一次，重启先用缓存
+      </div>
+    </div>
+    <div class="tabcard" style="min-height:0">
+      <h3><span class="idx" style="background:var(--green)">L</span> 飞书考勤 / 日程</h3>
+      <div class="small">
+        · 私聊机器人发「1」上班、「2」下班<br>
+        · 设置里填会话 ID / 机器人名 / 轮询分钟<br>
+        · 读飞书日历会议，会议提前量单独设<br>
+        · 托盘可一键发 1 / 2（需补发送权限）
+      </div>
+    </div>
+    <div class="tabcard" style="min-height:0">
+      <h3><span class="idx" style="background:var(--orange)">A</span> 提醒动效</h3>
+      <div class="small">
+        · 圆形柔光 / 进度条拉伸：从进度条末端扩散<br>
+        · 警戒带：整屏黄条 + 滚动斜纹 + 抽屉卡<br>
+        · 全屏约 1 秒入场、停留最多 6 秒；点任意处收回<br>
+        · 减少动态 / 高对比度时自动降级为卡片内
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 05 设置总表 -->
+<section class="section" data-n="05">
+  <div class="section-head">
+    <h2><span class="pill purple">设置</span> 七个页签，所有开关</h2>
+    <span class="tag">点卡片右上角 ⚙ 打开</span>
+  </div>
+
+  <div class="grid3" style="margin-bottom:16px">
+    <div class="tabcard">
+      <h3><span class="idx" style="background:var(--blue)">1</span> 考勤</h3>
+      <div class="li"><b>班次</b><span>固定班次 / 弹性工时</span></div>
+      <div class="li"><b>上下班</b><span>09:00 / 18:00，可改</span></div>
+      <div class="li"><b>每日应勤</b><span>弹性模式：小时 + 分钟</span></div>
+      <div class="li"><b>扣除午休</b><span>午休区间从工时里扣</span></div>
+      <div class="li"><b>工作日</b><span>周一~周日逐日勾，勾哪几天就哪几天上班；快捷按钮「周一~周五 / 周一~周六 / 每天」</span></div>
+      <div class="li"><b>节假日 / 调休</b><span>某天休息 / 调休上班，覆盖上面的工作日</span></div>
+      <div class="li"><b>托盘快捷</b><span>今天设为休息日 / 上班日</span></div>
+    </div>
+
+    <div class="tabcard">
+      <h3><span class="idx" style="background:var(--green)">2</span> 固定</h3>
+      <div class="li"><b>内置</b><span>午休 / 晚休 / 下班三条</span></div>
+      <div class="li"><b>自建</b><span>＋ 新的固定日程</span></div>
+      <div class="li"><b>时间</b><span>开始 / 结束，可只响一次</span></div>
+      <div class="li"><b>重复</b><span>每天 / 单数周 / 双数周</span></div>
+      <div class="li"><b>重复至</b><span>指定日期或永远</span></div>
+      <div class="li"><b>开关</b><span>启用 / 到点提醒 / 结束也提醒</span></div>
+      <div class="li"><b>其它</b><span>计入工时扣除 / 配色；列表超 3 条滚动</span></div>
+    </div>
+
+    <div class="tabcard">
+      <h3><span class="idx" style="background:var(--orange)">3</span> 提醒</h3>
+      <div class="li"><b>飞书</b><span>开关 / 会话 ID / 机器人名 / 轮询分钟</span></div>
+      <div class="li"><b>飞书日程</b><span>读取 / 不读取</span></div>
+      <div class="li"><b>提前量</b><span>会议提前 / 日程提前（分钟）</span></div>
+      <div class="li"><b>日程列表</b><span>点开看详情，再点收起</span></div>
+      <div class="li"><b>加日程</b><span>标题 / 地点 / 日期 / 时间 / 时长</span></div>
+      <div class="li"><b>快速填入</b><span>+3 / +5 / +15 / +30 / +60 分钟</span></div>
+    </div>
+
+    <div class="tabcard">
+      <h3><span class="idx" style="background:var(--gold)">4</span> 外观</h3>
+      <div class="li"><b>主题</b><span>39 套内置 + 自建（背景 / 进度条 / 名字）</span></div>
+      <div class="li"><b>不透明度</b><span>30–100%</span></div>
+      <div class="li"><b>自动收起</b><span>0–120 秒，0 = 不自动</span></div>
+      <div class="li"><b>窗口</b><span>置顶 / 开机自启 / 显示午休</span></div>
+      <div class="li"><b>动效</b><span>减少动态 / 最短停留 3–20 秒</span></div>
+      <div class="li"><b>背景风格</b><span>v3.6：纯色 / 磨砂玻璃（半透明 + 磨砂颗粒，卡片 / 小纸条 / 胶囊一起变）</span></div>
+      <div class="li"><b>背景光效</b><span>原样 / 角落 / 进度条 / 两者</span></div>
+      <div class="li"><b>字体</b><span>中文字体、数字字体分开选</span></div>
+      <div class="li"><b>配置备份</b><span>导出 / 导入 / 恢复默认</span></div>
+    </div>
+
+    <div class="tabcard">
+      <h3><span class="idx" style="background:var(--purple)">5</span> 日程</h3>
+      <div class="li"><b>日历列表</b><span>勾选启用 / 添加 / 编辑 / 删除</span></div>
+      <div class="li"><b>每份日历</b><span>名称 / 来源 / 地址 / 提前量</span></div>
+      <div class="li"><b>来源</b><span>订阅 .ics / 本地 .ics / Graph</span></div>
+      <div class="li"><b>操作</b><span>立即同步 / Outlook 登录</span></div>
+      <div class="li"><b>四类样式</b><span>固定 / 飞书 / 普通 / Outlook</span></div>
+      <div class="li"><b>每类三项</b><span>提醒范围 / 扩散样式 / 配色</span></div>
+      <div class="li"><b>默认提前</b><span>Outlook 0 = 用默认值</span></div>
+    </div>
+
+    <div class="tabcard">
+      <h3><span class="idx" style="background:var(--cyan)">6</span> 工资</h3>
+      <div class="li"><b>月工资</b><span>元 / 月，支持两位小数</span></div>
+      <div class="li"><b>发薪日</b><span>1–31 号</span></div>
+      <div class="li"><b>预览</b><span>本月应出勤 + 日薪</span></div>
+      <div class="li"><b>自动算</b><span>按考勤页工作日 / 节假日 / 调休</span></div>
+      <div class="li"><b>今日</b><span>时薪 × 已工作秒数，3 位小数</span></div>
+      <div class="li"><b>本月</b><span>日薪 × 已完成工作日 + 今日</span></div>
+      <div class="li"><b>发薪日</b><span>没有该日按月末，显示倒计时</span></div>
+      <div class="li"><b>限制</b><span>无历史打卡，默认之前工作日全勤</span></div>
+    </div>
+
+    <div class="tabcard">
+      <h3><span class="idx" style="background:var(--purple)">7</span> 纸条</h3>
+      <div class="li"><b>样式</b><span>抽屉式 A / 极简双栏 C</span></div>
+      <div class="li"><b>本机 ID</b><span>5 位数字，复制 / 重新生成</span></div>
+      <div class="li"><b>昵称</b><span>≤12 字，别人加你 / 群里发消息直接显示</span></div>
+      <div class="li"><b>中继</b><span>地址 + 端口 + 测试连接</span></div>
+      <div class="li"><b>对话</b><span>列表显示 名字 · 对话码 / ID；可改名 / 删除</span></div>
+      <div class="li"><b>存储</b><span>每个对话只留最近 8 条</span></div>
+      <div class="li"><b>未读</b><span>面板角标 + 卡片边框闪</span></div>
+    </div>
+  </div>
+
+  <div class="grid3">
+    <div class="tabcard" style="min-height:0">
+      <h3><span class="idx" style="background:var(--blue)">A</span> 字体</h3>
+      <div class="small">
+        设置 → 外观 →「字体…」：中文、数字两个下拉，实时预览中文样张 / <span class="kbd">05:05:17</span> / <span class="kbd">¥12,345.678</span>。数字默认 Consolas，建议等宽；保存后悬浮窗立即重建字体。
+      </div>
+    </div>
+    <div class="tabcard" style="min-height:0">
+      <h3><span class="idx" style="background:var(--gold)">B</span> 主题</h3>
+      <div class="small">
+        39 套内置，按主色推导背景 / 轨道 / 文字三层；四个白系自动转深色文字。自建主题可存无限套，预览小卡片按 DPI 缩放，不再重叠。
+      </div>
+    </div>
+    <div class="tabcard" style="min-height:0">
+      <h3><span class="idx" style="background:var(--green)">C</span> 配置</h3>
+      <div class="small">
+        <span class="kbd">settings.json</span> 存所有设置；导入 / 导出带日程、主题、字体、Outlook 日历；换电脑或给同事复用直接带一份。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 06 交互 -->
+<section class="section" data-n="06">
+  <div class="section-head">
+    <h2><span class="pill orange">交互</span> 右键胶囊 + 托盘菜单</h2>
+    <span class="tag">不用翻设置也能完成常用操作</span>
+  </div>
+  <div class="grid2">
+    <div>
+      <h3>右键卡片：六颗胶囊</h3>
+      <div class="bubble">
+        <div class="capsule"><div class="ic">＋</div><b>新增日程</b><p>默认「临时日程」+30 分钟；标题/地点可改，+15/+30/+60 或保存直接建。</p></div>
+        <div class="capsule"><div class="ic">◐</div><b>修改主题</b><p>4×3 色卡一屏 12 张，滚轮翻页；点一张立刻换，也能新建主题。</p></div>
+        <div class="capsule"><div class="ic">⏱</div><b>触发上下班</b><p>「上班打卡 / 下班打卡」，对应飞书发 1 / 2，先确认再发。</p></div>
+        <div class="capsule"><div class="ic">⌖</div><b>窗口置顶</b><p>点一下切换；胶囊文字变成「已置顶」，再点取消。</p></div>
+        <div class="capsule"><div class="ic">🔔</div><b>预览通知（v3.6）</b><p>上班 / 午休 / 飞书会议 / Outlook / 普通日程 / 下班提醒，选一类立刻真播一遍，只放一遍。</p></div>
+        <div class="capsule"><div class="ic">↻</div><b>检查更新（v3.6）</b><p>自动查 GitHub 最新版本；有新版本可全量更新（下载 exe → 替换 → 自动重启）。</p></div>
+      </div>
+      <div class="note">胶囊贴着卡片外侧竖排弹出；点开的那颗原地长成 246 宽的大卡片，下面的胶囊被顶下去，内容稍后淡入。六颗胶囊和卡片都是<b>一条 1 DIP 主题色细边</b>、不画投影；收起时整块菜单淡出 + 往卡片方向缩回（180ms）。</div>
+    </div>
+    <div>
+      <h3>托盘右键菜单</h3>
+      <div class="grid2" style="gap:0 20px">
+        <div class="small">
+          · 设置<br>
+          · 立即同步飞书<br>
+          · 刷新飞书日程<br>
+          · 刷新 Outlook 日程<br>
+          · 下一个日程：…<br>
+          · 预览提醒动画<br>
+          · 在飞书发「1」/「2」
+        </div>
+        <div class="small">
+          · 展开 / 收起<br>
+          · 今天设为休息日 / 上班日<br>
+          · 窗口置顶<br>
+          · 开机自启<br>
+          · 导出 / 导入配置<br>
+          · 退出
+        </div>
+      </div>
+      <div class="rule"></div>
+      <h3>卡片手势</h3>
+      <div class="small">
+        单击收起条 → 展开；按住拖动 → 移动，松手吸附左右边缘；展开 20 秒无操作 → 自动收起（可调 0）；提醒卡点任意处 / 右上角 × → 关闭当前提醒。
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 07 运行与数据 -->
+<section class="section" data-n="07">
+  <div class="section-head">
+    <h2><span class="pill cyan">运行</span> 数据、文件与边界</h2>
+    <span class="tag">出问题先看 widget.log</span>
+  </div>
+  <div class="grid3">
+    <div class="tabcard" style="min-height:0">
+      <h3>文件位置</h3>
+      <div class="kv">
+        <b>设置</b><span><span class="kbd">%APPDATA%\WorkCountdown\settings.json</span></span>
+        <b>日志</b><span><span class="kbd">widget.log</span>（同目录）</span>
+        <b>字体</b><span>exe 旁 <span class="kbd">fonts\</span>（PingFang.ttc 等）</span>
+        <b>便携</b><span>exe 旁放 <span class="kbd">portable.txt</span> → data 目录</span>
+      </div>
+    </div>
+    <div class="tabcard" style="min-height:0">
+      <h3>运行特性</h3>
+      <div class="small">
+        · 单实例：重复打开只会把已有窗口叫到前面<br>
+        · 置顶看门狗：每 2 秒检查一次，被系统摘掉会补回<br>
+        · 150% DPI 感知，分层窗口整帧抗锯齿<br>
+        · 不接飞书也能用，按班次时间推算<br>
+        · 字体 / 主题 / 配置都可导出带走
+      </div>
+    </div>
+    <div class="tabcard" style="min-height:0">
+      <h3>已知边界</h3>
+      <div class="small">
+        · 工资没有历史打卡，默认之前工作日全勤<br>
+        · Graph 只支持一份登录日历；多份请用 .ics<br>
+        · Outlook 只同步未来 14 天；全天事件不提醒<br>
+        · 补提醒上限 60 分钟，已结束的会不补<br>
+        · 小纸条走公共 MQTT：明文、不存离线消息；个人 ID 不保证全局唯一，对话码谁输入同一个码谁就进<br>
+        · 飞书发送「1/2」需要 <span class="kbd">im:message.send_as_user</span> 权限
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="footer">
+  <div><b>上班工具箱 v3.6.0</b> · 一图说明书 · 2026-11-13</div>
+  <div>设置入口：卡片右上角 ⚙ &nbsp;·&nbsp; 小纸条入口：右上角 ✈ &nbsp;·&nbsp; 工资入口：右上角 ¥ &nbsp;·&nbsp; 托盘：右键托盘图标</div>
+</div>
+
+</body>
+</html>

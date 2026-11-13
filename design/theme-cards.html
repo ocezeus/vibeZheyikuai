@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>主题色卡 · 交互预览（右键气泡 → 修改主题）</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:#0A0E15;color:#E8EDF7;
+    font-family:"Microsoft YaHei","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  .bar{position:fixed;left:0;right:0;top:0;height:52px;display:flex;align-items:center;gap:10px;padding:0 20px;z-index:20;
+    background:rgba(12,17,25,.92);border-bottom:1px solid rgba(255,255,255,.07)}
+  .bar .t{font:600 10px/1 "Bahnschrift",sans-serif;letter-spacing:.22em;color:#69748A;margin-right:6px}
+  .bar button{height:28px;padding:0 13px;border-radius:999px;border:1px solid rgba(255,255,255,.14);
+    background:rgba(255,255,255,.05);color:#D6DDEA;font-size:12px;cursor:pointer;font-family:inherit}
+  .bar button.on{background:#E8EDF7;color:#0B1018;border-color:#E8EDF7;font-weight:600}
+  .bar .hint{margin-left:auto;font-size:11.5px;color:#69748A}
+  .bar .hint b{color:#AEB9CC;font-weight:600}
+
+  /* ---------- 桌面底板 ---------- */
+  .stage{position:absolute;inset:52px 0 0 0;display:flex;align-items:center;justify-content:center;gap:16px;
+    background:
+      radial-gradient(70% 60% at 50% 18%,rgba(46,74,120,.20),transparent 70%),
+      linear-gradient(160deg,#0E141D,#080B11)}
+  .stage::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(40% 40% at 78% 82%,rgba(24,52,60,.16),transparent 70%)}
+
+  /* ---------- 卡片本体（和真程序一样 224×68 / 圆角 14） ---------- */
+  .card{position:relative;z-index:2;width:224px;height:68px;border-radius:14px;border:1px solid var(--edge);
+    background:linear-gradient(180deg,var(--bg1),var(--bg2));color:var(--tx);flex:none;
+    box-shadow:0 0 26px color-mix(in srgb,var(--ac) 32%,transparent),0 14px 30px rgba(0,0,0,.40);
+    transition:background .18s ease,color .18s ease}
+  .card .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:var(--ac);
+    box-shadow:0 0 7px var(--ac)}
+  .card .lab{position:absolute;left:24px;top:8px;font-size:9.5px;color:var(--mu)}
+  .card .rt{position:absolute;right:14px;top:8px;font-size:9.5px;color:var(--mu)}
+  .card .num{position:absolute;left:11px;top:21px;font:700 23px/27px "Consolas",monospace;letter-spacing:.01em}
+  .card .bar2{position:absolute;left:14px;right:14px;bottom:7px;height:3px;border-radius:2px;background:var(--trk)}
+  .card .bar2 i{position:absolute;inset:0;width:62%;border-radius:2px;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,transparent),var(--ac))}
+
+  /* ---------- 气泡面板（246 宽，和真程序一致） ---------- */
+  .bubble{position:relative;z-index:2;width:246px;flex:none;border-radius:18px;
+    background:linear-gradient(180deg,var(--surf1),var(--bg2));border:1px solid var(--edge);
+    box-shadow:0 22px 48px rgba(0,0,0,.52);overflow:hidden}
+  .phead{display:flex;align-items:center;gap:8px;height:40px;padding:0 13px;
+    border-bottom:1px solid color-mix(in srgb,var(--edge) 60%,transparent)}
+  .phead svg{width:15px;height:15px;fill:none;stroke:var(--ac);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .phead .lbl{font-size:11.5px;color:var(--tx)}
+  .phead .cnt{margin-left:auto;font-size:9.5px;color:var(--dm)}
+
+  .view{overflow-y:auto;overflow-x:hidden;padding:10px;scrollbar-width:none;overscroll-behavior:contain}
+  .view::-webkit-scrollbar{display:none}
+  .grid{display:grid;gap:8px;align-content:start}
+
+  /* 色卡 */
+  .tc{position:relative;border-radius:12px;overflow:hidden;cursor:pointer;flex:none;
+    border:1px solid color-mix(in srgb,var(--edge) 55%,transparent);
+    background:linear-gradient(180deg,var(--c1),var(--c2));
+    display:flex;align-items:center;
+    transition:transform .14s ease,box-shadow .14s ease}
+  .tc:hover{transform:translateY(-1px)}
+  .tc.sel{box-shadow:0 0 0 2px var(--ac),0 0 0 4px rgba(6,10,18,.55)}
+  .sw{flex:none;background:var(--ca)}
+  .nm{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
+    color:var(--ctx);overflow:hidden;text-align:center}
+  .nm i{font-style:normal;display:block;line-height:1.06}
+  .v-a .nm,.v-b .nm,.v-d .nm{flex-direction:column}
+
+  /* 方案 A：两列 105×62 */
+  .v-a .grid{grid-template-columns:repeat(2,1fr)}
+  .v-a .view{height:206px}
+  .v-a .tc{height:62px;padding:5px;gap:6px}
+  .v-a .sw{width:52px;height:52px;border-radius:9px}
+  .v-a .nm{font-size:9.5px;letter-spacing:.10em;line-height:1.1}
+
+  /* 方案 B：一行一张 222×131 */
+  .v-b .grid{grid-template-columns:1fr;gap:10px}
+  .v-b .view{height:292px}
+  .v-b .tc{height:131px;padding:11px;gap:14px}
+  .v-b .sw{width:109px;height:109px;border-radius:16px}
+  .v-b .nm{font-size:19px;letter-spacing:.14em;line-height:1.1;padding-right:8px}
+
+  /* 方案 C：一行一张扁卡 222×64，名字横排 */
+  .v-c .grid{grid-template-columns:1fr;gap:8px}
+  .v-c .view{height:222px}
+  .v-c .tc{height:64px;padding:6px;gap:9px}
+  .v-c .sw{width:52px;height:52px;border-radius:9px}
+  .v-c .nm{font-size:11.5px;letter-spacing:.02em;justify-content:flex-start;padding-left:2px;gap:0}
+  .v-c .nm i{display:inline}
+
+  /* 方案 D：4 列 × 3 行 = 12 张，面板高度和现在一样（106） */
+  .v-d .grid{grid-template-columns:repeat(4,1fr);gap:6px}
+  .v-d .view{height:130px;padding:8px}
+  .v-d .tc{height:34px;padding:3px;gap:4px;border-radius:8px}
+  .v-d .sw{width:27px;height:27px;border-radius:6px}
+  .v-d .nm{font-size:9px;letter-spacing:0;line-height:1.04;padding-right:1px}
+  .v-d .nm i{line-height:1.04}
+  .v-d .tc.sel{box-shadow:0 0 0 1.5px var(--ac),0 0 0 3px rgba(6,10,18,.5)}
+  /* 方案 0：现在这样（4 列小色块 + 底边高亮条） */
+  .v-0 .grid{grid-template-columns:repeat(4,1fr);gap:8px}
+  .v-0 .view{height:172px}
+  .v-0 .tc{height:26px;padding:0}
+  .v-0 .sw{position:absolute;left:2px;right:2px;bottom:2px;height:3px;width:auto;border-radius:2px}
+  .v-0 .nm{display:none}
+
+  .newbtn{display:flex;align-items:center;gap:8px;height:38px;margin:0 10px 10px;padding:0 11px;border-radius:10px;
+    background:color-mix(in srgb,var(--ac) 9%,transparent);
+    border:1px solid color-mix(in srgb,var(--ac) 30%,transparent);color:var(--ac);font-size:11px;cursor:pointer}
+  .newbtn .plus{width:14px;height:14px;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1}
+  .newbtn .tip{margin-left:auto;font-size:8.5px;color:var(--dm)}
+
+  /* 滚动指示条 */
+  .sbar{position:absolute;right:4px;top:50px;bottom:58px;width:3px;border-radius:2px;
+    background:color-mix(in srgb,var(--tx) 8%,transparent);pointer-events:none}
+  .sbar i{position:absolute;left:0;width:3px;border-radius:2px;background:color-mix(in srgb,var(--tx) 34%,transparent)}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,10px);opacity:0;pointer-events:none;
+    background:rgba(10,14,21,.94);border:1px solid rgba(255,255,255,.12);border-radius:12px;
+    padding:10px 16px;font-size:12px;color:#DCE3F0;transition:opacity .18s ease,transform .18s ease;max-width:560px;line-height:1.6}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+  .toast b{color:#fff}
+</style>
+</head>
+<body>
+<div class="bar">
+  <span class="t">THEME CARDS</span>
+  <button data-v="0">现在</button>
+  <button data-v="a" class="on">A 两列 105×62</button>
+  <button data-v="b">B 一行一张 222×131</button>
+  <button data-v="c">C 扁卡 222×64</button>
+  <button data-v="d">D 四列×三行 51×34</button>
+  <span class="hint">鼠标移到色卡上 <b>滚轮</b> 滚列表 · 点色卡 <b>立刻换主题</b> · 底部 <b>＋ 新建主题</b></span>
+</div>
+
+<div class="stage">
+  <div class="card" id="card">
+    <i class="dot"></i><span class="lab">距离下班</span><span class="rt">下班 18:00</span>
+    <div class="num" id="num">06:24:07</div>
+    <div class="bar2"><i></i></div>
+  </div>
+
+  <div class="bubble v-a" id="bubble">
+    <div class="phead">
+      <svg viewBox="0 0 24 24"><path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.15 0 1.9-.78 1.9-1.82 0-.55-.26-.98-.55-1.35-.3-.38-.52-.76-.52-1.22 0-.94.78-1.62 1.74-1.62h1.55c1.95 0 3.48-1.48 3.48-3.52 0-4.1-3.42-7.67-7.6-7.67Z"/><circle cx="8.1" cy="10.2" r="1.15"/><circle cx="12" cy="7.7" r="1.15"/><circle cx="15.9" cy="10.2" r="1.15"/></svg>
+      <span class="lbl">修改主题</span>
+      <span class="cnt" id="cnt">39 套</span>
+    </div>
+    <div class="view" id="view"><div class="grid" id="grid"></div></div>
+    <div class="newbtn" id="newbtn"><span class="plus">＋</span>新建主题<span class="tip">从当前配色开始</span></div>
+    <div class="sbar" id="sbar"><i id="thumb"></i></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var THEMES = [{"id":"midnight","name":"经典 · 午夜蓝","accent":"#4C8DFF","success":"#46D39A","bgTop":"#12161F","bgBottom":"#1B2130","track":"#2A3242","textMain":"#E8EDF7","textMuted":"#8B95A8","textDim":"#6C768A","edge":"#FFFFFF","light":false},{"id":"aurora","name":"经典 · 极光青","accent":"#2FD4C4","success":"#7FE08A","bgTop":"#0E1A1C","bgBottom":"#15292A","track":"#23403F","textMain":"#E6F4F3","textMuted":"#86A3A0","textDim":"#66817E","edge":"#FFFFFF","light":false},{"id":"sunset","name":"经典 · 落日橙","accent":"#FF9A5A","success":"#8FD98A","bgTop":"#211610","bgBottom":"#2E2019","track":"#46301F","textMain":"#FBEEDF","textMuted":"#B49A83","textDim":"#8E7763","edge":"#FFFFFF","light":false},{"id":"sakura","name":"经典 · 樱花粉","accent":"#FF7FA8","success":"#7FD8A8","bgTop":"#20141A","bgBottom":"#2E1E27","track":"#45262F","textMain":"#FCEAF2","textMuted":"#B893A3","textDim":"#8F7080","edge":"#FFFFFF","light":false},{"id":"forest","name":"经典 · 松林绿","accent":"#5FD08A","success":"#A8E06A","bgTop":"#101C15","bgBottom":"#18291F","track":"#27402F","textMain":"#E9F5EC","textMuted":"#8FAF9B","textDim":"#6D8A79","edge":"#FFFFFF","light":false},{"id":"graphite","name":"经典 · 石墨灰","accent":"#B9C2D0","success":"#8FD3A8","bgTop":"#141619","bgBottom":"#1F2228","track":"#2E323A","textMain":"#F0F2F6","textMuted":"#929AA8","textDim":"#6F7684","edge":"#FFFFFF","light":false},{"id":"ivory","name":"经典 · 象牙白","accent":"#3D6BFF","success":"#2E9E6B","bgTop":"#FCFDFF","bgBottom":"#EEF1F7","track":"#D9DFEA","textMain":"#1B2230","textMuted":"#5C6779","textDim":"#8A93A5","edge":"#182030","light":true},{"id":"zi-fengxin","name":"紫 · 凤信","accent":"#CFACC0","success":"#46D39A","bgTop":"#191517","bgBottom":"#292226","track":"#53454D","textMain":"#FAF7F9","textMuted":"#EDDFE7","textDim":"#E4D1DC","edge":"#FFFFFF","light":false},{"id":"zi-tengluo","name":"紫 · 藤萝","accent":"#7767A2","success":"#46D39A","bgTop":"#0F0E13","bgBottom":"#191720","track":"#322D40","textMain":"#F2F1F5","textMuted":"#CEC9DB","textDim":"#B6AFC9","edge":"#FFFFFF","light":false},{"id":"zi-doukou","name":"紫 · 豆蔻","accent":"#B7528C","success":"#46D39A","bgTop":"#160C12","bgBottom":"#25131D","track":"#49273A","textMain":"#F8EFF4","textMuted":"#E4C3D6","textDim":"#D7A7C2","edge":"#FFFFFF","light":false},{"id":"zi-jiegeng","name":"紫 · 桔梗","accent":"#C04AB7","success":"#46D39A","bgTop":"#110610","bgBottom":"#1C0B1A","track":"#371635","textMain":"#F3EBF3","textMuted":"#D3B3D0","textDim":"#BD8EBA","edge":"#FFFFFF","light":false},{"id":"lv-zhuang","name":"绿 · 竹篁","accent":"#A2D6C0","success":"#46D39A","bgTop":"#131A17","bgBottom":"#202B26","track":"#41564D","textMain":"#F6FBF9","textMuted":"#DCEFE7","textDim":"#CBE8DC","edge":"#FFFFFF","light":false},{"id":"lv-luwei","name":"绿 · 芦莠","accent":"#A4CB72","success":"#46D39A","bgTop":"#14180E","bgBottom":"#212917","track":"#42512E","textMain":"#F6FAF1","textMuted":"#DCEBC9","textDim":"#CCE2B0","edge":"#FFFFFF","light":false},{"id":"lv-kongque","name":"绿 · 孔雀","accent":"#0AFF8E","success":"#46D39A","bgTop":"#001109","bgBottom":"#001D10","track":"#003A1F","textMain":"#E6F4ED","textMuted":"#9ED5BC","textDim":"#70C19C","edge":"#FFFFFF","light":false},{"id":"lv-yuzan","name":"绿 · 玉簪","accent":"#8BC5AF","success":"#46D39A","bgTop":"#111815","bgBottom":"#1C2723","track":"#384F46","textMain":"#F3F9F7","textMuted":"#D3E9E1","textDim":"#BEDFD2","edge":"#FFFFFF","light":false},{"id":"hui-lusui","name":"灰 · 芦穗","accent":"#A99795","success":"#46D39A","bgTop":"#141212","bgBottom":"#221E1E","track":"#443C3C","textMain":"#F6F5F4","textMuted":"#DED7D7","textDim":"#CFC5C4","edge":"#FFFFFF","light":false},{"id":"hui-banjiu","name":"灰 · 斑鸠","accent":"#CB3F7D","success":"#46D39A","bgTop":"#090306","bgBottom":"#0F0509","track":"#1E0A13","textMain":"#EDE8EA","textMuted":"#BBA7B0","textDim":"#9B7E8B","edge":"#FFFFFF","light":false},{"id":"hui-langyan","name":"灰 · 狼烟","accent":"#67A282","success":"#46D39A","bgTop":"#0A0C0B","bgBottom":"#111413","track":"#232825","textMain":"#EEF0EF","textMuted":"#BFC4C1","textDim":"#A1A8A4","edge":"#FFFFFF","light":false},{"id":"hui-yanyu","name":"灰 · 燕羽","accent":"#A58F65","success":"#46D39A","bgTop":"#0D0B08","bgBottom":"#15130D","track":"#2B251A","textMain":"#F0EFEC","textMuted":"#C7C1B7","textDim":"#ACA495","edge":"#FFFFFF","light":false},{"id":"zong-chahe","name":"棕 · 茶褐","accent":"#E77922","success":"#46D39A","bgTop":"#0C0602","bgBottom":"#140B03","track":"#291606","textMain":"#F0EBE7","textMuted":"#C5B3A4","textDim":"#A98E79","edge":"#FFFFFF","light":false},{"id":"zong-kuangjin","name":"棕 · 矿金","accent":"#CF7E3A","success":"#46D39A","bgTop":"#100A05","bgBottom":"#1B1108","track":"#362110","textMain":"#F3EEE9","textMuted":"#D2BEAD","textDim":"#BC9F86","edge":"#FFFFFF","light":false},{"id":"zong-guibei","name":"棕 · 龟背","accent":"#B88F52","success":"#46D39A","bgTop":"#110D08","bgBottom":"#1C160D","track":"#382C19","textMain":"#F4F0EC","textMuted":"#D3C8B6","textDim":"#BFAD93","edge":"#FFFFFF","light":false},{"id":"zong-kafei","name":"棕 · 咖啡","accent":"#D36F36","success":"#46D39A","bgTop":"#140A05","bgBottom":"#211109","track":"#422311","textMain":"#F6EEEA","textMuted":"#DCBFAE","textDim":"#CCA188","edge":"#FFFFFF","light":false},{"id":"lan-jianshi","name":"蓝 · 涧石","accent":"#27C3E7","success":"#46D39A","bgTop":"#041317","bgBottom":"#062026","track":"#0C404C","textMain":"#E8F6F9","textMuted":"#AADBE7","textDim":"#81CADB","edge":"#FFFFFF","light":false},{"id":"lan-jingtai","name":"蓝 · 景泰","accent":"#0AA7FF","success":"#46D39A","bgTop":"#000D15","bgBottom":"#001623","track":"#002D46","textMain":"#E6F1F7","textMuted":"#9EC9E1","textDim":"#70AFD2","edge":"#FFFFFF","light":false},{"id":"lan-yuming","name":"蓝 · 玉茗","accent":"#0AD7FF","success":"#46D39A","bgTop":"#000D10","bgBottom":"#00161A","track":"#002C34","textMain":"#E6F0F2","textMuted":"#9EC8D0","textDim":"#70ADB9","edge":"#FFFFFF","light":false},{"id":"lan-zangqing","name":"蓝 · 藏青","accent":"#4678C3","success":"#46D39A","bgTop":"#05090F","bgBottom":"#090F18","track":"#121E30","textMain":"#EAEDF2","textMuted":"#AFBBCC","textDim":"#899AB4","edge":"#FFFFFF","light":false},{"id":"huang-gancao","name":"黄 · 甘草","accent":"#F8BE40","success":"#46D39A","bgTop":"#1E1708","bgBottom":"#32260D","track":"#634C1A","textMain":"#FEF8EC","textMuted":"#FCE6B6","textDim":"#FBDB94","edge":"#FFFFFF","light":false},{"id":"huang-daimao","name":"黄 · 玳瑁","accent":"#E2A451","success":"#46D39A","bgTop":"#1B140A","bgBottom":"#2D2110","track":"#5A4220","textMain":"#FCF6EE","textMuted":"#F4DCBD","textDim":"#EFCC9E","edge":"#FFFFFF","light":false},{"id":"huang-hupo","name":"黄 · 琥珀","accent":"#F8B713","success":"#46D39A","bgTop":"#1E1602","bgBottom":"#322504","track":"#634908","textMain":"#FEF8E7","textMuted":"#FCE4A5","textDim":"#FBD77B","edge":"#FFFFFF","light":false},{"id":"huang-liuli","name":"黄 · 琉璃","accent":"#F2CC13","success":"#46D39A","bgTop":"#1D1802","bgBottom":"#302904","track":"#615208","textMain":"#FEFAE7","textMuted":"#FAECA5","textDim":"#F8E27B","edge":"#FFFFFF","light":false},{"id":"hong-fengye","name":"红 · 枫叶","accent":"#EB1E32","success":"#46D39A","bgTop":"#1A0306","bgBottom":"#2B0609","track":"#560C13","textMain":"#FBE8EA","textMuted":"#EFA9B0","textDim":"#E8808B","edge":"#FFFFFF","light":false},{"id":"hong-fengxian","name":"红 · 凤仙","accent":"#EA2C59","success":"#46D39A","bgTop":"#1C0D11","bgBottom":"#2F161C","track":"#5E2C38","textMain":"#FDF1F4","textMuted":"#F7C8D3","textDim":"#F3AEBF","edge":"#FFFFFF","light":false},{"id":"hong-baochun","name":"红 · 报春","accent":"#EF859C","success":"#46D39A","bgTop":"#1D1013","bgBottom":"#301B1F","track":"#60353E","textMain":"#FDF3F5","textMuted":"#F9D1D9","textDim":"#F6BBC8","edge":"#FFFFFF","light":false},{"id":"hong-jinkui","name":"红 · 锦葵","accent":"#D9304F","success":"#46D39A","bgTop":"#19060A","bgBottom":"#2A0A10","track":"#531420","textMain":"#FAEBEE","textMuted":"#EDB1BC","textDim":"#E58D9D","edge":"#FFFFFF","light":false},{"id":"bai-yudu","name":"白 · 鱼肚","accent":"#A68740","success":"#2E9E6B","bgTop":"#F7F4ED","bgBottom":"#E6E3DC","track":"#D4D2CC","textMain":"#232221","textMuted":"#6F6E6B","textDim":"#999793","edge":"#182030","light":true},{"id":"bai-zhenzhu","name":"白 · 珍珠","accent":"#947951","success":"#2E9E6B","bgTop":"#E6DFD5","bgBottom":"#D6CFC6","track":"#C6C0B7","textMain":"#201F1E","textMuted":"#676460","textDim":"#8F8A84","edge":"#182030","light":true},{"id":"bai-yinmiao","name":"白 · 银苗","accent":"#8C6F5A","success":"#2E9E6B","bgTop":"#E7E3E0","bgBottom":"#D7D3D0","track":"#C7C3C1","textMain":"#20201F","textMuted":"#686665","textDim":"#8F8D8B","edge":"#182030","light":true},{"id":"bai-hehua","name":"白 · 荷花","accent":"#E66F00","success":"#2E9E6B","bgTop":"#FDECDC","bgBottom":"#EBDBCD","track":"#DACBBD","textMain":"#23211F","textMuted":"#726A63","textDim":"#9D9288","edge":"#182030","light":true}];
+
+var state = { sel: 0 };
+
+function shortName(n){
+  var i = n.indexOf('·');
+  return i >= 0 ? n.slice(i + 1).trim() : n;
+}
+function luma(hex){
+  var r = parseInt(hex.substr(1,2),16), g = parseInt(hex.substr(3,2),16), b = parseInt(hex.substr(5,2),16);
+  return (0.2126*r + 0.7152*g + 0.0722*b) / 255;
+}
+function mix(hex, other, t){
+  var a = [parseInt(hex.substr(1,2),16), parseInt(hex.substr(3,2),16), parseInt(hex.substr(5,2),16)];
+  var b = [parseInt(other.substr(1,2),16), parseInt(other.substr(3,2),16), parseInt(other.substr(5,2),16)];
+  var o = a.map(function(v,i){ return Math.round(v + (b[i]-v)*t); });
+  return '#' + o.map(function(v){ return ('0'+v.toString(16)).slice(-2); }).join('');
+}
+
+function applyTheme(t){
+  var light = luma(t.bgTop) > 0.56;
+  var surf = light ? mix(t.bgTop, '#FFFFFF', 0.02) : mix(t.bgTop, '#FFFFFF', 0.04);
+  var root = document.documentElement.style;
+  root.setProperty('--bg1', t.bgTop);
+  root.setProperty('--bg2', t.bgBottom);
+  root.setProperty('--tx', t.textMain);
+  root.setProperty('--mu', t.textMuted);
+  root.setProperty('--dm', t.textDim);
+  root.setProperty('--ac', t.accent);
+  root.setProperty('--trk', t.track);
+  root.setProperty('--edge', light ? 'rgba(0,0,0,.13)' : 'rgba(255,255,255,.11)');
+  root.setProperty('--surf1', surf);
+  document.querySelectorAll('.tc').forEach(function(el){
+    var c = THEMES[parseInt(el.dataset.i,10)];
+    el.style.setProperty('--c1', c.bgTop);
+    el.style.setProperty('--c2', c.bgBottom);
+    el.style.setProperty('--ca', c.accent);
+    el.style.setProperty('--ctx', c.textMain);
+    el.classList.toggle('sel', parseInt(el.dataset.i,10) === state.sel);
+  });
+  document.getElementById('cnt').textContent = THEMES.length + ' 套';
+}
+
+function build(){
+  var html = THEMES.map(function(t,i){
+    return '<div class="tc" data-i="'+i+'" title="'+t.name+'">'+
+      '<span class="sw"></span><span class="nm">'+shortName(t.name).split('').map(function(ch){return '<i>'+ch+'</i>';}).join('')+'</span></div>';
+  }).join('');
+  document.getElementById('grid').innerHTML = html;
+  document.querySelectorAll('.tc').forEach(function(el){
+    el.addEventListener('click', function(){
+      state.sel = parseInt(el.dataset.i,10);
+      applyTheme(THEMES[state.sel]);
+      toast('已切到 <b>' + THEMES[state.sel].name + '</b>');
+    });
+  });
+}
+
+function toast(msg){
+  var t = document.getElementById('toast');
+  t.innerHTML = msg;
+  t.classList.add('show');
+  clearTimeout(t._t);
+  t._t = setTimeout(function(){ t.classList.remove('show'); }, 2400);
+}
+
+/* 滚动指示条 */
+function syncBar(){
+  var v = document.getElementById('view');
+  var bar = document.getElementById('sbar'), thumb = document.getElementById('thumb');
+  var track = bar.clientHeight;
+  var ratio = v.clientHeight / v.scrollHeight;
+  if (ratio >= 0.999) { bar.style.opacity = 0; return; }
+  bar.style.opacity = 1;
+  var h = Math.max(24, track * ratio);
+  var max = v.scrollHeight - v.clientHeight;
+  var y = max <= 0 ? 0 : (v.scrollTop / max) * (track - h);
+  thumb.style.height = h + 'px';
+  thumb.style.top = y + 'px';
+}
+
+document.getElementById('view').addEventListener('scroll', syncBar);
+
+document.querySelectorAll('.bar button').forEach(function(b){
+  b.addEventListener('click', function(){
+    document.querySelectorAll('.bar button').forEach(function(x){ x.classList.remove('on'); });
+    b.classList.add('on');
+    document.getElementById('bubble').className = 'bubble v-' + b.dataset.v;
+    document.getElementById('view').scrollTop = 0;
+    syncBar();
+  });
+});
+
+document.getElementById('newbtn').addEventListener('click', function(){
+  toast('（预览）这里会打开现在的<b>调色盘</b>：以当前配色为起点，起完名字存成「我的主题」，建完立刻切过去');
+});
+
+/* 秒数走动，假装是活的 */
+var s = 6*3600 + 24*60 + 7;
+setInterval(function(){
+  s = s > 0 ? s - 1 : 6*3600;
+  var h = Math.floor(s/3600), m = Math.floor(s%3600/60), sec = s%60;
+  document.getElementById('num').textContent = ('0'+h).slice(-2)+':'+('0'+m).slice(-2)+':'+('0'+sec).slice(-2);
+}, 1000);
+
+build();
+applyTheme(THEMES[0]);
+syncBar();
+
+/* ?v=0|a|b|c 直接定格某个方案，方便出对照图 */
+(function(){
+  var q = new URLSearchParams(location.search);
+  var v = q.get('v');
+  if (v === null) return;
+  var btn = document.querySelector('.bar button[data-v="' + v + '"]');
+  if (btn) btn.click();
+})();
+</script>
+</body>
+</html>

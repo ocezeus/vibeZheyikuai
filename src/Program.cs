@@ -10,13 +10,16 @@ namespace WorkCountdown
     internal static class Program
     {
         private const string MutexName = "WorkCountdownWidget.SingleInstance";
-        private const string WindowTitle = "下班倒计时";
+        private const string WindowTitle = "上班工具箱";
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern IntPtr FindWindow(string cls, string title);
 
+        [DllImport("winmm.dll")] private static extern uint timeBeginPeriod(uint ms);
+
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr h, int cmd);
+
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr h);
@@ -24,6 +27,7 @@ namespace WorkCountdown
         [STAThread]
         private static void Main(string[] args)
         {
+            try { timeBeginPeriod(1); } catch { }   // 1ms 计时器：警戒带动画要 60–120fps
             // 上一次退出可能还没把进程收干净：等一小会儿再抢，别让「重新打开没反应」发生
             Mutex mutex = null;
             bool createdNew = false;

@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>上班工具箱 · 今日收入数字效果</title>
+<style>
+  :root{
+    --bg1:#1a202e; --bg2:#262e40;
+    --ink:#ecf1fa; --muted:#9aa6bd; --dim:#6f7b92;
+    --accent:#4c8dff; --accent-soft:#9fc0ff; --success:#4fd1a1;
+    --line:rgba(236,241,250,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:#0d111b;color:#dfe6f3;
+    font-family:"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:30px 40px 46px;
+  }
+  .page-head{max-width:960px;margin:0 auto 22px}
+  .page-head h1{font-size:22px;letter-spacing:.5px;margin:0 0 8px;font-weight:700}
+  .page-head p{margin:0;color:#8d99b0;font-size:13px;line-height:1.7}
+  .page-head b{color:#cfd9ea;font-weight:600}
+  .page-head .accent{color:#8fb8ff}
+  .grid{
+    max-width:960px;margin:0 auto;
+    display:grid;grid-template-columns:420px 420px;gap:30px 36px;
+    justify-content:center;
+  }
+  .option{width:420px}
+  .option h2{
+    font-size:14px;margin:0 0 10px;color:#aebbd1;font-weight:600;
+    display:flex;align-items:center;gap:8px
+  }
+  .option h2 .tag{
+    font-size:10px;color:#8fa6cc;border:1px solid rgba(120,150,200,.35);
+    padding:2px 7px;border-radius:20px;font-weight:500
+  }
+  .option h2 .rec{color:#7fe3bd;border-color:rgba(79,209,161,.4);background:rgba(79,209,161,.08)}
+  .option p.note{margin:9px 2px 0;font-size:11.5px;color:#7b879d;line-height:1.6}
+  .option p.note em{font-style:normal;color:#9fb0cc}
+
+  .card{
+    width:420px;border-radius:18px;position:relative;overflow:hidden;
+    background:linear-gradient(180deg,var(--bg1),var(--bg2));
+    box-shadow:0 18px 50px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.035);
+  }
+  .card-inner{padding:16px 18px 0}
+  .row-status{display:flex;align-items:center;height:24px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:9px;box-shadow:0 0 8px rgba(76,141,255,.7)}
+  .status{font-size:12px;color:var(--muted);letter-spacing:.2px}
+  .tools{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .tool{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;color:#8491a8;font-size:14px;line-height:1}
+  .tool.salary{color:var(--accent);background:rgba(76,141,255,.13);font-weight:700;font-size:13px}
+  .tool svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+  .big-label{font-size:11.5px;color:var(--muted);margin-top:10px}
+  .countdown{
+    font-family:Consolas,"SFMono-Regular",monospace;font-size:46px;line-height:1.06;
+    letter-spacing:1px;font-weight:700;color:var(--ink);margin-top:2px;font-variant-numeric:tabular-nums;
+  }
+  .bar{height:5px;border-radius:6px;background:rgba(255,255,255,.10);margin-top:10px;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#3d7ff0,#64a0ff)}
+  .subline{font-size:11.5px;color:var(--muted);margin-top:9px}
+  .lunch{font-size:11.5px;color:var(--ink);margin-top:7px}
+  .lunch em{font-style:normal;color:var(--muted);font-weight:400;margin-right:6px}
+  .foot{font-size:10.5px;color:var(--dim);margin-top:7px;padding-bottom:14px}
+
+  .salary-sec{
+    border-top:1px solid var(--line);
+    margin:0 18px;padding:12px 0 14px;position:relative;
+  }
+  .salary-sec::before{
+    content:"";position:absolute;left:-18px;right:-18px;top:-1px;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(76,141,255,.38),transparent);
+  }
+  .s-head{display:flex;align-items:center;gap:8px}
+  .s-title{font-size:11px;color:var(--muted);letter-spacing:.6px}
+  .live{
+    display:inline-flex;align-items:center;gap:4px;font-size:9.5px;color:#7fe3bd;
+    background:rgba(79,209,161,.09);border:1px solid rgba(79,209,161,.22);
+    border-radius:20px;padding:2px 7px 2px 6px;
+  }
+  .live i{width:4px;height:4px;border-radius:50%;background:#4fd1a1;animation:blink 1.6s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  .pin{
+    margin-left:auto;font-size:9.5px;color:#8fa6cc;border:1px solid rgba(120,150,200,.3);
+    border-radius:20px;padding:2px 8px;
+  }
+  .pin.on{color:#9fc0ff;border-color:rgba(76,141,255,.45);background:rgba(76,141,255,.10)}
+
+  .money{
+    font-family:Consolas,"SFMono-Regular",monospace;font-variant-numeric:tabular-nums;
+    font-weight:700;letter-spacing:.4px;white-space:nowrap;
+  }
+  .money .cur{font-size:22px;color:var(--muted);margin-right:4px;font-weight:600}
+  .money .dec{color:#f4f8ff}
+  .hero{font-size:46px;line-height:1.12;margin-top:7px}
+
+  .metric-row{display:flex;align-items:center;justify-content:space-between;margin-top:14px;font-size:10.5px;color:var(--dim)}
+  .metric-row b{font-family:Consolas,monospace;color:var(--muted);font-weight:600;font-size:11px}
+  .stats{display:flex;align-items:flex-end;justify-content:space-between;margin-top:15px;padding-top:12px;border-top:1px solid rgba(255,255,255,.055)}
+  .stat .k{font-size:9.5px;color:var(--dim);letter-spacing:.4px}
+  .stat .v{font-family:Consolas,monospace;font-size:15px;color:var(--ink);font-weight:600;margin-top:3px;white-space:nowrap}
+  .stat.right{text-align:right}
+  .stat.right .v{color:#cfe1ff}
+  .stat .v small{font-size:10px;color:var(--muted);font-weight:400}
+
+  /* ---------- 效果 A：整数位流动渐变 ---------- */
+  .fx-flow .int{
+    display:inline-block;
+    background:linear-gradient(100deg,#3d7ff0 0%,#bcd4ff 26%,#4c8dff 48%,#8fb8ff 72%,#3d7ff0 100%);
+    background-size:240% 100%;
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:flow 2.8s linear infinite;
+    filter:drop-shadow(0 0 8px rgba(76,141,255,.28));
+  }
+  @keyframes flow{from{background-position:0% 50%}to{background-position:240% 50%}}
+
+  /* ---------- 效果 B：整数位高光扫过 ---------- */
+  .fx-sweep .int-wrap{position:relative;display:inline-block;color:var(--accent);text-shadow:0 0 10px rgba(76,141,255,.16)}
+  .fx-sweep .int-wrap::after{
+    content:attr(data-int);position:absolute;left:0;top:0;color:transparent;
+    background:linear-gradient(105deg,rgba(255,255,255,0) 38%,rgba(255,255,255,.96) 50%,rgba(255,255,255,0) 62%);
+    background-size:230% 100%;
+    -webkit-background-clip:text;background-clip:text;
+    animation:sweep 2.6s cubic-bezier(.4,0,.2,1) infinite;
+  }
+  @keyframes sweep{0%{background-position:185% 0}58%,100%{background-position:-85% 0}}
+
+  /* ---------- 效果 C：整数位呼吸光晕 ---------- */
+  .fx-glow .int{
+    color:var(--accent);
+    animation:breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes breathe{
+    0%,100%{text-shadow:0 0 0 rgba(76,141,255,0),0 0 0 rgba(76,141,255,0);filter:brightness(1)}
+    50%{text-shadow:0 0 18px rgba(76,141,255,.55),0 0 42px rgba(76,141,255,.20);filter:brightness(1.12)}
+  }
+
+  /* ---------- 效果 D：渐变底 + 扫光 ---------- */
+  .fx-metal .int-wrap{position:relative;display:inline-block}
+  .fx-metal .int{
+    display:inline-block;
+    background:linear-gradient(180deg,#d6e5ff 0%,#7fb0ff 26%,#4c8dff 54%,#2f6fe0 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 8px rgba(76,141,255,.22));
+  }
+  .fx-metal .int-wrap::after{
+    content:attr(data-int);position:absolute;left:0;top:0;color:transparent;
+    background:linear-gradient(105deg,rgba(255,255,255,0) 40%,rgba(255,255,255,.82) 50%,rgba(255,255,255,0) 60%);
+    background-size:220% 100%;
+    -webkit-background-clip:text;background-clip:text;
+    animation:sweep 3.2s ease-in-out infinite;
+  }
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <h1>今日收入 · 数字效果 4 选</h1>
+    <p>已去掉今日收入的进度条和百分比。<b>整数位用主题彩色</b>，<span class="accent">小数位保持白色</span>；
+    数字按 18fps 实时跳动，这里用 55ms 的脚本模拟。<br>模拟数据：月薪 ¥28,000 / 21 个工作日 / 今日 09:30 打卡 / 当前 14:05。</p>
+  </div>
+
+  <div class="grid">
+
+    <!-- A -->
+    <section class="option">
+      <h2>效果 A · 流动渐变 <span class="tag rec">推荐</span></h2>
+      <div class="card fx-flow">
+        <div class="card-inner">
+          <div class="row-status"><span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown cd">03:55:00</div>
+          <div class="bar"><i style="width:78%"></i></div>
+          <div class="subline">上班 09:30 · 预计下班 18:00</div>
+          <div class="lunch"><em>距晚休</em>3h55m</div>
+          <div class="foot">已工作 4h35m · 应勤 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head">
+            <span class="s-title">今日收入</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin on">已固定</span>
+          </div>
+          <div class="money hero"><span class="cur">¥</span><span class="int" data-int>404</span><span class="dec" data-dec>.677</span></div>
+          <div class="metric-row"><span>已工作 <b>4h35m</b></span><span>计薪 <b>8h00m</b></span></div>
+          <div class="stats">
+            <div class="stat"><div class="k">本月收入</div><div class="v">¥<span data-month>9,738.010</span></div></div>
+            <div class="stat right"><div class="k">发薪日 11/15</div><div class="v">4 <small>天后</small></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>整段数字像一条蓝色光带在流动</em>：整数位从深蓝到浅蓝再到深蓝，速度慢、幅度小，不刺眼；小数位纯白，读收入总额仍然一眼看清。</p>
+    </section>
+
+    <!-- B -->
+    <section class="option">
+      <h2>效果 B · 高光扫过 <span class="tag">最有「金属感」</span></h2>
+      <div class="card fx-sweep">
+        <div class="card-inner">
+          <div class="row-status"><span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown cd">03:55:00</div>
+          <div class="bar"><i style="width:78%"></i></div>
+          <div class="subline">上班 09:30 · 预计下班 18:00</div>
+          <div class="lunch"><em>距晚休</em>3h55m</div>
+          <div class="foot">已工作 4h35m · 应勤 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head">
+            <span class="s-title">今日收入</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin on">已固定</span>
+          </div>
+          <div class="money hero"><span class="cur">¥</span><span class="int-wrap" data-int="404"><span class="int">404</span></span><span class="dec" data-dec>.677</span></div>
+          <div class="metric-row"><span>已工作 <b>4h35m</b></span><span>计薪 <b>8h00m</b></span></div>
+          <div class="stats">
+            <div class="stat"><div class="k">本月收入</div><div class="v">¥<span data-month>9,738.010</span></div></div>
+            <div class="stat right"><div class="k">发薪日 11/15</div><div class="v">4 <small>天后</small></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>整数位固定主题蓝，一道高光从左往右扫过</em>：像金属/玻璃上的反光，节奏 2.6 秒一次；比 A 更利落，但扫到哪一位哪一位才亮。</p>
+    </section>
+
+    <!-- C -->
+    <section class="option">
+      <h2>效果 C · 呼吸光晕 <span class="tag">最安静</span></h2>
+      <div class="card fx-glow">
+        <div class="card-inner">
+          <div class="row-status"><span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown cd">03:55:00</div>
+          <div class="bar"><i style="width:78%"></i></div>
+          <div class="subline">上班 09:30 · 预计下班 18:00</div>
+          <div class="lunch"><em>距晚休</em>3h55m</div>
+          <div class="foot">已工作 4h35m · 应勤 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head">
+            <span class="s-title">今日收入</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin on">已固定</span>
+          </div>
+          <div class="money hero"><span class="cur">¥</span><span class="int" data-int>404</span><span class="dec" data-dec>.677</span></div>
+          <div class="metric-row"><span>已工作 <b>4h35m</b></span><span>计薪 <b>8h00m</b></span></div>
+          <div class="stats">
+            <div class="stat"><div class="k">本月收入</div><div class="v">¥<span data-month>9,738.010</span></div></div>
+            <div class="stat right"><div class="k">发薪日 11/15</div><div class="v">4 <small>天后</small></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>整数位保持主题蓝，外圈光晕慢慢呼吸</em>：没有横向移动，只有亮度变化，适合怕晃眼的人；牺牲一点「流光」感。</p>
+    </section>
+
+    <!-- D -->
+    <section class="option">
+      <h2>效果 D · 渐变底 + 扫光 <span class="tag">最亮</span></h2>
+      <div class="card fx-metal">
+        <div class="card-inner">
+          <div class="row-status"><span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown cd">03:55:00</div>
+          <div class="bar"><i style="width:78%"></i></div>
+          <div class="subline">上班 09:30 · 预计下班 18:00</div>
+          <div class="lunch"><em>距晚休</em>3h55m</div>
+          <div class="foot">已工作 4h35m · 应勤 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head">
+            <span class="s-title">今日收入</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin on">已固定</span>
+          </div>
+          <div class="money hero"><span class="cur">¥</span><span class="int-wrap" data-int="404"><span class="int">404</span></span><span class="dec" data-dec>.677</span></div>
+          <div class="metric-row"><span>已工作 <b>4h35m</b></span><span>计薪 <b>8h00m</b></span></div>
+          <div class="stats">
+            <div class="stat"><div class="k">本月收入</div><div class="v">¥<span data-month>9,738.010</span></div></div>
+            <div class="stat right"><div class="k">发薪日 11/15</div><div class="v">4 <small>天后</small></div></div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>整数位从浅蓝到深蓝做纵向渐变，再叠一道扫光</em>：最像发光的电子屏；亮度最高，但和「小数位白色」的对比也最强。</p>
+    </section>
+
+  </div>
+
+<script>
+  const rate = 166.6666667 / 3600;
+  const base = 404.677;
+  const monthBase = 9333.333;
+  const started = Date.now();
+  const nf = new Intl.NumberFormat('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+  function tick(){
+    const t = (Date.now() - started) / 1000;
+    const today = base + rate * t;
+    const month = monthBase + today;
+    const s = nf.format(today);
+    const dot = s.lastIndexOf('.');
+    const intPart = s.slice(0, dot);
+    const decPart = s.slice(dot);
+
+    document.querySelectorAll('[data-int]').forEach(el => {
+      if (el.classList.contains('int-wrap')) {
+        el.setAttribute('data-int', intPart);
+        const inner = el.querySelector('.int');
+        if (inner) inner.textContent = intPart;
+      } else {
+        el.textContent = intPart;
+      }
+    });
+    document.querySelectorAll('[data-dec]').forEach(el => el.textContent = decPart);
+    document.querySelectorAll('[data-month]').forEach(el => el.textContent = nf.format(month));
+
+    // 主倒计时只做轻微跳动，避免整页每帧都在大幅变化
+    const left = 3*3600 + 55*60 - Math.floor(t);
+    const hh = String(Math.floor(left/3600)).padStart(2,'0');
+    const mm = String(Math.floor((left%3600)/60)).padStart(2,'0');
+    const ss = String(left%60).padStart(2,'0');
+    document.querySelectorAll('.cd').forEach(el => el.textContent = hh+':'+mm+':'+ss);
+  }
+  tick();
+  setInterval(tick, 55);
+</script>
+</body>
+</html>

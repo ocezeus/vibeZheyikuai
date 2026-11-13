@@ -107,10 +107,20 @@ if (-not (Test-Path $csc)) { throw "找不到 .NET Framework 编译器：$csc" }
 $exe = Join-Path $dist 'WorkCountdown.exe'
 $sources = @(
     (Join-Path $src 'Program.cs'),
+    (Join-Path $src 'AssemblyInfo.cs'),
     (Join-Path $src 'Models.cs'),
+    (Join-Path $src 'Frost.cs'),
+    (Join-Path $src 'Updates.cs'),
     (Join-Path $src 'Lark.cs'),
+    (Join-Path $src 'Ics.cs'),
+    (Join-Path $src 'OutlookGraph.cs'),
     (Join-Path $src 'Widget.cs'),
     (Join-Path $src 'ScreenReminderForm.cs'),
+    (Join-Path $src 'DrawerForm.cs'),
+    (Join-Path $src 'BubbleMenuForm.cs'),
+    (Join-Path $src 'NotePanelForm.cs'),
+    (Join-Path $src 'NoteRelay.cs'),
+    (Join-Path $src 'CardGlowForm.cs'),
     (Join-Path $src 'SettingsForm.cs'),
     (Join-Path $src 'FirstRunForm.cs')
 )
@@ -124,7 +134,8 @@ $cscArgs = @(
     '/reference:System.Core.dll',
     '/reference:System.Drawing.dll',
     '/reference:System.Windows.Forms.dll',
-    '/reference:System.Web.Extensions.dll'
+    '/reference:System.Web.Extensions.dll',
+    '/reference:System.Security.dll'
 ) + $sources
 
 # 正在运行的旧实例会锁住 exe，先按路径精确关掉它（只关这个 dist 里的）
@@ -139,13 +150,13 @@ if ($LASTEXITCODE -ne 0) { throw "编译失败（exit $LASTEXITCODE）" }
 Write-Host "exe   -> $exe"
 
 if ($Shortcut) {
-    $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) '下班倒计时.lnk'
+    $lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) '上班工具箱.lnk'
     $ws = New-Object -ComObject WScript.Shell
     $sc = $ws.CreateShortcut($lnk)
     $sc.TargetPath = $exe
     $sc.WorkingDirectory = $dist
     $sc.IconLocation = "$exe,0"
-    $sc.Description = '下班倒计时悬浮窗'
+    $sc.Description = '上班工具箱悬浮窗'
     $sc.Save()
     Write-Host "link  -> $lnk"
 }

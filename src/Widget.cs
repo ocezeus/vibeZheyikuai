@@ -48,6 +48,7 @@ namespace WorkCountdown
         private readonly System.Windows.Forms.Timer autoCollapse;
         private readonly System.Windows.Forms.Timer animT;
         private readonly System.Windows.Forms.Timer calPoll;
+        private readonly System.Windows.Forms.Timer olPoll;
         private readonly System.Windows.Forms.Timer remindT;
         private readonly System.Windows.Forms.Timer flowT;
         private readonly System.Windows.Forms.Timer topT;
@@ -58,6 +59,9 @@ namespace WorkCountdown
 
         // 日程提醒
         private List<ReminderEvent> larkEvents = new List<ReminderEvent>();
+        private List<ReminderEvent> outlookEvents = new List<ReminderEvent>();
+        private string outlookError;
+        private bool olFetching;
         private string larkEventError;
         private bool calFetching;
         private readonly HashSet<string> notified = new HashSet<string>();
@@ -106,10 +110,22 @@ namespace WorkCountdown
         private Font screenKindFont, screenTitleFont, screenCountFont, screenWhenFont,
             screenPlaceFont, screenDetailFont, screenHintFont;
 
+        // 警戒带之后的抽屉卡（方案 A：实心黄 + 同色系三阶文字）
+        private DrawerForm drawer;
+        private bool drawerDismissed;      // 用户点掉了抽屉，这一条提醒不再自动弹
+        private int tapePhase;             // 0 空闲 / 1 等卡片展开后放全屏 / 2 等警戒带消失后开抽屉
+        private int tapeAt;                // 上面两个阶段的触发时刻（Environment.TickCount）
+        private bool tapeActive;           // 本次提醒走警戒带：卡片不做覆盖
+        private readonly System.Windows.Forms.Timer tapeT;
+
         private bool animating;
         private int animFromW, animFromH, animFromX, animToW, animToH, animToX;
         private int animStart;
+        private int animDuration = AnimMs;
         private const int AnimMs = 150;
+        // 警戒带那一路按 HTML 预览的节奏：展开 0.9s、收回 0.7s（普通点开/收起仍是 150ms）
+        private const int TapeExpandMs = 400;
+        private const int TapeCollapseMs = 400;
         // 展开后的错峰：主视觉先出，其余行每行相隔 55ms，每行 190ms 淡入
         // 进度条流光跑一个来回的时间
         private const int FlowPeriodMs = 2600;
@@ -132,23 +148,51 @@ namespace WorkCountdown
         private Point formOrigin;
 
         private readonly ContextMenuStrip menu;
+        private BubbleMenuForm bubbleMenu;
+        private NotePanelForm notePanel;
+        private NoteRelay noteRelay;
+        private int noteFlashAt;
+        private CardGlowForm cardGlow;
         private NotifyIcon tray;
+
+        // 检查更新（气泡菜单里的「检查更新」胶囊）：状态留在 Widget 上，
+        // 菜单关掉再打开还能看到「已下载 / 有新版本」；网络和下载都在后台线程。
+        private UpdateRelease updateRelease;
+        private string updateExePath;
+        private bool updateBusy;
+        private UpdatePhase updatePhase = UpdatePhase.Idle;
+        private string updateDetail = "";
+        private int updatePercent;
         private readonly ToolTip reminderTip = new ToolTip { InitialDelay = 800, ReshowDelay = 200, AutoPopDelay = 20000, ShowAlways = true };
 
-        private readonly Font fontBig;
-        private readonly Font fontBigText;
-        private readonly Font fontStatus;
-        private readonly Font fontTiny;
-        private readonly Font fontSmallBold;
-        private readonly Font fontSmall;
-        private readonly Font fontCollapsedNum;
-        private readonly Font fontCollapsedLabel;
+        private Font fontBig;
+        private Font fontBigText;
+        private Font fontStatus;
+        private Font fontTiny;
+        private Font fontSmallBold;
+        private Font fontSmall;
+        private Font fontCollapsedNum;
+        private Font fontCollapsedLabel;
+        private string appliedTextFont = "";
+        private string appliedNumberFont = "Consolas";
 
         private readonly StringFormat sfCenter = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         private readonly StringFormat sfNear = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center };
         private readonly StringFormat sfFar = new StringFormat { Alignment = StringAlignment.Far, LineAlignment = StringAlignment.Center };
 
-        private Rectangle rectGear, rectRefresh, rectChevron;
+        private Rectangle rectGear, rectRefresh, rectChevron, rectSalary, rectNote;
+        // 工资面板：单击 ¥ 展开 / 收起（v3.2 起不再支持双击固定）
+        private bool salaryOpen;
+        // 工资面板展开 / 收起的按行浮现动画
+        private bool salaryAnimating;
+        private bool salaryAnimOpen;
+        private int salaryAnimStart;
+        private int salaryAnimDuration;
+        private int salaryAnimFromH;
+        private int salaryAnimToH;
+        private const int SalaryPanelDip = 116;
+        private Font fontSalary;
+        private Font fontGlyphSalary;
 
         public WidgetForm(SettingsStore store, Settings settings)
         {
@@ -157,6 +201,8 @@ namespace WorkCountdown
             this.lark = new LarkClient(store);
             settings.NormalizeSchedules();      // 老配置 / 直接 new 出来的 Settings 也要有固定日程
             settings.NormalizeCustomThemes();
+            if (settings.note == null) settings.note = new NoteSettings();
+            settings.note.Normalize();
             this.theme = Themes.Get(settings.ui.theme);
 
             using (var screen = Graphics.FromHwnd(IntPtr.Zero))
@@ -176,26 +222,20 @@ namespace WorkCountdown
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.Manual;
             AutoScaleMode = AutoScaleMode.None;
-            Text = "下班倒计时";
+            Text = "上班工具箱";
             MinimumSize = new Size(S(DesignCollapsedW), S(DesignCollapsedH));
 
-            fontBig = MakeFont("Consolas", 28f, FontStyle.Bold);
-            fontBigText = UiFont.Make(17f, FontStyle.Bold);
-            fontStatus = UiFont.Make(TypeStatusPt, FontStyle.Regular);
-            fontTiny = UiFont.Make(TypeTinyPt, FontStyle.Regular);
-            fontSmall = UiFont.Make(TypeSmallPt, FontStyle.Regular);
-            fontSmallBold = UiFont.Make(TypeSmallPt, FontStyle.Bold);
-            fontCollapsedNum = MakeFont("Consolas", 17f, FontStyle.Bold);
-            fontCollapsedLabel = UiFont.Make(TypeSmallPt, FontStyle.Regular);
-            fontCollapsedText = UiFont.Make(13f, FontStyle.Bold);
-            fontRemindBig = UiFont.Make(17f, FontStyle.Bold);
-            fontRemindSmall = UiFont.Make(10f, FontStyle.Regular);
-            fontRemindTitle = UiFont.Make(17f, FontStyle.Bold);
-            fontRemindMeta = UiFont.Make(10f, FontStyle.Regular);
-            fontRemindTime = UiFont.Make(12f, FontStyle.Bold);
+            UiFont.Configure(settings.ui.textFont, settings.ui.numberFont);
+            appliedTextFont = settings.ui.textFont ?? "";
+            appliedNumberFont = UiFont.NumberFamily;
+            CreateFonts();
+
+            // 工资面板每次启动都从收起状态开始（v3.2 起不再持久化展开 / 固定状态）
+            salaryOpen = false;
 
             menu = BuildMenu();
-            ContextMenuStrip = menu;
+            // 卡片右键走自己的胶囊菜单（BuildMenu 只留给托盘）；不挂 ContextMenuStrip，
+            // 否则系统菜单会先弹出来，把右键抢走。
 
             tick = new System.Windows.Forms.Timer();
             tick.Interval = 1000;
@@ -212,6 +252,7 @@ namespace WorkCountdown
                 CheckOffWork();
                 CheckSticky();
                 CheckReminders();
+                if (drawer != null) drawer.RefreshText();
             };
 
             poll = new System.Windows.Forms.Timer();
@@ -228,16 +269,28 @@ namespace WorkCountdown
             calPoll.Interval = Math.Max(3, settings.calendarPollMinutes) * 60 * 1000;
             calPoll.Tick += delegate { RequestCalendar(false); };
 
+            // Outlook / Exchange：.ics 订阅，和飞书日程同一个轮询间隔
+            olPoll = new System.Windows.Forms.Timer();
+            olPoll.Interval = Math.Max(3, settings.calendarPollMinutes) * 60 * 1000;
+            olPoll.Tick += delegate { RequestOutlook(false); };
+
             remindT = new System.Windows.Forms.Timer();
             remindT.Interval = 16;
 
-            // 进度条上的流光要一直走：只在窗口可见、没在放提醒动画时按 18fps 重画
+            // 进度条上的流光要一直走：只在窗口可见、没在放提醒动画时按 18fps 重画。
+            // 工资面板开着时也靠这一路刷新，后三位小数才会每秒高速跳动；关了动效也保留。
             flowT = new System.Windows.Forms.Timer();
             flowT.Interval = 55;
             flowT.Tick += delegate
             {
-                if (!Visible || reminding || animating || expandAnim) return;
-                if (settings.ui.reducedMotion || SystemInformation.HighContrast) return;
+                if (!Visible) return;
+                if (reminding || animating || expandAnim) return;
+                bool salaryTick = salaryOpen;
+                if (settings.ui.reducedMotion || SystemInformation.HighContrast)
+                {
+                    if (salaryTick || NoteRimActive()) Invalidate();
+                    return;
+                }
                 Invalidate();
             };
             remindT.Tick += delegate { StepReminder(); };
@@ -249,8 +302,13 @@ namespace WorkCountdown
             topT.Interval = 2000;
             topT.Tick += delegate { KeepTopMost(); };
 
+            // 警戒带流程的看门狗：等卡片展开、等警戒带消失 0.3s 后拉抽屉
+            tapeT = new System.Windows.Forms.Timer();
+            tapeT.Interval = 50;
+            tapeT.Tick += delegate { StepTapeFlow(); };
+
             ApplySettings();
-            BackColor = theme.bgBottom;
+            outlookEvents = CachedOutlookEvents();            BackColor = theme.bgBottom;
             collapsed = settings.ui.edge != "free";
             Size = collapsed ? new Size(S(DesignCollapsedW), S(DesignCollapsedH)) : new Size(S(DesignExpandedW), ExpandedH);
             PlaceInitial();
@@ -299,13 +357,52 @@ namespace WorkCountdown
 
         private int ExpandedH
         {
-            get { return S(CardHeightDip(ShowLunchRow)); }
+            get
+            {
+                int h = S(CardHeightDip(ShowLunchRow));
+                if (salaryOpen) h += S(SalaryPanelDip);
+                return h;
+            }
         }
 
-        private static Font MakeFont(string family, float size, FontStyle style)
+        /// <summary>卡片圆角的物理像素（收起 14 / 展开 18 DIP），和 RenderCard 画的那条路径一致。</summary>
+        internal int CardRadiusPx
         {
-            try { return new Font(family, size, style, GraphicsUnit.Point); }
-            catch { return new Font(FontFamily.GenericSansSerif, size, style, GraphicsUnit.Point); }
+            get { return S(collapsed ? 14 : 18); }
+        }
+
+        /// <summary>按当前设置重建所有卡片字体（换中文字体 / 数字字体后调用）。</summary>
+        private void CreateFonts()
+        {
+            DisposeCoreFonts();
+            fontBig = UiFont.MakeNumber(28f, FontStyle.Bold);
+            fontBigText = UiFont.Make(17f, FontStyle.Bold);
+            fontStatus = UiFont.Make(TypeStatusPt, FontStyle.Regular);
+            fontTiny = UiFont.Make(TypeTinyPt, FontStyle.Regular);
+            fontSmall = UiFont.Make(TypeSmallPt, FontStyle.Regular);
+            fontSmallBold = UiFont.Make(TypeSmallPt, FontStyle.Bold);
+            fontCollapsedNum = UiFont.MakeNumber(17f, FontStyle.Bold);
+            fontCollapsedLabel = UiFont.Make(TypeSmallPt, FontStyle.Regular);
+            fontCollapsedText = UiFont.Make(13f, FontStyle.Bold);
+            fontRemindBig = UiFont.Make(17f, FontStyle.Bold);
+            fontRemindSmall = UiFont.Make(10f, FontStyle.Regular);
+            fontRemindTitle = UiFont.Make(17f, FontStyle.Bold);
+            fontRemindMeta = UiFont.Make(10f, FontStyle.Regular);
+            fontRemindTime = UiFont.Make(12f, FontStyle.Bold);
+            fontSalary = UiFont.MakeNumber(22f, FontStyle.Bold);
+            // 卡片右上角那颗 ¥：用常规字重。字号只决定轮廓精度，DrawGlyph 会把字形墨迹缩放到约 13.4 DIP 高，
+            // 粗体在这一档会显得比旁边 1.5 DIP 的线条图标重。
+            fontGlyphSalary = UiFont.MakeNumber(13f, FontStyle.Regular);
+        }
+
+        private void DisposeCoreFonts()
+        {
+            foreach (var font in new Font[] { fontBig, fontBigText, fontStatus, fontTiny, fontSmall,
+                fontCollapsedNum, fontCollapsedLabel, fontCollapsedText, fontRemindBig, fontRemindSmall,
+                fontRemindTitle, fontRemindMeta, fontRemindTime, fontSalary, fontGlyphSalary })
+            {
+                if (font != null && !ReferenceEquals(font, SystemFonts.DefaultFont)) font.Dispose();
+            }
         }
 
         protected override CreateParams CreateParams
@@ -324,10 +421,16 @@ namespace WorkCountdown
             Recompute();
             RequestRefresh(false);
             RequestCalendar(false);
+            RequestOutlook(false);
             tick.Start();
             flowT.Start();
             topT.Start();
             KeepTopMost();
+            if (!settings.ui.reducedMotion && !SystemInformation.HighContrast && cardGlow == null)
+            {
+                cardGlow = new CardGlowForm(this, theme, scale);
+                cardGlow.Begin();
+            }
             // 开机也是展开的：同样按「N 秒没动就收起」的规则走，别一直杵在那儿
             ResetAutoCollapse();
             // 第一帧主动推一次：分层窗口不会因为窗口出现就自动有东西
@@ -372,8 +475,11 @@ namespace WorkCountdown
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            CloseBubbleMenu();
+            if (cardGlow != null) { cardGlow.CloseNow(); cardGlow = null; }
             if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-            tick.Stop(); poll.Stop(); autoCollapse.Stop(); animT.Stop(); flowT.Stop(); topT.Stop(); calPoll.Stop(); remindT.Stop();
+            tick.Stop(); poll.Stop(); autoCollapse.Stop(); animT.Stop(); flowT.Stop(); topT.Stop(); calPoll.Stop(); olPoll.Stop(); remindT.Stop(); tapeT.Stop();
+            CloseDrawer();
             base.OnFormClosing(e);
         }
 
@@ -383,16 +489,21 @@ namespace WorkCountdown
             {
                 reminderTip.Dispose();
                 if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, remindT, flowT, topT })
+                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, olPoll, remindT, flowT, topT, tapeT })
                     if (timer != null) timer.Dispose();
                 foreach (var font in new Font[] { fontBig, fontBigText, fontStatus, fontTiny, fontSmall,
                     fontCollapsedNum, fontCollapsedLabel, fontCollapsedText, fontRemindBig, fontRemindSmall,
-                    fontRemindTitle, fontRemindMeta, fontRemindTime }) if (font != null) font.Dispose();
+                    fontRemindTitle, fontRemindMeta, fontRemindTime, fontSalary, fontGlyphSalary }) if (font != null) font.Dispose();
                 sfCenter.Dispose(); sfNear.Dispose(); sfFar.Dispose();
                 DisposeScreenFonts();
                 if (screenForm != null) { screenForm.CloseNow(); screenForm = null; }
+                CloseDrawer();
                 if (screenCardUnder != null) { screenCardUnder.Dispose(); screenCardUnder = null; }
                 if (frame != null) { frame.Dispose(); frame = null; }
+                CloseBubbleMenu();
+                CloseNotePanel();
+                if (noteRelay != null) { noteRelay.Dispose(); noteRelay = null; }
+                if (cardGlow != null) { cardGlow.CloseNow(); cardGlow = null; }
                 if (menu != null) menu.Dispose();
             }
             base.Dispose(disposing);
@@ -406,7 +517,14 @@ namespace WorkCountdown
             // 窗口底色必须和卡片一致：圆角抗锯齿边缘会与底色混合，浅灰底会出现一圈白边
             if (BackColor != theme.bgBottom) BackColor = theme.bgBottom;
             status = StatusBuilder.Build(settings, snapshot, DateTime.Now, theme);
+            if (cardGlow != null) cardGlow.SetTheme(theme);
             UpdateTickRate();
+            // 工资面板开着时，午休行出现 / 消失会改变展开高度：每秒顺手校正一次
+            if (salaryOpen && !screenReminder && !collapsed && !animating && !salaryAnimating && Height != ExpandedH)
+            {
+                Size = new Size(S(DesignExpandedW), ExpandedH);
+                ApplyRegion();
+            }
             Invalidate();
         }
 
@@ -500,19 +618,103 @@ namespace WorkCountdown
 
         private string NextEventText()
         {
-            var all = Reminders.Merge(settings, larkEvents);
+            var all = Reminders.Merge(settings, larkEvents, outlookEvents);
             var next = Reminders.Next(settings, all, DateTime.Now);
             if (next == null) return "没有待提醒的日程";
             DateTime start = Reminders.ParseStart(next);
             return start.ToString("HH:mm") + " " + next.title;
         }
 
-        /// <summary>每秒检查一次：到点（开始时间 - 提前量）就放一次提醒动画。</summary>
+        /// <summary>把各份日历上次成功同步的缓存拼起来（启动时先用它顶着，等网络回来再刷新）。</summary>
+        private List<ReminderEvent> CachedOutlookEvents()
+        {
+            var all = new List<ReminderEvent>();
+            if (settings.outlook == null || settings.outlook.calendars == null) return all;
+            var seen = new HashSet<string>();
+            foreach (var c in settings.outlook.calendars)
+            {
+                if (c == null || c.cached == null) continue;
+                foreach (var e in c.cached)
+                {
+                    if (e == null) continue;
+                    string key = string.IsNullOrEmpty(e.id) ? e.title + "@" + e.start : e.id;
+                    if (!seen.Add(key)) continue;
+                    all.Add(e);
+                }
+            }
+            all.Sort(delegate (ReminderEvent a, ReminderEvent b)
+            {
+                return Reminders.ParseStart(a).CompareTo(Reminders.ParseStart(b));
+            });
+            return all;
+        }
+
+        /// <summary>
+        /// 把所有启用的 Outlook 日历拉一遍（.ics 订阅 / 本地文件 / Graph 登录），
+        /// 每份日历各自写回 lastSync / lastError / cached，再汇总成提醒池。
+        /// 一份失败不影响其它日历，失败时保留它上次成功的缓存。
+        /// </summary>
+        private void RequestOutlook(bool manual)
+        {
+            if (settings.outlook == null || !settings.outlook.HasEnabled)
+            {
+                outlookEvents = new List<ReminderEvent>();
+                outlookError = null;
+                return;
+            }
+            if (olFetching) return;
+            olFetching = true;
+            var cfg = settings.outlook;
+            ThreadPool.QueueUserWorkItem(delegate (object state)
+            {
+                List<ReminderEvent> list = null;
+                string error = null;
+                try
+                {
+                    list = CalendarSync.Poll(cfg, DateTime.Today, DateTime.Today.AddDays(14), 20000, out error);
+                }
+                catch (Exception ex) { error = ex.Message; }
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        olFetching = false;
+                        if (list != null) outlookEvents = list;
+                        bool changed = error != outlookError;
+                        string previous = outlookError;
+                        outlookError = error;
+                        cfg.lastError = error ?? "";
+                        try { store.Save(settings); } catch { }
+                        if (!string.IsNullOrEmpty(error) && error != previous)
+                            store.Log("Outlook 日程读取失败: " + error);
+                        if (manual)
+                        {
+                            if (!string.IsNullOrEmpty(error) && (outlookEvents == null || outlookEvents.Count == 0))
+                                ShowBalloon("Outlook 同步失败：" + LarkClient.Shorten(error, 90));
+                            else if (!string.IsNullOrEmpty(error))
+                                ShowBalloon("Outlook 日程：" + outlookEvents.Count + " 个 · 部分日历失败：" +
+                                    LarkClient.Shorten(error, 50));
+                            else
+                                ShowBalloon("Outlook 日程：" + outlookEvents.Count + " 个 · " + NextEventText());
+                        }
+                        Invalidate();
+                    });
+                }
+                catch { olFetching = false; }
+            });
+        }
+
+        /// <summary>
+        /// 每秒检查一次：到点（开始时间 - 提前量）就放一次提醒动画。
+        /// 另外，日历同步 / 程序启动晚于开始时间时（严格窗口已经错过），
+        /// 只要这条日程是「刚看到」且还没结束、开始不超过 60 分钟，就补放一次。
+        /// 之前 Outlook 在会开始后才同步下来，会整场会都没有提醒。
+        /// </summary>
         private void CheckReminders()
         {
             DateTime now = DateTime.Now;
             if (CheckBreaks(now)) return;
-            var all = Reminders.Merge(settings, larkEvents);
+            var all = Reminders.Merge(settings, larkEvents, outlookEvents);
             if (all.Count == 0) return;
             if (notified.Count > 300) notified.Clear();
             foreach (var e in all)
@@ -520,9 +722,14 @@ namespace WorkCountdown
                 DateTime start = Reminders.ParseStart(e);
                 string key = (e.id ?? e.title) + "@" + start.Ticks;
                 if (notified.Contains(key)) continue;
-                if (Reminders.IsDue(settings, e, now))
+                bool due = Reminders.IsDue(settings, e, now);
+                // 晚同步 / 程序刚启动 / 电脑睡眠醒来都算：只要还没结束、开始不超过 60 分钟就补一次
+                bool late = !due && Reminders.IsLateDue(settings, e, now);
+                if (due || late)
                 {
                     notified.Add(key);
+                    if (late)
+                        store.Log("补提醒（错过开始时间）: " + e.title + " @" + start.ToString("yyyy-MM-dd HH:mm"));
                     StartReminder(e);
                     return;
                 }
@@ -700,6 +907,7 @@ namespace WorkCountdown
 
         private void StartReminder(ReminderEvent e)
         {
+            CloseBubbleMenu();
             if (screenReminder) ExitScreenMode();
             if (animating) { animT.Stop(); animating = false; SetBounds(animToX, Top, animToW, animToH); collapsed = animToW == S(DesignCollapsedW); ApplyRegion(); }
             remindEvent = e;
@@ -712,11 +920,29 @@ namespace WorkCountdown
             reminding = true;
             autoCollapse.Stop();
             remindT.Interval = (settings.ui.reducedMotion || SystemInformation.HighContrast) ? 100 : 33; remindT.Start();
-            if (UseScreenReminder(e)) ShowScreenReminder(e);
+            // 警戒带：先把小卡展开成大卡，等展开动画走完再把全屏条推上来；
+            // 这一轮里卡片不做覆盖（只显示普通卡片），信息交给警戒带和抽屉
+            bool tape = UseScreenReminder(e) && settings.StyleOf(Reminders.KindOf(e)).shape == "tape";
+            tapeActive = tape;
+            CloseDrawer();
+            drawerDismissed = false;
+            if (tape)
+            {
+                if (collapsed) StartAnim(false, TapeExpandMs);
+                if (animating)
+                {
+                    tapePhase = 1;
+                    tapeAt = Environment.TickCount + animDuration + 80;
+                    tapeT.Start();
+                }
+                else ShowScreenReminder(e);
+            }
+            else if (UseScreenReminder(e)) ShowScreenReminder(e);
             Invalidate();
             store.Log("日程提醒: " + e.title + " @" + Reminders.ParseStart(e).ToString("yyyy-MM-dd HH:mm"));
-            ShowBalloon("日程提醒 · " + e.title + "\r\n" + Reminders.ParseStart(e).ToString("HH:mm") +
-                " 开始，" + Reminders.CountdownText(settings, e, DateTime.Now));
+            if (e.id != "preview")      // 预览通知不弹托盘气泡，免得以为真来了个日程
+                ShowBalloon("日程提醒 · " + e.title + "\r\n" + Reminders.ParseStart(e).ToString("HH:mm") +
+                    " 开始，" + Reminders.CountdownText(settings, e, DateTime.Now));
         }
 
         /// <summary>
@@ -727,8 +953,9 @@ namespace WorkCountdown
         {
             DateTime min = now.AddMilliseconds(RemindHoldMs);
             if (e == null) return min;
+            // 预览通知（含「下班提醒」这种常驻样式）：只放一遍，按最短停留退场
+            if (e.id == "preview") return min;
             if (e.source == "alert") return DateTime.MaxValue;
-            if (e.id == "preview") return min;              // 右键预览：只放一遍动画，别常驻
             DateTime end = Reminders.ParseEnd(e);
             if (e.source == "break")
             {
@@ -765,6 +992,10 @@ namespace WorkCountdown
         {
             remindT.Stop();
             if (screenForm != null) { screenForm.CloseNow(); screenForm = null; }
+            CloseDrawer();
+            tapeT.Stop();
+            tapePhase = 0;
+            tapeActive = false;
             reminding = false;
             remindExiting = false;
             remindEvent = null;
@@ -775,7 +1006,7 @@ namespace WorkCountdown
 
         private bool UseScreenReminder(ReminderEvent e)
         {
-            return settings.ui.reminderSpread == "screen"
+            return settings.StyleOf(Reminders.KindOf(e)).spread == "screen"
                 && !settings.ui.reducedMotion && !SystemInformation.HighContrast
                 && e != null && e.source != "alert";
         }
@@ -802,6 +1033,79 @@ namespace WorkCountdown
             // 全屏动画放完回到卡片提醒；提醒本身继续常驻
             screenForm = null;
             Invalidate();
+            if (!tapeActive || remindEvent == null) return;
+            // 警戒带放完：卡片收回小卡，等它收完再拉抽屉（HTML 预览里也是先收后拉）
+            bool collapsing = !collapsed;
+            if (collapsing) StartAnim(true, TapeCollapseMs);
+            if (drawerDismissed) return;
+            tapePhase = 2;
+            tapeAt = Environment.TickCount + (collapsing ? TapeCollapseMs + 300 : 300);
+            tapeT.Start();
+        }
+
+        /// <summary>警戒带流程的两段等待：先等卡片展开，再等警戒带消失 0.3s。</summary>
+        private void StepTapeFlow()
+        {
+            int now = Environment.TickCount;
+            if (tapePhase == 1)
+            {
+                if (!reminding || remindEvent == null) { tapePhase = 0; tapeT.Stop(); return; }
+                if (now < tapeAt) return;
+                tapePhase = 0;
+                tapeT.Stop();
+                if (remindEvent != null && UseScreenReminder(remindEvent)) ShowScreenReminder(remindEvent);
+                return;
+            }
+            if (tapePhase == 2)
+            {
+                if (now < tapeAt) return;
+                tapePhase = 0;
+                tapeT.Stop();
+                ShowDrawer();
+            }
+        }
+
+        /// <summary>从卡片贴边反向拉出抽屉卡；贴左往右拉，贴右往左拉。</summary>
+        private void ShowDrawer()
+        {
+            if (!tapeActive || remindEvent == null || drawerDismissed) return;
+            if (screenForm != null) return;
+            CloseDrawer();
+            bool toRight = DrawerToRight();
+            var d = new DrawerForm(settings, remindEvent, Bounds, toRight, scale,
+                IsWindowTopMost(), delegate { drawerDismissed = true; });
+            d.FormClosed += delegate { if (drawer == d) drawer = null; };
+            drawer = d;
+            d.Show();
+            if (d.IsHandleCreated) d.OrderBelow(Handle);
+            d.BeginSlide();
+            store.Log("抽屉卡: " + remindEvent.title + " " + (toRight ? "向右拉" : "向左拉"));
+        }
+
+        /// <summary>抽屉往哪边拉：贴左的往右，贴右的往左；自由位置按卡片在屏幕哪半边决定，出屏就翻边。</summary>
+        private bool DrawerToRight()
+        {
+            Screen scr = Screen.FromRectangle(Bounds);
+            Rectangle wa = scr.WorkingArea;
+            int need = S(DrawerForm.WidthDip - DrawerForm.OverlapDip);
+            if (settings.ui.edge == "left") return true;
+            if (settings.ui.edge == "right") return false;
+            bool cardOnRight = Bounds.Left + Bounds.Width / 2 >= wa.Left + wa.Width / 2;
+            bool toRight = !cardOnRight;
+            if (toRight && Bounds.Right - S(DrawerForm.OverlapDip) + need > wa.Right) toRight = false;
+            if (!toRight && Bounds.Left + S(DrawerForm.OverlapDip) - need < wa.Left) toRight = true;
+            return toRight;
+        }
+
+        /// <summary>关掉抽屉卡（提醒结束、卡片被动过、设置改了）。</summary>
+        private void CloseDrawer()
+        {
+            if (tapePhase == 2) tapePhase = 0;
+            if (drawer != null)
+            {
+                drawer.CloseNow();
+                drawer = null;
+            }
         }
 
         /// <summary>把窗口临时铺满小组件所在的那块屏，退场后原样缩回卡片。</summary>
@@ -919,6 +1223,12 @@ namespace WorkCountdown
         private void CheckSticky()
         {
             if (!reminding || remindEvent == null || remindExiting) return;
+            // 预览通知：不管哪一类（含下班提醒那种常驻样式），到点就退场
+            if (remindEvent.id == "preview")
+            {
+                if (DateTime.Now >= remindUntil) BeginExitReminder();
+                return;
+            }
             if (remindEvent.source == "alert") return;      // 下班提醒由 CheckOffWork 管
             if (DateTime.Now < remindUntil) return;
             store.Log("提醒时段结束: 收起「" + remindEvent.title + "」");
@@ -932,6 +1242,8 @@ namespace WorkCountdown
             var e = remindEvent;
             notified.Add((e.id ?? e.title) + "@" + Reminders.ParseStart(e).Ticks);
             store.Log("手动关闭提醒: " + e.title);
+            drawerDismissed = true;
+            CloseDrawer();
             if (screenForm != null)
             {
                 // 全屏时手动关闭：直接结束提醒，不要让卡片再留着
@@ -951,6 +1263,14 @@ namespace WorkCountdown
         private void StepReminder()
         {
             if (remindEvent == null) { remindT.Stop(); return; }
+            // 预览通知：入场 → 停一会 → 退场，全走普通提醒的时钟（时长 = 最短停留）
+            if (remindEvent.id == "preview")
+            {
+                if (remindExiting && (DateTime.Now - remindExitAt).TotalMilliseconds > RemindOutMs) { EndReminder(); return; }
+                if (!remindExiting && DateTime.Now >= remindUntil) BeginExitReminder();
+                Invalidate();
+                return;
+            }
             if (remindEvent.source == "alert")
             {
                 // 常驻：入场动画放完就停表，静态显示，等下一次 5 分钟重播
@@ -1083,9 +1403,8 @@ namespace WorkCountdown
         private void ReminderColors(out Color a, out Color b, out Color ink)
         {
             if (theme == null) theme = Themes.Get(settings.ui.theme);
-            var fixedSched = FixedOf(remindEvent);
-            string styleId = fixedSched != null && !string.IsNullOrWhiteSpace(fixedSched.styleId)
-                ? fixedSched.styleId : ReminderStyles.Follow;
+            // 固定日程按自己选的配色（旧规则），其余三类按「该类日程」的配色设置
+            string styleId = Reminders.ColorIdOf(settings, remindEvent, FixedOf(remindEvent));
             ReminderStyles.Resolve(styleId, theme, out a, out b, out ink);
         }
 
@@ -1095,6 +1414,7 @@ namespace WorkCountdown
             if (e != null && e.source == "alert") return "注意";
             if (e != null && e.source == "break")
                 return (string.IsNullOrWhiteSpace(fixedName) ? "固定日程" : fixedName) + "提醒";
+            if (e != null && e.source == "outlook") return "Outlook 日程";
             return meeting ? "会议提醒" : "日程提醒";
         }
 
@@ -1242,7 +1562,7 @@ namespace WorkCountdown
             try
             {
                 if (tray == null) return;
-                tray.BalloonTipTitle = "下班倒计时";
+                tray.BalloonTipTitle = "上班工具箱";
                 tray.BalloonTipText = text;
                 tray.ShowBalloonTip(2500);
             }
@@ -1251,6 +1571,22 @@ namespace WorkCountdown
 
         private void ApplySettings()
         {
+            CloseDrawer();
+            CloseNotePanel();
+            if (settings.note == null) settings.note = new NoteSettings();
+            settings.note.Normalize();
+            UiFont.Configure(settings.ui.textFont, settings.ui.numberFont);
+            string wantText = settings.ui.textFont ?? "";
+            string wantNumber = UiFont.NumberFamily;
+            if (!string.Equals(wantText, appliedTextFont, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(wantNumber, appliedNumberFont, StringComparison.OrdinalIgnoreCase))
+            {
+                appliedTextFont = wantText;
+                appliedNumberFont = wantNumber;
+                CreateFonts();
+            }
+            if (salaryAnimating) FinishSalaryAnimNow();
+            if (settings.salary == null || settings.salary.monthly <= 0m) salaryOpen = false;
             frameAlpha = (byte)Math.Round(255 * Math.Max(0.3, Math.Min(1.0, settings.ui.opacity / 100.0)));
             KeepTopMost();
             int ms = Math.Max(1, settings.lark.pollMinutes) * 60 * 1000;
@@ -1261,6 +1597,9 @@ namespace WorkCountdown
             calPoll.Interval = Math.Max(3, settings.calendarPollMinutes) * 60 * 1000;
             calPoll.Stop();
             if (settings.calendarEnabled && settings.lark.enabled) calPoll.Start();
+            olPoll.Interval = Math.Max(3, settings.calendarPollMinutes) * 60 * 1000;
+            olPoll.Stop();
+            if (settings.outlook != null && settings.outlook.HasEnabled) olPoll.Start();
             if (tray != null)
             {
                 try
@@ -1271,6 +1610,7 @@ namespace WorkCountdown
                 }
                 catch { }
             }
+            RestartNoteRelay();
             Recompute();
             if (!collapsed && !animating && Height != ExpandedH)
             {
@@ -1362,8 +1702,17 @@ namespace WorkCountdown
 
         private void StartAnim(bool collapse)
         {
+            StartAnim(collapse, AnimMs);
+        }
+
+        /// <summary>带时长的展开/收起：警戒带那一路按 HTML 预览的节奏走（展开 0.9s、收回 0.7s）。</summary>
+        private void StartAnim(bool collapse, int duration)
+        {
+            CloseDrawer();                    // 卡片要变尺寸了，抽屉先收掉
+            if (salaryAnimating) FinishSalaryAnimNow();
             if (animating) FinishAnimNow();   // 动画还没走完也照样响应，先把它收尾
             animating = true;
+            animDuration = Math.Max(60, duration);
             animFromW = Width; animFromH = Height; animFromX = Left;
             animToW = collapse ? S(DesignCollapsedW) : S(DesignExpandedW);
             animToH = collapse ? S(DesignCollapsedH) : ExpandedH;
@@ -1378,8 +1727,10 @@ namespace WorkCountdown
 
         private void StepAnim()
         {
+            // 工资面板的展开 / 收起动画
+            if (salaryAnimating && !animating) { StepSalaryAnim(); return; }
             // 看门狗：动画超时还没结束就直接收尾，免得一直卡在「点击没反应」的状态
-            if (animating && Environment.TickCount - animStart > AnimMs + 1200)
+            if (animating && Environment.TickCount - animStart > animDuration + 1200)
             {
                 FinishAnimNow();
                 return;
@@ -1397,7 +1748,7 @@ namespace WorkCountdown
                 return;
             }
             int elapsed = Environment.TickCount - animStart;
-            double t = Math.Min(1.0, Math.Max(0.0, elapsed / (double)AnimMs));
+            double t = Math.Min(1.0, Math.Max(0.0, elapsed / (double)animDuration));
             double e = 1 - Math.Pow(1 - t, 3);
             int w = (int)Math.Round(animFromW + (animToW - animFromW) * e);
             int h = (int)Math.Round(animFromH + (animToH - animFromH) * e);
@@ -1419,7 +1770,9 @@ namespace WorkCountdown
 
         private void SetCollapsed(bool value)
         {
-            if (reminding) return;
+            // 提醒期间不收起，但**允许展开**：日程提醒常驻时，点小卡要能看大卡
+            if (reminding && value) return;
+            if (salaryAnimating) FinishSalaryAnimNow();
             // 上一段动画万一没走完（掉帧、被系统挂起），这里先把它收尾，
             // 否则 animating 一直为 true，点击就彻底没反应了
             if (animating) FinishAnimNow();
@@ -1429,6 +1782,149 @@ namespace WorkCountdown
                 return;
             }
             StartAnim(value);
+        }
+
+        /// <summary>单击右上角 ¥：展开 / 收起工资面板。没配月工资就直接跳到「工资」设置页。</summary>
+        private void ToggleSalary()
+        {
+            if (settings.salary == null || settings.salary.monthly <= 0m)
+            {
+                OpenSettings(5);
+                return;
+            }
+            if (salaryAnimating) FinishSalaryAnimNow();
+
+            if (!salaryOpen)
+            {
+                salaryOpen = true;
+                store.Log("工资面板: 展开");
+                if (collapsed) { SetCollapsed(false); return; }
+                BeginSalaryAnim(true);
+            }
+            else
+            {
+                store.Log("工资面板: 收起");
+                BeginSalaryAnim(false);
+            }
+        }
+
+        /// <summary>展开 / 收起工资面板：尺寸按缓动长高 / 缩短，内容按行浮现（见 SalaryRowProgress）。</summary>
+        private void BeginSalaryAnim(bool open)
+        {
+            if (screenReminder) return;
+            if (animating) FinishAnimNow();
+            int baseH = S(CardHeightDip(ShowLunchRow));
+            if (open) salaryOpen = true;
+            int toH = open ? baseH + S(SalaryPanelDip) : baseH;
+            salaryAnimating = true;
+            salaryAnimOpen = open;
+            salaryAnimStart = Environment.TickCount;
+            salaryAnimDuration = open ? 430 : 300;
+            salaryAnimFromH = Height;
+            salaryAnimToH = toH;
+            if (Math.Abs(Height - toH) <= 1)
+            {
+                salaryAnimating = false;
+                if (!open) salaryOpen = false;
+                SetBounds(Left, Top, Width, toH);
+                ApplyRegion();
+                ResetAutoCollapse();
+                Invalidate();
+                return;
+            }
+            store.Log((open ? "工资面板展开动画" : "工资面板收起动画") + ": " + Height + " -> " + toH);
+            animT.Interval = 15;
+            animT.Start();
+        }
+
+        private void StepSalaryAnim()
+        {
+            int elapsed = Environment.TickCount - salaryAnimStart;
+            double t = Math.Min(1.0, Math.Max(0.0, elapsed / (double)Math.Max(1, salaryAnimDuration)));
+            double e = salaryAnimOpen ? 1 - Math.Pow(1 - t, 3) : t * t;
+            int h = (int)Math.Round(salaryAnimFromH + (salaryAnimToH - salaryAnimFromH) * e);
+            SetBounds(Left, Top, Width, Math.Max(1, h));
+            ApplyRegion();
+            if (t >= 1.0)
+            {
+                salaryAnimating = false;
+                if (!salaryAnimOpen)
+                {
+                    salaryOpen = false;
+                    SetBounds(Left, Top, Width, salaryAnimToH);
+                    ApplyRegion();
+                }
+                animT.Stop();
+                ResetAutoCollapse();
+            }
+            Invalidate();
+        }
+
+        private void FinishSalaryAnimNow()
+        {
+            if (!salaryAnimating) return;
+            salaryAnimating = false;
+            salaryOpen = salaryAnimOpen;
+            SetBounds(Left, Top, Width, salaryAnimToH);
+            ApplyRegion();
+            animT.Stop();
+            Invalidate();
+        }
+
+        /// <summary>工资面板的逐行进度：header / 数字 / 本月收入 三行依次浮现；收起时反过来。</summary>
+        private void SalaryRowProgress(out double head, out double money, out double stats)
+        {
+            double elapsed;
+            bool closing = false;
+            if (salaryAnimating)
+            {
+                elapsed = Environment.TickCount - salaryAnimStart;
+                closing = !salaryAnimOpen;
+            }
+            else if (expandAnim && salaryOpen)
+            {
+                elapsed = Environment.TickCount - expandStart;
+            }
+            else
+            {
+                head = 1; money = 1; stats = 1;
+                return;
+            }
+            if (closing)
+            {
+                head = Clamp01(1 - elapsed / 140.0);
+                money = Clamp01(1 - Math.Max(0, elapsed - 30) / 150.0);
+                stats = Clamp01(1 - Math.Max(0, elapsed - 70) / 160.0);
+            }
+            else
+            {
+                head = Clamp01(elapsed / 180.0);
+                money = Clamp01((elapsed - 60) / 220.0);
+                stats = Clamp01((elapsed - 140) / 220.0);
+            }
+        }
+
+        /// <summary>工资面板展开 / 收起后，把卡片高度直接调到 ExpandedH（截图探针 / 设置变化用）。</summary>
+        private void ResizeForSalary()
+        {
+            if (screenReminder) return;
+            if (salaryAnimating) FinishSalaryAnimNow();
+            if (collapsed)
+            {
+                SetCollapsed(false);
+                ResetAutoCollapse();
+                Invalidate();
+                return;
+            }
+            if (animating) FinishAnimNow();
+            int h = ExpandedH;
+            if (Height != h)
+            {
+                Size = new Size(S(DesignExpandedW), h);
+                ApplyRegion();
+            }
+            ResetAutoCollapse();
+            Invalidate();
         }
 
         /// <summary>把动画直接推到终点：尺寸、状态、展开错峰一起收干净。</summary>
@@ -1589,8 +2085,11 @@ namespace WorkCountdown
             if (theme == null) theme = Themes.Get(settings.ui.theme);
             using (var path = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
             {
-                using (var brush = new LinearGradientBrush(new Rectangle(0, 0, Width, Height), theme.bgTop, theme.bgBottom, 90f))
-                    g.FillPath(brush, path);
+                if (Frost.On(settings.ui))
+                    Frost.PaintSurface(g, path, new Rectangle(0, 0, Width, Height), theme, 1, 1);
+                else
+                    using (var brush = new LinearGradientBrush(new Rectangle(0, 0, Width, Height), theme.bgTop, theme.bgBottom, 90f))
+                        g.FillPath(brush, path);
                 PaintCardGlow(g, path);
                 if (!reminding)
                 {
@@ -1628,11 +2127,19 @@ namespace WorkCountdown
                 }
                 else
                 {
-                    PaintCardReminder(g, ReminderClock());
+                    // 警戒带模式：卡片不做色块扫入/覆盖，保持普通卡片，信息交给警戒带和抽屉
+                    if (tapeActive)
+                    {
+                        if (collapsed) PaintCollapsed(g); else PaintExpanded(g);
+                    }
+                    else PaintCardReminder(g, ReminderClock());
                 }
                 // 提醒动画期间不描边：浅色主题下这一圈线会压在色块上显出一条亮边。
                 if (!reminding)
+                {
                     using (var pen = new Pen(Color.FromArgb(24, theme.accent), Math.Max(1, scale))) g.DrawPath(pen, path);
+                    DrawNoteRim(g, path);
+                }
             }
         }
 
@@ -1710,7 +2217,7 @@ namespace WorkCountdown
         /// </summary>
         private void PaintCardReminder(Graphics g, double t)
         {
-            bool bar = settings.ui.reminderSpreadStyle == "bar";
+            bool bar = settings.StyleOf(Reminders.KindOf(remindEvent)).shape == "bar";
             if (settings.ui.reducedMotion || SystemInformation.HighContrast)
             {
                 using (var hold = ReminderHoldBitmap())
@@ -1891,7 +2398,7 @@ namespace WorkCountdown
             float L = (float)screenLayout;
             double t = ReminderClock();
             double end = RemindInMs + RemindHoldMs;
-            bool bar = settings.ui.reminderSpreadStyle == "bar";
+            bool bar = settings.StyleOf(Reminders.KindOf(remindEvent)).shape == "bar";
             Color a, b, ink;
             ReminderColors(out a, out b, out ink);
 
@@ -2111,9 +2618,16 @@ namespace WorkCountdown
                 using(var brush=new SolidBrush(Fade(status.accent, a))) g.FillEllipse(brush,pad,y+head/2-S(3)+dy,S(6),S(6));
                 Line(g,status.headline,fontStatus,muted,new RectangleF(pad+S(13),y+dy,w-S(13),head),a,false);
                 int iconSize=S(24); int iconY=y+(head-iconSize)/2+dy;
+                rectSalary=new Rectangle(Width-S(118),iconY,iconSize,iconSize);
+                rectNote=new Rectangle(Width-S(146),iconY,iconSize,iconSize);
                 rectGear=new Rectangle(Width-S(90),iconY,iconSize,iconSize);
                 rectRefresh=new Rectangle(Width-S(62),iconY,iconSize,iconSize);
                 rectChevron=new Rectangle(Width-S(34),iconY,iconSize,iconSize);
+                DrawGlyph(g,"plane",rectNote,Fade(NoteUnread?status.accent:dim,a));
+                if(NoteUnread)
+                    using(var brush=new SolidBrush(Fade(theme.accent,1)))
+                        g.FillEllipse(brush,rectNote.Right-S(5),rectNote.Top+S(1),S(5),S(5));
+                DrawGlyph(g,"salary",rectSalary,Fade(salaryOpen?status.accent:dim,a));
                 DrawGlyph(g,"gear",rectGear,Fade(dim, a));
                 DrawGlyph(g,"refresh",rectRefresh,Fade(fetching?status.accent:dim, a));
                 DrawGlyph(g,"chevron",rectChevron,Fade(dim, a));
@@ -2169,6 +2683,172 @@ namespace WorkCountdown
             {
                 double a = p[5]; int dy = (int)Math.Round((1 - a) * S(6));
                 Line(g,status.extra,fontTiny,dim,new RectangleF(pad,y+dy,w,S(FootDip)),a,false);
+            }
+
+            // 8. 工资面板：接在原有内容下面，卡片整体拉长
+            if (salaryOpen) DrawSalaryPanel(g);
+        }
+
+        /// <summary>
+        /// 工资面板（方案 A：主数字）。今日收入实时累计、保留 3 位小数；
+        /// 下面是本月收入 + 发薪日；再点一次右上角 ¥ 收起。
+        /// </summary>
+        private void DrawSalaryPanel(Graphics g)
+        {
+            var ss = SalaryCalc.Compute(settings, snapshot, DateTime.Now);
+            int top = S(CardHeightDip(ShowLunchRow));
+            int pad = S(18), w = Width - pad * 2;
+            Color muted = MixColor(theme.textMain, theme.bgBottom, MutedMix);
+            Color dim = MixColor(theme.textMain, theme.bgBottom, DimMix);
+            Color accent = theme.accent;
+            double ph, pm, ps;
+            SalaryRowProgress(out ph, out pm, out ps);
+            int dyH = (int)Math.Round((1 - ph) * S(6));
+            int dyM = (int)Math.Round((1 - pm) * S(6));
+            int dyS = (int)Math.Round((1 - ps) * S(6));
+
+            using (var pen = new Pen(Color.FromArgb((int)(30 * ph), theme.textMain), Math.Max(1f, scale)))
+                g.DrawLine(pen, pad, top, Width - pad, top);
+
+            if (!ss.configured)
+            {
+                Line(g, "还没设置月工资，点右上角 ¥ 去设置", fontSmall, muted,
+                    new RectangleF(pad, top + S(30), w, S(24)), 1, false);
+                return;
+            }
+
+            // 标题 + 实时（右边是「单击收起」弱提示）
+            int headY = top + S(8) + dyH;
+            Line(g, "今日收入", fontSmall, muted, new RectangleF(pad, headY, S(60), S(16)), ph, false);
+            float titleW = g.MeasureString("今日收入", fontSmall).Width;
+            int pillX = pad + (int)titleW + S(8);
+            var live = new Rectangle(pillX, headY + S(1), S(48), S(13));
+            using (var path = RoundPath(live, S(6)))
+            using (var br = new SolidBrush(Color.FromArgb((int)(24 * ph), 79, 209, 161)))
+                g.FillPath(br, path);
+            using (var br = new SolidBrush(Color.FromArgb((int)(220 * ph), 79, 209, 161)))
+                g.FillEllipse(br, live.X + S(6), live.Y + S(4), S(5), S(5));
+            Line(g, "实时", fontTiny, Color.FromArgb(210, 79, 209, 161),
+                new RectangleF(live.X + S(14), live.Y, S(32), live.Height), ph, false);
+
+            // 右边只留一个「单击收起」的弱提示（v3.2 起没有双击固定）
+            Line(g, "单击收起", fontTiny, dim,
+                new RectangleF(Width - pad - S(60), headY, S(60), S(16)), ph, true);
+
+            // 今日收入：只把这个大数字往下让约半个字高，本月收入/发薪日不动
+            int moneyY = top + S(32) + dyM;
+            Line(g, "¥", fontSmallBold, muted, new RectangleF(pad, moneyY + S(8), S(18), S(24)), pm, false);
+            DrawSalaryAmount(g, pad + S(18), moneyY, w - S(18), S(36), ss.today, pm);
+
+            // 本月收入 / 发薪日（和 HTML 一样，上面一条细分隔线）
+            int lineY = top + S(68) + dyS;
+            using (var pen = new Pen(Color.FromArgb((int)(28 * ps), theme.textMain), Math.Max(1f, scale)))
+                g.DrawLine(pen, pad, lineY, Width - pad, lineY);
+
+            int statY = top + S(74) + dyS;
+            Line(g, "本月收入", fontTiny, dim, new RectangleF(pad, statY, S(60), S(14)), ps, false);
+            Line(g, "¥" + SalaryCalc.Money3(ss.month), fontSmallBold, theme.textMain,
+                new RectangleF(pad, statY + S(16), S(190), S(18)), ps, false);
+
+            Line(g, "发薪日 " + ss.paydayDate.ToString("MM/dd", CultureInfo.InvariantCulture), fontTiny, dim,
+                new RectangleF(Width - pad - S(150), statY, S(150), S(14)), ps, true);
+            string pay = ss.daysToPayday <= 0 ? "今天发薪"
+                : ss.daysToPayday == 1 ? "明天发薪" : ss.daysToPayday + " 天后";
+            Line(g, pay, fontSmallBold, ss.daysToPayday <= 3 ? theme.success : theme.textMain,
+                new RectangleF(Width - pad - S(150), statY + S(16), S(150), S(18)), ps, true);
+        }
+
+        /// <summary>
+        /// 今日收入数字：整数位用主题色渐变 + 常驻柔光，再叠一道 6.5 秒的流动高光；
+        /// 小数位保持主题文字色（深色主题下就是白色）。对应 design\salary-number-final.html。
+        /// </summary>
+        private void DrawSalaryAmount(Graphics g, int x, int y, int w, int h, decimal value, double alpha)
+        {
+            alpha = Clamp01(alpha);
+            if (alpha < 0.01) return;
+            string text = SalaryCalc.Money3(value);
+            int dot = text.LastIndexOf('.');
+            string intPart = dot >= 0 ? text.Substring(0, dot) : text;
+            string decPart = dot >= 0 ? text.Substring(dot) : "";
+            if (intPart.Length == 0) intPart = "0";
+
+            using (var fmt = new StringFormat
+            {
+                Alignment = StringAlignment.Near,
+                LineAlignment = StringAlignment.Center,
+                Trimming = StringTrimming.None,
+                FormatFlags = StringFormatFlags.NoWrap | StringFormatFlags.NoClip
+            })
+            {
+                float iw = Math.Min(w, g.MeasureString(intPart, fontSalary, PointF.Empty,
+                    StringFormat.GenericTypographic).Width + S(1));
+                if (iw < S(8)) iw = S(8);
+                var intRect = new RectangleF(x, y, iw, h);
+                Color accent = theme.accent;
+                // 浅色卡片上不能再用「主题色 + 白」，否则整数位会被背景吃掉：
+                // 底色往黑里压、亮部往文字色靠；柔光改成很淡的深色阴影，流光也压低亮度。
+                bool onLight = Luminance(theme.bgBottom) > 0.55;
+                Color glowBase = onLight ? MixColor(accent, Color.Black, 0.45) : accent;
+
+                // 轻一档的常驻柔光：两圈低透明度文字，不呼吸
+                using (var inner = new SolidBrush(Color.FromArgb((int)((onLight ? 10 : 18) * alpha), glowBase)))
+                {
+                    float r = S(2);
+                    for (int i = 0; i < 8; i++)
+                    {
+                        double a = Math.PI * 2 * i / 8.0;
+                        g.DrawString(intPart, fontSalary, inner,
+                            new RectangleF(x + (float)Math.Cos(a) * r, y + (float)Math.Sin(a) * r, iw, h), fmt);
+                    }
+                }
+                using (var outer = new SolidBrush(Color.FromArgb((int)((onLight ? 4 : 8) * alpha), glowBase)))
+                {
+                    float r = S(4);
+                    for (int i = 0; i < 8; i++)
+                    {
+                        double a = Math.PI * 2 * i / 8.0;
+                        g.DrawString(intPart, fontSalary, outer,
+                            new RectangleF(x + (float)Math.Cos(a) * r, y + (float)Math.Sin(a) * r, iw, h), fmt);
+                    }
+                }
+
+                // 主题色渐变底
+                Color dark = Fade(onLight
+                    ? MixColor(accent, Color.Black, 0.42)
+                    : MixColor(accent, theme.bgBottom, 0.28), alpha);
+                Color light = Fade(onLight
+                    ? MixColor(accent, theme.textMain, 0.30)
+                    : MixColor(accent, Color.White, 0.52), alpha);
+                using (var brush = new LinearGradientBrush(new RectangleF(x, y, Math.Max(2f, iw), h), dark, light, 10f))
+                    g.DrawString(intPart, fontSalary, brush, intRect, fmt);
+
+                // 6.5 秒一轮的流动高光，只在整数位字形上显影
+                double phase = (Environment.TickCount % 6500) / 6500.0;
+                float band = Math.Max(iw * 0.95f, S(64));
+                float bx = x - band + (float)(phase * (iw + band * 2));
+                using (var brush = new LinearGradientBrush(new RectangleF(bx, y, band, h),
+                    Color.Transparent, Color.Transparent, 0f))
+                {
+                    var blend = new ColorBlend();
+                    Color shine = onLight ? MixColor(accent, Color.White, 0.28) : Color.White;
+                    int shineAlpha = onLight ? 80 : 150;
+                    blend.Colors = new Color[]
+                    {
+                        Color.FromArgb(0, shine),
+                        Color.FromArgb((int)(shineAlpha * alpha), shine),
+                        Color.FromArgb(0, shine)
+                    };
+                    blend.Positions = new float[] { 0f, 0.5f, 1f };
+                    brush.InterpolationColors = blend;
+                    g.DrawString(intPart, fontSalary, brush, intRect, fmt);
+                }
+
+                if (decPart.Length > 0)
+                {
+                    using (var brush = new SolidBrush(Fade(theme.textMain, alpha)))
+                        g.DrawString(decPart, fontSalary, brush,
+                            new RectangleF(x + iw, y, Math.Max(0, w - iw), h), fmt);
+                }
             }
         }
 
@@ -2227,9 +2907,29 @@ namespace WorkCountdown
             var bar = new Rectangle(x, y, filled, height);
             bool hot = HotBar(MinutesToOffWork());
 
-            // 外发光：两圈比条子大一点的同色圆角矩形，越靠外越淡，前缘像在发亮
+            // 外发光：两圈比条子大一点的同色圆角矩形，越靠外越淡，前缘像在发亮。
+            // 颜色必须跟着条子走：普通模式是 accent 的深浅渐变，最后半小时是同一套彩虹，
+            // 不能一律用 accent —— 那样条子变黄了外圈还是绿的。
             if (glowOn && filled > height * 2)
             {
+                Color[] glowStops;
+                float[] glowPos;
+                if (hot)
+                {
+                    glowStops = new Color[]
+                    {
+                        Color.FromArgb(255, 212, 122), Color.FromArgb(255, 214, 61),
+                        Color.FromArgb(255, 138, 61), Color.FromArgb(255, 92, 122)
+                    };
+                    glowPos = new float[] { 0f, 0.42f, 0.74f, 1f };
+                }
+                else
+                {
+                    glowStops = new Color[] { MixColor(MixColor(status.accent, theme.bgBottom, 0.22), Color.White, 0.15), MixColor(status.accent, Color.White, 0.15) };
+                    glowPos = new float[] { 0f, 1f };
+                }
+                int glowSpan = hot ? Math.Max(2, width) : Math.Max(2, filled);
+
                 for (int pass = 0; pass < 2; pass++)
                 {
                     int grow = (int)Math.Round(height * (pass == 0 ? 1.8f : 0.9f));
@@ -2238,13 +2938,35 @@ namespace WorkCountdown
                     // 右边多留一截做羽毛状的尾巴，光才不会在前缘突然断掉
                     var halo = new Rectangle(x - grow, y - grow, filled + grow * 2 + feather, height + grow * 2);
                     using (var gp = RoundPath(halo, halo.Height / 2))
-                    using (var br = new LinearGradientBrush(halo, Color.FromArgb((int)Math.Round((alpha) * barAlpha), status.accent),
-                        Color.FromArgb((int)Math.Round((0) * barAlpha), status.accent), 0f))
+                    using (var br = new LinearGradientBrush(halo, Color.Black, Color.Black, 0f))
                     {
+                        float keep = Math.Min(1f, (float)(filled + grow) / Math.Max(1, halo.Width));
+                        var cols = new List<Color>();
+                        var pos = new List<float>();
+                        int a = (int)Math.Round(alpha * barAlpha);
+                        cols.Add(Color.FromArgb(a, glowStops[0]));
+                        pos.Add(0f);
+                        int lastIdx = 0;                       // 已经画到的最靠右的颜色
+                        for (int i = 1; i < glowStops.Length; i++)
+                        {
+                            float u = (float)((x + glowPos[i] * glowSpan - halo.X) / (double)halo.Width);
+                            if (u <= 0f) { cols[0] = Color.FromArgb(a, glowStops[i]); lastIdx = i; }
+                            else if (u >= keep) break;
+                            else { cols.Add(Color.FromArgb(a, glowStops[i])); pos.Add(u); lastIdx = i; }
+                        }
+                        // GDI+ 要求最后一个位置正好是 1.0：先到 keep 保持颜色，再从 keep 淡到透明。
+                        // 淡出用的是「条子前缘」的颜色，不能拿渐变的最后一个色（那样尾巴会忽然变粉）。
+                        float fadeAt = Math.Max(keep, pos[pos.Count - 1] + 0.0005f);
+                        if (fadeAt < 0.999f)
+                        {
+                            cols.Add(Color.FromArgb(a, glowStops[lastIdx]));
+                            pos.Add(fadeAt);
+                        }
+                        cols.Add(Color.FromArgb(0, glowStops[lastIdx]));
+                        pos.Add(1f);
                         var fblend = new ColorBlend();
-                        float keep = Math.Min(1f, (float)(filled + grow) / halo.Width);
-                        fblend.Colors = new Color[] { Color.FromArgb((int)Math.Round((alpha) * barAlpha), status.accent), Color.FromArgb((int)Math.Round((alpha) * barAlpha), status.accent), Color.FromArgb((int)Math.Round((0) * barAlpha), status.accent) };
-                        fblend.Positions = new float[] { 0f, keep, 1f };
+                        fblend.Colors = cols.ToArray();
+                        fblend.Positions = pos.ToArray();
                         br.InterpolationColors = fblend;
                         g.FillPath(br, gp);
                     }
@@ -2347,46 +3069,100 @@ namespace WorkCountdown
             float f = scale;
             float cx = r.X + r.Width / 2f;
             float cy = r.Y + r.Height / 2f;
+            // 五个图标统一：几何外框 12 DIP，加上 1.5 DIP 线宽后墨迹外框约 13.5 DIP 见方，
+            // 全部绕命中区中心画。拐角用 Round：尖角 miter 会把外框拉长（飞机左尖角尤其明显）。
+            float half = 6f * f;
             using (var pen = new Pen(color, 1.5f * f))
             {
                 pen.StartCap = LineCap.Round;
                 pen.EndCap = LineCap.Round;
+                pen.LineJoin = LineJoin.Round;
                 if (kind == "gear")
                 {
-                    g.DrawEllipse(pen, cx - 4.4f * f, cy - 4.4f * f, 8.8f * f, 8.8f * f);
-                    for (int i = 0; i < 6; i++)
+                    // 8 齿：0° / 90° 都有齿尖，横竖外框都正好 12 DIP
+                    g.DrawEllipse(pen, cx - half * 0.66f, cy - half * 0.66f, half * 1.32f, half * 1.32f);
+                    for (int i = 0; i < 8; i++)
                     {
-                        double a = i * Math.PI / 3.0;
-                        float x1 = cx + (float)Math.Cos(a) * 4.4f * f;
-                        float y1 = cy + (float)Math.Sin(a) * 4.4f * f;
-                        float x2 = cx + (float)Math.Cos(a) * 6.6f * f;
-                        float y2 = cy + (float)Math.Sin(a) * 6.6f * f;
+                        double a = i * Math.PI / 4.0;
+                        float x1 = cx + (float)Math.Cos(a) * half * 0.66f;
+                        float y1 = cy + (float)Math.Sin(a) * half * 0.66f;
+                        float x2 = cx + (float)Math.Cos(a) * half;
+                        float y2 = cy + (float)Math.Sin(a) * half;
                         g.DrawLine(pen, x1, y1, x2, y2);
                     }
                     using (var b = new SolidBrush(color))
-                        g.FillEllipse(b, cx - 1.7f * f, cy - 1.7f * f, 3.4f * f, 3.4f * f);
+                        g.FillEllipse(b, cx - 1.2f * f, cy - 1.2f * f, 2.4f * f, 2.4f * f);
                 }
                 else if (kind == "refresh")
                 {
-                    g.DrawArc(pen, cx - 5f * f, cy - 4.6f * f, 10f * f, 9.2f * f, 35f, 275f);
+                    // 原来的圆弧 + 箭头等比缩到 12 DIP 外框（箭头留在缺口右上角，别缩丢了）
+                    g.DrawArc(pen, cx - 6.0f * f, cy - 4.051f * f, 10.426f * f, 10.05f * f, 35f, 275f);
                     using (var b = new SolidBrush(color))
-                    {
-                        var pts = new PointF[]
+                        g.FillPolygon(b, new PointF[]
                         {
-                            new PointF(cx + 4.3f * f, cy - 6.4f * f),
-                            new PointF(cx + 6.6f * f, cy - 1.6f * f),
-                            new PointF(cx + 2.0f * f, cy - 2.2f * f)
-                        };
-                        g.FillPolygon(b, pts);
+                            new PointF(cx + 3.738f * f, cy - 5.997f * f),
+                            new PointF(cx + 6.0f * f, cy - 0.769f * f),
+                            new PointF(cx + 1.279f * f, cy - 1.384f * f)
+                        });
+                }
+                else if (kind == "plane")
+                {
+                    // 小飞机：一条折线 + 尾翼，和面板里那颗图标同一形状，整体缩到 12 DIP 外框
+                    g.DrawLines(pen, new PointF[]
+                    {
+                        new PointF(cx + 6.0f * f, cy - 6.0f * f),
+                        new PointF(cx - 6.0f * f, cy - 0.74f * f),
+                        new PointF(cx - 0.99f * f, cy + 1.39f * f),
+                        new PointF(cx + 6.0f * f, cy - 6.0f * f)
+                    });
+                    g.DrawLine(pen, cx - 0.99f * f, cy + 1.39f * f, cx - 0.25f * f, cy + 6.0f * f);
+                }
+                else if (kind == "salary")
+                {
+                    // ¥ 用字体轮廓画：字体排版框上下留白不对称，直接 DrawString 居中会偏低；
+                    // 这里量出字形真实墨迹框，缩放到和线条图标同高，再把墨迹中心对到命中区中心。
+                    // 万一当前数字字体没有 ¥ 字形（比如被换成了别的字体），退回原来的 DrawString。
+                    float targetW = 12.4f * f, targetH = 13.4f * f;
+                    bool drawn = false;
+                    try
+                    {
+                        using (var path = new GraphicsPath())
+                        {
+                            float em = fontGlyphSalary.Size * g.DpiY / 72f;
+                            path.AddString("¥", fontGlyphSalary.FontFamily, (int)fontGlyphSalary.Style,
+                                em, PointF.Empty, StringFormat.GenericTypographic);
+                            RectangleF box = path.GetBounds();
+                            if (box.Width > 0.01f && box.Height > 0.01f)
+                            {
+                                var pts = path.PathPoints;
+                                var types = path.PathTypes;
+                                float kx = targetW / box.Width, ky = targetH / box.Height;
+                                float mx = box.X + box.Width / 2f, my = box.Y + box.Height / 2f;
+                                for (int i = 0; i < pts.Length; i++)
+                                {
+                                    pts[i].X = (pts[i].X - mx) * kx + cx;
+                                    pts[i].Y = (pts[i].Y - my) * ky + cy;
+                                }
+                                using (var scaled = new GraphicsPath(pts, types))
+                                using (var b = new SolidBrush(color))
+                                    g.FillPath(b, scaled);
+                                drawn = true;
+                            }
+                        }
                     }
+                    catch { }
+                    if (!drawn)
+                        using (var b = new SolidBrush(color))
+                            g.DrawString("¥", fontGlyphSalary, b, new RectangleF(r.X, r.Y, r.Width, r.Height), sfCenter);
                 }
                 else
                 {
+                    // 折叠箭头：宽度也撑到 11 DIP，视觉上不再比别的图标瘦小
                     g.DrawLines(pen, new PointF[]
                     {
-                        new PointF(cx - 2.0f * f, cy - 4.2f * f),
-                        new PointF(cx + 2.0f * f, cy),
-                        new PointF(cx - 2.0f * f, cy + 4.2f * f)
+                        new PointF(cx - 5.5f * f, cy - 6.0f * f),
+                        new PointF(cx + 5.5f * f, cy),
+                        new PointF(cx - 5.5f * f, cy + 6.0f * f)
                     });
                 }
             }
@@ -2398,8 +3174,17 @@ namespace WorkCountdown
         {
             base.OnMouseDown(e);
             if (screenReminder) return;
+            if (e.Button == MouseButtons.Right)
+            {
+                OpenBubbleMenu();
+                return;
+            }
             if (e.Button == MouseButtons.Left)
             {
+                CloseBubbleMenu();
+                CloseNotePanel();
+                // 卡片被按住（要拖 / 要展开）：抽屉先收掉，别跟着卡片一起飘
+                CloseDrawer();
                 dragging = true;
                 downAt = Environment.TickCount;
                 moved = false;
@@ -2473,6 +3258,12 @@ namespace WorkCountdown
             // 提醒卡片上点哪儿都能把它收起来——不然一张卡片杵四十分钟、点它又没反应，最烦人
             if (reminding) { store.Log("点击提醒卡片: 收起「" + (remindEvent == null ? "" : remindEvent.title) + "」"); DismissReminder(); return; }
             if (animating) FinishAnimNow();   // 动画还没走完也照样响应，先把它收尾
+            if (GlyphRect(rectNote, 146).Contains(e.Location)) { ToggleNotePanel(); return; }
+            if (GlyphRect(rectSalary, 118).Contains(e.Location))
+            {
+                ToggleSalary();
+                return;
+            }
             if (GlyphRect(rectGear, 90).Contains(e.Location)) { OpenSettings(); return; }
             if (GlyphRect(rectRefresh, 62).Contains(e.Location)) { RequestRefresh(true); return; }
             if (GlyphRect(rectChevron, 34).Contains(e.Location)) { SetCollapsed(true); return; }
@@ -2510,8 +3301,15 @@ namespace WorkCountdown
 
         private void OpenSettings()
         {
+            OpenSettings(0);
+        }
+
+        /// <summary>打开设置，并直接切到某一页（0 考勤 / 1 固定日程 / 2 提醒 / 3 外观）。</summary>
+        private void OpenSettings(int tab)
+        {
+            CloseBubbleMenu();
             autoCollapse.Stop();
-            using (var dlg = new SettingsForm(store, settings))
+            using (var dlg = new SettingsForm(store, settings, tab))
             {
                 dlg.TopMost = true;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
@@ -2520,7 +3318,8 @@ namespace WorkCountdown
                     ApplySettings();
                     RequestRefresh(false);
                     RequestCalendar(false);
-                    var next = Reminders.Next(settings, Reminders.Merge(settings, larkEvents), DateTime.Now);
+                    RequestOutlook(false);
+                    var next = Reminders.Next(settings, Reminders.Merge(settings, larkEvents, outlookEvents), DateTime.Now);
                     if (next != null)
                     {
                         DateTime startTime = Reminders.ParseStart(next);
@@ -2533,6 +3332,609 @@ namespace WorkCountdown
             ResetAutoCollapse();
         }
 
+        // ---------------- 胶囊菜单 ----------------
+
+        /// <summary>右键卡片：贴着外侧弹出四颗胶囊。已经开着就再按一次收起。</summary>
+        private void OpenBubbleMenu()
+        {
+            if (bubbleMenu != null)
+            {
+                // 正在播消失动画的那块菜单不算「开着」：右键直接开一份新的，不用等它淡完
+                if (!bubbleMenu.IsClosing)
+                {
+                    CloseBubbleMenu();
+                    return;
+                }
+                bubbleMenu = null;
+            }
+            if (screenReminder) return;
+            autoCollapse.Stop();
+            var m = new BubbleMenuForm(settings, theme, Bounds, settings.ui.alwaysOnTop,
+                ApplyBubbleTheme,
+                ApplyBubblePin,
+                delegate(bool clockIn) { CloseBubbleMenu(); SendClock(clockIn); },
+                AddQuickEvent,
+                delegate(int tab) { CloseBubbleMenu(); OpenSettings(tab); },
+                CreateBubbleTheme,
+                PreviewNotification,
+                BeginUpdateCheck,
+                BeginUpdateApply);
+            bubbleMenu = m;
+            m.FormClosed += delegate
+            {
+                if (bubbleMenu == m) bubbleMenu = null;
+                ResetAutoCollapse();
+            };
+            m.Show();
+            // 菜单重新打开时把上次的更新状态带回来（下载完 / 有新版本别丢）
+            if (updatePhase != UpdatePhase.Idle)
+                m.SetUpdateState(updatePhase, updateRelease == null ? "" : updateRelease.version,
+                    updateDetail, updateRelease == null ? "" : updateRelease.notes, updatePercent,
+                    updateRelease != null && updateRelease.HasAsset);
+            store.Log("打开胶囊菜单 @" + Bounds.Left + "," + Bounds.Top);
+        }
+
+        private void CloseBubbleMenu()
+        {
+            BubbleMenuForm m = bubbleMenu;
+            bubbleMenu = null;
+            if (m != null && !m.IsDisposed) m.CloseMenu();
+        }
+
+        // ---------------- 小纸条 ----------------
+
+        private bool NoteUnread
+        {
+            get { return settings.note != null && settings.note.TotalUnread() > 0; }
+        }
+
+        /// <summary>重新连公共中继（设置改了 / 换了一份 Settings 之后调用）。</summary>
+        private void RestartNoteRelay()
+        {
+            if (noteRelay != null)
+            {
+                try { noteRelay.Dispose(); } catch { }
+                noteRelay = null;
+            }
+            if (settings.note == null) settings.note = new NoteSettings();
+            settings.note.Normalize();
+            // 测试 / 出图探针不连真实中继（避免后台线程和网络依赖）
+            if (Environment.GetEnvironmentVariable("WC_NO_RELAY") == "1"
+                || Environment.GetEnvironmentVariable("WC_NO_SAVE") == "1") return;
+            var relay = new NoteRelay(settings.note);
+            relay.Message += OnNoteMessage;
+            relay.Profile += OnNoteProfile;
+            relay.ConnectedChanged += delegate(bool on) { store.Log("小纸条中继: " + (on ? "已连接" : "断开")); };
+            noteRelay = relay;
+            relay.Start();
+        }
+
+        private void ToggleNotePanel()
+        {
+            if (notePanel != null) { CloseNotePanel(); return; }
+            if (screenReminder || collapsed) return;
+            autoCollapse.Stop();
+            var p = new NotePanelForm(settings, theme, Bounds, settings.ui.alwaysOnTop,
+                SendNoteText, ReadNoteThread, ProbeNoteId, AddNoteContact,
+                delegate { CloseNotePanel(); OpenSettings(6); },
+                RenameNoteContact, DeleteNoteContact, SetNoteNickname);
+            notePanel = p;
+            p.FormClosed += delegate
+            {
+                if (notePanel == p) notePanel = null;
+                ResetAutoCollapse();
+            };
+            p.Show();
+            noteFlashAt = 0;      // 打开面板就把闪光停掉，未读点/徽标还在
+            Invalidate();
+            store.Log("打开小纸条面板 @" + Bounds.Left + "," + Bounds.Top);
+        }
+
+        private void CloseNotePanel()
+        {
+            NotePanelForm p = notePanel;
+            notePanel = null;
+            if (p != null && !p.IsDisposed) p.ClosePanel();
+        }
+
+        private bool SendNoteText(string toId, string text)
+        {
+            if (string.IsNullOrEmpty(toId) || string.IsNullOrEmpty(text)) return false;
+            if (noteRelay == null || !noteRelay.Connected)
+            {
+                store.Log("小纸条发送失败: 中继未连接");
+                return false;
+            }
+            bool ok = noteRelay.SendMessage(toId, text);
+            if (!ok)
+            {
+                store.Log("小纸条发送失败: publish 失败");
+                return false;
+            }
+            settings.note.Append(new NoteMessage(settings.note.id, toId, text, NoteRelay.Now()), false);
+            store.Save(settings);
+            Invalidate();
+            return true;
+        }
+
+        private void ReadNoteThread(string contactId)
+        {
+            if (string.IsNullOrEmpty(contactId)) return;
+            settings.note.MarkRead(contactId);
+            store.Save(settings);
+            Invalidate();
+        }
+
+        private void ProbeNoteId(string id, Action<bool> done)
+        {
+            if (noteRelay == null) { if (done != null) done(false); return; }
+            noteRelay.Probe(id, done);
+        }
+
+        /// <summary>新建对话：5 位数字 = 和这个 ID 的人 1:1；其它 5 位字符 = 对话码（同码的人进同一个对话）。</summary>
+        private bool AddNoteContact(string id, string remark)
+        {
+            bool added = settings.note.AddConversation(id, remark);
+            settings.note.Thread(NoteSettings.NormalizeCode(id));
+            store.Save(settings);
+            Invalidate();
+            store.Log("小纸条新建对话: " + id + (settings.note.IsRoom(id) ? "（对话码）" : "") + (string.IsNullOrEmpty(remark) ? "" : " / " + remark));
+            // 对话码要订阅对应主题；个人对话要订阅对方 presence（retained）拿昵称。顺便重发自己的 presence。
+            if (noteRelay != null) noteRelay.RefreshSubscriptions();
+            return added;
+        }
+
+        /// <summary>收到别人的「在线状态 / 昵称」：把昵称补到本机这个对话上，列表 / 聊天头部就直接显示名字。</summary>
+        private void OnNoteProfile(string id, string nick, bool online)
+        {
+            if (settings.note == null || string.IsNullOrEmpty(id) || string.IsNullOrEmpty(nick)) return;
+            if (!IsHandleCreated || IsDisposed) return;
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    if (settings.note == null) return;
+                    if (!settings.note.SetContactNick(id, nick)) return;
+                    store.Save(settings);
+                    if (notePanel != null) notePanel.RefreshData();
+                    Invalidate();
+                    store.Log("小纸条昵称: " + id + " = " + nick);
+                });
+            }
+            catch { }
+        }
+
+        /// <summary>右键删除对话：本机这段会话一起删掉。</summary>
+        private void DeleteNoteContact(string id)
+        {
+            if (settings.note == null || string.IsNullOrEmpty(id)) return;
+            settings.note.RemoveContact(id);
+            store.Save(settings);
+            Invalidate();
+            store.Log("小纸条删除对话: " + id);
+        }
+
+        private void RenameNoteContact(string id, string remark)
+        {
+            if (settings.note == null || string.IsNullOrEmpty(id)) return;
+            var c = settings.note.Contact(id);
+            if (c == null) return;
+            remark = (remark ?? "").Trim();
+            if (remark.Length > NoteSettings.MaxRemark) remark = remark.Substring(0, NoteSettings.MaxRemark);
+            c.remark = remark;
+            store.Save(settings);
+            Invalidate();
+            store.Log("小纸条改备注: " + id + (string.IsNullOrEmpty(remark) ? " (空)" : " / " + remark));
+        }
+
+        /// <summary>
+        /// 卡片页「昵称」胶囊双击改本机昵称：落盘 + 重启中继（presence 里带新昵称，15s keepalive 也会重播）。
+        /// 面板自己已经先把头部画成新昵称，这里只负责持久化和广播。
+        /// </summary>
+        private void SetNoteNickname(string nick)
+        {
+            if (settings.note == null) settings.note = new NoteSettings();
+            nick = NoteSettings.CleanNick(nick);
+            if (string.Equals(settings.note.nickname ?? "", nick, StringComparison.Ordinal)) return;
+            settings.note.nickname = nick;
+            store.Save(settings);
+            RestartNoteRelay();      // 昵称变化要立刻广播给已有联系人
+            if (notePanel != null) notePanel.RefreshData();
+            Invalidate();
+            store.Log("小纸条改昵称: " + (string.IsNullOrEmpty(nick) ? "(空)" : nick));
+        }
+
+        /// <summary>收到别人的小纸条：存进 8 条、置未读、卡片边框闪两次。</summary>
+        private void OnNoteMessage(NoteIncoming msg)
+        {
+            if (msg == null || settings.note == null) return;
+            if (!IsHandleCreated || IsDisposed) return;
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    if (settings.note == null) return;
+                    var note = settings.note;
+                    bool room = note.IsRoom(msg.to);
+                    string key;
+                    if (room)
+                    {
+                        key = msg.to;
+                        // 对话码对话：只认本机已经存过的那个对话；删掉的对话即使中继还订阅着，也不该再冒出来
+                        if (note.Contact(key) == null) return;
+                        // 自己发进对话码的消息：本地已经记过一条，中继会把发布回显给订阅者，这里丢掉
+                        if (string.Equals(msg.from, note.id, StringComparison.Ordinal)) return;
+                    }
+                    else
+                    {
+                        if (!string.Equals(msg.to, note.id, StringComparison.Ordinal)) return;
+                        key = msg.from;
+                        // 陌生人发来的纸条：先按 ID 建一个对话（备注空着，显示 ID），不然用户读不到
+                        if (note.Contact(key) == null) note.AddContact(key, "");
+                    }
+                    var m = new NoteMessage(msg.from, room ? key : note.id, msg.text, msg.ts, msg.nick);
+                    note.Append(m, true);
+                    // 顺手把发送者昵称补到本机对话上（个人对话会显示成名字；群聊气泡里用消息自带的昵称）
+                    if (!string.IsNullOrEmpty(msg.nick)) note.SetContactNick(msg.from, msg.nick);
+                    store.Save(settings);
+                    noteFlashAt = Environment.TickCount;
+                    if (notePanel != null)
+                    {
+                        if (notePanel.SelectedId == key)
+                        {
+                            note.MarkRead(key);
+                            store.Save(settings);
+                        }
+                        notePanel.RefreshData();
+                    }
+                    Invalidate();
+                    store.Log((room ? "收到对话码消息: " : "收到小纸条: ") + msg.from + " / " + msg.text);
+                });
+            }
+            catch { }
+        }
+
+        private static readonly double[] RimT = new double[] { 0, 0.08, 0.24, 0.40, 0.60, 0.75, 0.90, 1 };
+        private static readonly double[] RimA = new double[] { 0, 0.95, 0.12, 0.90, 0.10, 0.50, 0, 0 };
+
+        private static double RimKeyframes(double p)
+        {
+            if (p <= 0) return 0;
+            if (p >= 1) return 0;
+            for (int i = 1; i < RimT.Length; i++)
+            {
+                if (p <= RimT[i])
+                {
+                    double span = RimT[i] - RimT[i - 1];
+                    if (span <= 0) return RimA[i];
+                    double k = (p - RimT[i - 1]) / span;
+                    return RimA[i - 1] + (RimA[i] - RimA[i - 1]) * k;
+                }
+            }
+            return 0;
+        }
+
+        /// <summary>贴边闪光：收到时沿圆角边框亮两次；未读时每 5 秒轻闪一次。</summary>
+        private double NoteRimAlpha()
+        {
+            int now = Environment.TickCount;
+            double a = 0;
+            if (noteFlashAt != 0)
+            {
+                int el = now - noteFlashAt;
+                if (el >= 0 && el < 1300) a = RimKeyframes(el / 1300.0);
+            }
+            if (a < 0.02 && NoteUnread && !settings.ui.reducedMotion && !SystemInformation.HighContrast)
+            {
+                double ph = (now % 5000) / 5000.0;
+                if (ph >= 0.86 && ph < 0.98) a = 0.5 * Math.Sin((ph - 0.86) / 0.12 * Math.PI);
+            }
+            return Math.Max(0, Math.Min(1, a));
+        }
+
+        private bool NoteRimActive() { return NoteRimAlpha() > 0.02; }
+
+        private void DrawNoteRim(Graphics g, GraphicsPath cardPath)
+        {
+            double a = NoteRimAlpha();
+            if (a < 0.02) return;
+            var rim = new Rectangle(S(1), S(1), Math.Max(2, Width - S(2)), Math.Max(2, Height - S(2)));
+            using (var path = RoundPath(rim, S(collapsed ? 13 : 17)))
+            {
+                for (int i = 3; i >= 1; i--)
+                    using (var pen = new Pen(Color.FromArgb((int)(a * 24 / i), theme.accent), Math.Max(2f, S(2) * i)))
+                        g.DrawPath(pen, path);
+                using (var pen = new Pen(Color.FromArgb((int)(a * 225), theme.accent), Math.Max(1.5f, scale * 2f)))
+                    g.DrawPath(pen, path);
+                using (var pen = new Pen(Color.FromArgb((int)(a * 80), Color.White), Math.Max(1f, scale)))
+                    g.DrawPath(pen, path);
+            }
+        }
+
+
+        // ---------------- 预览通知（气泡菜单「预览通知」） ----------------
+
+        /// <summary>
+        /// 预览某一类通知：造一条 id=preview 的临时日程，走真实提醒动画
+        /// （按该类日程的配色 / 范围 / 扩散样式），只放一遍就自动退场；不写配置、不弹托盘气泡。
+        /// </summary>
+        private void PreviewNotification(string kind)
+        {
+            if (reminding) DismissReminder();
+            if (collapsed) SetCollapsed(false);
+            DateTime now = DateTime.Now;
+            var e = new ReminderEvent();
+            e.id = "preview";
+            if (kind == "off")
+            {
+                e.source = "alert";
+                e.title = "该下班啦";
+                e.detail = "在飞书发「2」打卡后自动消失";
+                e.start = Reminders.FormatStart(now);
+            }
+            else if (kind == "lark")
+            {
+                e.source = "lark";
+                e.title = "产品部周会";
+                e.place = "3F 会议室";
+                e.detail = "过一下本期主题背景和小纸条改动";
+                e.start = Reminders.FormatStart(now);
+                e.end = Reminders.FormatStart(now.AddMinutes(30));
+            }
+            else if (kind == "outlook")
+            {
+                e.source = "outlook";
+                e.title = "和设计对稿";
+                e.place = "Teams 线上";
+                e.detail = "磨砂玻璃背景视觉确认";
+                e.start = Reminders.FormatStart(now);
+                e.end = Reminders.FormatStart(now.AddMinutes(30));
+            }
+            else if (kind == "local")
+            {
+                e.source = "local";
+                e.title = "整理周报";
+                e.place = "";
+                e.detail = "把本周进度写进周报";
+                e.start = Reminders.FormatStart(now);
+                e.end = Reminders.FormatStart(now.AddMinutes(30));
+            }
+            else if (kind == "lunch")
+            {
+                e.source = "break";
+                e.title = "午休时间到";
+                e.detail = "去吃饭，先歇一会儿";
+                e.start = Reminders.FormatStart(now);
+                e.end = Reminders.FormatStart(now.AddMinutes(60));
+            }
+            else
+            {
+                e.source = "break";
+                e.title = "上班时间到";
+                e.detail = "到点了，收收心";
+                e.start = Reminders.FormatStart(now);
+            }
+            store.Log("预览通知: " + kind);
+            StartReminder(e);
+        }
+
+        // ---------------- 检查更新（气泡菜单「检查更新」） ----------------
+
+        /// <summary>开始检查 GitHub 最新 Release（后台线程，结果推给气泡菜单）。</summary>
+        private void BeginUpdateCheck()
+        {
+            if (updateBusy || updatePhase == UpdatePhase.Downloading) return;
+            updateBusy = true;
+            updatePhase = UpdatePhase.Checking;
+            updateDetail = "";
+            ApplyUpdateStateToBubble();
+            store.Log("检查更新: 开始");
+            var th = new Thread(delegate()
+            {
+                try
+                {
+                    UpdateRelease rel = UpdateService.Check();
+                    updateRelease = rel;
+                    if (!UpdateService.IsNewer(rel.version, AppInfo.Version))
+                    {
+                        updatePhase = UpdatePhase.UpToDate;
+                        updateDetail = "";
+                        store.Log("检查更新: 已是最新 v" + AppInfo.Version);
+                    }
+                    else
+                    {
+                        updatePhase = UpdatePhase.Available;
+                        updateDetail = "";
+                        store.Log("检查更新: 发现新版本 v" + rel.version + "（" + (rel.HasAsset ? "有自动更新包" : "只能打开发布页") + "）");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    updatePhase = UpdatePhase.Error;
+                    updateDetail = ex.Message;
+                    store.Log("检查更新失败: " + ex.Message);
+                }
+                finally
+                {
+                    updateBusy = false;
+                }
+                TryPostUpdateState();
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
+        /// <summary>下载并应用全量更新；已经下载好就直接替换重启。</summary>
+        private void BeginUpdateApply()
+        {
+            if (updatePhase == UpdatePhase.Ready && !string.IsNullOrEmpty(updateExePath) && File.Exists(updateExePath))
+            {
+                ApplyDownloadedUpdate();
+                return;
+            }
+            if (updateBusy || updateRelease == null || !updateRelease.HasAsset) return;
+            updateBusy = true;
+            updatePhase = UpdatePhase.Downloading;
+            updatePercent = 0;
+            ApplyUpdateStateToBubble();
+            store.Log("自动更新: 开始下载 v" + updateRelease.version);
+            UpdateRelease rel = updateRelease;
+            var th = new Thread(delegate()
+            {
+                try
+                {
+                    string path = UpdateService.Download(rel, delegate(long done, long total)
+                    {
+                        int pct = total > 0 ? (int)Math.Min(100, done * 100 / total) : 0;
+                        if (pct == updatePercent) return;
+                        updatePercent = pct;
+                        TryPostUpdateState();
+                    });
+                    string message;
+                    if (!UpdateService.VerifyDownloaded(path, rel, out message))
+                        throw new InvalidOperationException(message);
+                    updateExePath = path;
+                    updatePhase = UpdatePhase.Ready;
+                    updatePercent = 100;
+                    store.Log("自动更新: 下载完成 " + path);
+                }
+                catch (Exception ex)
+                {
+                    updatePhase = UpdatePhase.Error;
+                    updateDetail = "下载失败：" + ex.Message;
+                    store.Log("自动更新下载失败: " + ex.Message);
+                }
+                finally
+                {
+                    updateBusy = false;
+                }
+                TryPostUpdateState();
+                if (updatePhase == UpdatePhase.Ready)
+                {
+                    try
+                    {
+                        BeginInvoke((MethodInvoker)delegate
+                        {
+                            ShowBalloon("新版本 v" + updateRelease.version + " 已下载\r\n右键卡片 → 检查更新 → 立即重启");
+                        });
+                    }
+                    catch { }
+                }
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
+        /// <summary>把下载好的 exe 交给临时 updater 脚本替换并重启（本进程随即退出）。</summary>
+        private void ApplyDownloadedUpdate()
+        {
+            try
+            {
+                UpdateService.LaunchUpdater(updateExePath);
+                store.Log("自动更新: 启动替换脚本，退出当前实例");
+                Close();
+            }
+            catch (Exception ex)
+            {
+                updatePhase = UpdatePhase.Error;
+                updateDetail = "启动更新失败：" + ex.Message;
+                ApplyUpdateStateToBubble();
+                Invalidate();
+                store.Log("自动更新失败: " + ex.Message);
+            }
+        }
+
+        /// <summary>后台线程推进状态后，回到 UI 线程刷新气泡菜单。</summary>
+        private void TryPostUpdateState()
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    ApplyUpdateStateToBubble();
+                    Invalidate();
+                });
+            }
+            catch { }
+        }
+
+        private void ApplyUpdateStateToBubble()
+        {
+            BubbleMenuForm m = bubbleMenu;
+            if (m == null || m.IsDisposed) return;
+            m.SetUpdateState(updatePhase, updateRelease == null ? "" : updateRelease.version,
+                updateDetail, updateRelease == null ? "" : updateRelease.notes,
+                updatePercent, updateRelease != null && updateRelease.HasAsset);
+        }
+
+        /// <summary>菜单里点色卡：立刻换主题，菜单自己会更新选中环。</summary>
+        private void ApplyBubbleTheme(string id)
+        {
+            if (string.IsNullOrEmpty(id) || id == settings.ui.theme) return;
+            settings.ui.theme = id;
+            store.Save(settings);
+            ApplySettings();
+            Invalidate();
+            store.Log("胶囊菜单换主题: " + id);
+        }
+
+        /// <summary>菜单里点「＋ 新建主题」：存一套自建主题、立刻应用，返回新 id 给气泡刷新列表。</summary>
+        private string CreateBubbleTheme(string name, string bg, string bar)
+        {
+            var ct = new CustomTheme();
+            ct.id = "my-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+            ct.name = string.IsNullOrWhiteSpace(name) ? "我的主题" : name.Trim();
+            ct.bg = bg;
+            ct.bar = bar;
+            ct.accent = bar;
+            if (settings.customThemes == null) settings.customThemes = new List<CustomTheme>();
+            settings.customThemes.Add(ct);
+            Themes.SetCustom(settings.customThemes);
+
+            settings.ui.theme = ct.id;
+            store.Save(settings);
+            ApplySettings();
+            Invalidate();
+            store.Log("胶囊菜单新建主题: " + ct.name + " (" + ct.id + ")");
+            return ct.id;
+        }
+
+        /// <summary>菜单里点「窗口置顶」：直接切换，双向同步设置页的勾选。</summary>
+        private void ApplyBubblePin(bool on)
+        {
+            settings.ui.alwaysOnTop = on;
+            KeepTopMost();
+            store.Save(settings);
+            Invalidate();
+            store.Log("胶囊菜单窗口置顶: " + (on ? "开" : "关"));
+        }
+
+        /// <summary>菜单里的 +15 / +30 / +60：用面板里填的标题和地点，建一条 30 分钟的日程。</summary>
+        private void AddQuickEvent(string title, string place, int minutes)
+        {
+            if (minutes <= 0) minutes = 30;
+            if (string.IsNullOrWhiteSpace(title)) title = "临时日程";
+            DateTime start = DateTime.Now.AddMinutes(minutes);
+            DateTime end = start.AddMinutes(30);
+            var e = new ReminderEvent();
+            e.id = "local:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            e.source = "local";
+            e.title = title.Trim();
+            e.detail = "";
+            e.place = place == null ? "" : place.Trim();
+            e.start = Reminders.FormatStart(start);
+            e.end = Reminders.FormatStart(end);
+            e.leadMinutes = 0;
+            if (settings.events == null) settings.events = new List<ReminderEvent>();
+            settings.events.Add(e);
+            store.Save(settings);
+            Recompute();
+            ShowBalloon("已添加：" + e.title + " " + start.ToString("HH:mm") + "–" + end.ToString("HH:mm") +
+                (string.IsNullOrEmpty(e.place) ? "" : "\r\n" + e.place));
+            store.Log("胶囊菜单新增日程: " + e.title + " @ " + e.start);
+        }
+
         private ContextMenuStrip BuildMenu()
         {
             var m = new ContextMenuStrip();
@@ -2542,6 +3944,9 @@ namespace WorkCountdown
             miRrefresh.Click += delegate { RequestRefresh(true); };
             var miCal = new ToolStripMenuItem("刷新飞书日程");
             miCal.Click += delegate { RequestCalendar(true); };
+            var miOutlook = new ToolStripMenuItem("刷新 Outlook 日程");
+            miOutlook.Click += delegate { RequestOutlook(true); };
+            miOutlook.Enabled = settings.outlook != null && settings.outlook.HasEnabled;
             var miNext = new ToolStripMenuItem("下一个日程");
             miNext.Enabled = false;
             var miPreview = new ToolStripMenuItem("预览提醒动画");
@@ -2592,6 +3997,7 @@ namespace WorkCountdown
             m.Items.Add(miSettings);
             m.Items.Add(miRrefresh);
             m.Items.Add(miCal);
+            m.Items.Add(miOutlook);
             m.Items.Add(miNext);
             m.Items.Add(miPreview);
             m.Items.Add(miIn);
@@ -2629,7 +4035,7 @@ namespace WorkCountdown
             {
                 dlg.Title = "导出配置";
                 dlg.Filter = "配置文件 (*.json)|*.json";
-                dlg.FileName = "下班倒计时配置.json";
+                dlg.FileName = "上班工具箱配置.json";
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 if (store.Export(settings, dlg.FileName))
                     ShowBalloon("配置已导出\r\n" + dlg.FileName);
@@ -2754,7 +4160,7 @@ namespace WorkCountdown
             {
                 tray = new NotifyIcon();
                 tray.Icon = MakeTrayIcon();
-                tray.Text = "下班倒计时";
+                tray.Text = "上班工具箱";
                 tray.Visible = true;
                 tray.ContextMenuStrip = menu;
                 tray.DoubleClick += delegate

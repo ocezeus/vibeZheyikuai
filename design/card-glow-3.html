@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>卡片流光 · 三种（小卡 + 大卡）</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0B1018;color:#E8EDF7;font-family:"Microsoft YaHei","Segoe UI",sans-serif}
+  .head{max-width:1180px;margin:0 auto;padding:34px 24px 6px}
+  .kicker{font:600 11px/1 "Bahnschrift",sans-serif;letter-spacing:.28em;color:#7F8BA3}
+  h1{margin:12px 0 8px;font-size:25px;letter-spacing:-.01em}
+  .lede{margin:0;color:#98A4BA;font-size:13.5px;line-height:1.8;max-width:900px}
+  .lede b{color:#E8EDF7}
+  .bar{max-width:1180px;margin:16px auto 0;padding:0 24px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .bar span{font-size:11.5px;color:#7F8BA3;margin-right:4px}
+  .tbtn{height:28px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#DCE3F0;font-size:12px;cursor:pointer}
+  .tbtn.on{background:#E8EDF7;color:#0B1018;border-color:#E8EDF7}
+  .grid{max-width:1180px;margin:18px auto 0;padding:0 24px;display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .col{--ct:#12161F;--cb:#1B2130;--tx:#E8EDF7;--mu:#8B95A8;--dm:#6C768A;--ac:#4C8DFF;--trk:rgba(255,255,255,.14);--edge:rgba(255,255,255,.10);
+    background:linear-gradient(160deg,#101822,#0A0F16);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:18px 16px 16px;
+    display:flex;flex-direction:column;align-items:center;gap:34px;min-height:520px;position:relative;overflow:hidden}
+  .col::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(60% 50% at 50% 30%,rgba(70,110,170,.10),transparent 70%)}
+  .col .name{position:absolute;left:14px;top:12px;font-size:11.5px;color:#7F8BA3;letter-spacing:.04em;z-index:3}
+  .col .name b{color:#DCE3F0;font-weight:600}
+
+  /* ---------- 主题变量 ---------- */
+  .card{position:relative;z-index:2;border-radius:14px;border:1px solid var(--edge);
+    background:linear-gradient(180deg,var(--ct),var(--cb));color:var(--tx)}
+
+  .mini{width:224px;height:68px;padding:0}
+  .mini .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac)}
+  .mini .lab{position:absolute;left:24px;top:8px;font-size:9.5px;color:var(--mu)}
+  .mini .rt{position:absolute;right:14px;top:8px;font-size:9.5px;color:var(--mu)}
+  .mini .num{position:absolute;left:12px;top:22px;font:700 23px/27px "Consolas",monospace;letter-spacing:.01em}
+  .mini .bar{position:absolute;left:14px;right:14px;bottom:7px;height:3px;border-radius:2px;background:var(--trk);overflow:hidden}
+  .mini .bar i{position:absolute;inset:0;width:62%;border-radius:2px;background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,transparent),var(--ac))}
+
+  .big{width:280px;height:190px;padding:12px 16px;display:flex;flex-direction:column}
+  .big .r1{display:flex;align-items:center;gap:7px;font-size:10px}
+  .big .r1 .dot{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac)}
+  .big .r1 .tools{margin-left:auto;color:var(--dm);display:flex;gap:11px;font-size:12px}
+  .big .cap{margin-top:9px;font-size:10.5px;color:var(--mu)}
+  .big .num{font:700 34px/36px "Consolas",monospace;letter-spacing:.01em;margin-top:1px}
+  .big .bar{position:relative;height:5px;border-radius:3px;background:var(--trk);overflow:hidden;margin-top:9px}
+  .big .bar i{position:absolute;inset:0;width:62%;border-radius:3px;background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,transparent),var(--ac))}
+  .big .sub{margin-top:7px;font-size:10.5px;color:var(--mu);display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .big .sub b{color:var(--tx);font-weight:600}
+  .big .sub .sd{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.5}
+  .big .extra{margin-top:auto;font-size:9.5px;color:var(--dm)}
+
+  /* ---------- 发光/流光层 ---------- */
+  .wrap{position:relative;z-index:1;width:max-content;margin:0 auto}
+  .wrap .halo,.wrap .ring,.wrap .blob,.wrap .borderlight{position:absolute;pointer-events:none}
+
+  /* 基础呼吸光（第 4 版的底子） */
+  .halo{inset:-12px;border-radius:24px;background:var(--ac);filter:blur(22px);opacity:.55;
+    animation:breathe 4.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:.34;transform:scale(.98)}50%{opacity:.62;transform:scale(1.02)}}
+
+  /* 1 双光斑环绕 */
+  .s-blob .blob{width:86px;height:86px;border-radius:50%;filter:blur(11px);
+    background:radial-gradient(circle,color-mix(in srgb,var(--ac) 95%,transparent),transparent 62%);
+    left:0;top:0;offset-path:ellipse(var(--rx,150px) var(--ry,70px) at 50% 50%);
+    offset-rotate:0deg;animation:travel 6.8s linear infinite}
+  .s-blob .b2{animation-delay:-3.4s;opacity:.85}
+  @keyframes travel{to{offset-distance:100%}}
+
+  /* 2 旋转流光（锥形） */
+  .s-conic .ring{inset:-27px;border-radius:34px;filter:blur(15px);opacity:1;
+    background:conic-gradient(from 0deg,transparent 0 28deg,var(--ac) 70deg,transparent 118deg,
+      transparent 205deg,color-mix(in srgb,var(--ac) 70%,transparent) 252deg,transparent 318deg);
+    animation:spin 6s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* 3 呼吸 + 扫边 */
+  .s-edge .borderlight{inset:0;border-radius:14px;overflow:hidden}
+  .s-edge .borderlight::before{content:"";position:absolute;inset:-60%;border-radius:50%;
+    background:conic-gradient(transparent 0 72%,color-mix(in srgb,var(--ac) 90%,transparent) 82%,#fff 85%,color-mix(in srgb,var(--ac) 90%,transparent) 88%,transparent 96%);
+    animation:spin 5.5s linear infinite;filter:blur(1px)}
+  .s-edge .card{position:relative;z-index:2;margin:1.5px;box-shadow:0 0 22px color-mix(in srgb,var(--ac) 45%,transparent)}
+
+  .cap{max-width:1180px;margin:10px auto 0;padding:0 24px;font-size:12px;line-height:1.7;color:#98A4BA}
+  .cap b{color:#E8EDF7}
+  .notes{max-width:1180px;margin:22px auto 44px;padding:16px 20px;background:#121A26;border:1px solid rgba(255,255,255,.06);
+    border-radius:12px;font-size:12.5px;line-height:1.9;color:#98A4BA}
+  .notes b{color:#E8EDF7}
+  .notes ul{margin:6px 0 0;padding-left:18px}
+  .notes code{font:600 11.5px/1.4 "Bahnschrift",monospace;color:#DCE3F0}
+  body.snap .head,body.snap .bar,body.snap .cap,body.snap .notes{display:none}
+  body.snap .grid{margin:0;padding:10px;max-width:none;gap:10px}
+  body.snap .col{min-height:100vh}
+</style>
+</head>
+<body>
+<div class="head">
+  <div class="kicker">WORK COUNTDOWN · FLOWING CARD GLOW</div>
+  <h1>卡片背面的流光：三种，小卡和大卡都加</h1>
+  <p class="lede">以第 4 版「呼吸柔光」为底，再叠一层会流动的光：<b>双光斑环绕</b>（两团光绕着卡片转）、<b>旋转流光</b>（锥形光扫过四周）、
+    <b>扫边</b>（一道亮光沿卡片边缘跑）。光色跟卡片强调色走；上面是收起的小卡，下面是展开的大卡。</p>
+</div>
+
+<div class="bar">
+  <span>主题</span>
+  <button class="tbtn on" data-t="midnight" onclick="setTheme('midnight')">午夜蓝</button>
+  <button class="tbtn" data-t="sunset" onclick="setTheme('sunset')">落日橙</button>
+  <button class="tbtn" data-t="kongque" onclick="setTheme('kongque')">孔雀绿</button>
+  <button class="tbtn" data-t="ivory" onclick="setTheme('ivory')">象牙白</button>
+</div>
+
+<div class="grid">
+  <div class="col s-blob">
+    <div class="name"><b>1 · 双光斑环绕</b></div>
+    <div class="wrap" style="margin-top:26px;--rx:132px;--ry:62px">
+      <div class="halo"></div><div class="blob b1"></div><div class="blob b2"></div>
+      <div class="card mini" data-card="mini"></div>
+    </div>
+    <div class="wrap" style="--rx:168px;--ry:118px">
+      <div class="halo"></div><div class="blob b1"></div><div class="blob b2"></div>
+      <div class="card big" data-card="big"></div>
+    </div>
+  </div>
+
+  <div class="col s-conic">
+    <div class="name"><b>2 · 旋转流光</b></div>
+    <div class="wrap" style="margin-top:26px;--rx:132px;--ry:62px">
+      <div class="halo"></div><div class="ring"></div>
+      <div class="card mini" data-card="mini"></div>
+    </div>
+    <div class="wrap" style="--rx:168px;--ry:118px">
+      <div class="halo"></div><div class="ring"></div>
+      <div class="card big" data-card="big"></div>
+    </div>
+  </div>
+
+  <div class="col s-edge">
+    <div class="name"><b>3 · 呼吸 + 扫边</b></div>
+    <div class="wrap" style="margin-top:26px;--rx:132px;--ry:62px">
+      <div class="halo"></div>
+      <div class="borderlight"></div>
+      <div class="card mini" data-card="mini"></div>
+    </div>
+    <div class="wrap" style="--rx:168px;--ry:118px">
+      <div class="halo"></div>
+      <div class="borderlight"></div>
+      <div class="card big" data-card="big"></div>
+    </div>
+  </div>
+</div>
+
+<p class="cap"><b>怎么选：</b>1 最像「背后有光在绕着卡转」，也最容易在 GDI+ 里实现（两团径向渐变光斑沿椭圆轨迹移动）；2 整圈都在流，最抓眼，但 GDI+ 没有锥形渐变，要用分段圆弧近似；3 光只贴在边上跑，最克制，靠一小段高亮弧沿卡片边框移动。</p>
+
+<div class="notes">
+  <b>落地到 C#</b>
+  <ul>
+    <li>都在同一张分层窗里画：卡片下面先铺一层<b>强调色的柔光</b>（圆角矩形缩小再放大当模糊），再叠流光层，最后画卡片本体。</li>
+    <li>1：两团 <code>PathGradientBrush</code> 光斑，中心按 <code>sin/cos</code> 沿椭圆走，周期 6–8s；呼吸底光 4.2s。最省事、帧率稳。</li>
+    <li>2：把卡片外圈拆成 40–60 段圆弧，每段按「旋转角 - 段角」的相位取强调色透明度，合起来就是一圈流光；每帧重画，仍然只在展开/呼吸时跑。</li>
+    <li>3：沿圆角矩形边框取一段 60° 的亮弧，按时间推进；下面再垫一层模糊的同色光。</li>
+    <li>小卡/大卡共用同一个绘制函数，只换宽高和圆角；浅色主题把亮度压到 45–55%，避免糊。</li>
+  </ul>
+</div>
+
+<script>
+  var THEMES = {
+    midnight:{ct:'#12161F',cb:'#1B2130',tx:'#E8EDF7',mu:'#8B95A8',dm:'#6C768A',ac:'#4C8DFF',trk:'rgba(255,255,255,.14)',edge:'rgba(255,255,255,.10)'},
+    sunset:{ct:'#2E2019',cb:'#211610',tx:'#FBEEDF',mu:'#B49A83',dm:'#8E7763',ac:'#FF9A5A',trk:'rgba(255,255,255,.14)',edge:'rgba(255,255,255,.10)'},
+    kongque:{ct:'#0B2A1B',cb:'#062015',tx:'#E8F4EC',mu:'#8DB7A1',dm:'#6B8F7B',ac:'#0FA35C',trk:'rgba(255,255,255,.14)',edge:'rgba(255,255,255,.10)'},
+    ivory:{ct:'#FCFDFF',cb:'#EEF1F7',tx:'#1B2230',mu:'#5C6779',dm:'#8A93A5',ac:'#3D6BFF',trk:'rgba(24,32,48,.14)',edge:'rgba(24,32,48,.12)'}
+  };
+
+  function miniHTML(){
+    return '<i class="dot"></i><span class="lab">距离下班</span><span class="rt">下班 20:04</span>'+
+      '<div class="num">05:30:56</div><div class="bar"><i></i></div>';
+  }
+  function bigHTML(){
+    return '<div class="r1"><i class="dot"></i><span>工作中</span><span class="tools"><span>⚙</span><span>⟳</span><span>›</span></span></div>'+
+      '<div class="cap">距离下班</div><div class="num">05:30:43</div><div class="bar"><i></i></div>'+
+      '<div class="sub">上班 <b>09:34</b> · 预计下班 <b>20:04</b></div>'+
+      '<div class="sub"><i class="dot" style="width:5px;height:5px"></i>午休 <b>11:50–13:30</b><span class="sd"></span>已结束</div>'+
+      '<div class="extra">已工作 4h59m · 应勤 10h30m</div>';
+  }
+
+  function setTheme(id){
+    var t = THEMES[id];
+    document.querySelectorAll('.col').forEach(function(c){
+      Object.keys(t).forEach(function(k){ c.style.setProperty('--'+k, t[k]); });
+    });
+    document.querySelectorAll('.tbtn').forEach(function(b){ b.classList.toggle('on', b.dataset.t===id); });
+  }
+
+  document.querySelectorAll('.card[data-card="mini"]').forEach(function(c){ c.innerHTML = miniHTML(); });
+  document.querySelectorAll('.card[data-card="big"]').forEach(function(c){ c.innerHTML = bigHTML(); });
+  setTheme('midnight');
+
+  (function(){
+    var q = new URLSearchParams(location.search);
+    if(q.get('snap')==='1') document.body.classList.add('snap');
+    var t = q.get('theme'); if(t && THEMES[t]) setTheme(t);
+  })();
+</script>
+</body>
+</html>

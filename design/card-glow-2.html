@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>主题卡片的主题色发光 · 四种</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#0E131C;color:#E8EDF7;font-family:"Microsoft YaHei","Segoe UI",sans-serif}
+  .head{max-width:1120px;margin:0 auto;padding:34px 24px 8px}
+  .kicker{font:600 11px/1 "Bahnschrift",sans-serif;letter-spacing:.28em;color:#7F8BA3}
+  h1{margin:12px 0 8px;font-size:25px;letter-spacing:-.01em}
+  .lede{margin:0;color:#98A4BA;font-size:13.5px;line-height:1.8;max-width:860px}
+  .lede b{color:#E8EDF7}
+  .bar{max-width:1120px;margin:18px auto 0;padding:0 24px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .bar span{font-size:11.5px;color:#7F8BA3;margin-right:4px}
+  .tbtn{height:28px;padding:0 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#DCE3F0;font-size:12px;cursor:pointer}
+  .tbtn.on{background:#E8EDF7;color:#0E131C;border-color:#E8EDF7}
+  .chk{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:#98A4BA}
+  .grid{max-width:1120px;margin:16px auto 0;padding:0 24px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .cell{background:#0B1018;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.06)}
+  .desk{position:relative;height:330px;display:flex;align-items:center;justify-content:center;
+    background:
+      radial-gradient(60% 70% at 20% 15%,rgba(48,86,130,.28),transparent 60%),
+      radial-gradient(50% 60% at 85% 90%,rgba(90,52,90,.24),transparent 60%),
+      linear-gradient(155deg,#101722,#0A0F16 60%,#070B11)}
+  .desk::after{content:"";position:absolute;inset:0;background:radial-gradient(120% 90% at 50% 45%,transparent 55%,rgba(0,0,0,.45));pointer-events:none}
+  .cap{padding:10px 14px 12px;font-size:12px;line-height:1.65;color:#98A4BA}
+  .cap b{color:#E8EDF7;display:block;margin-bottom:2px;font-size:12.5px}
+
+  /* ---------- 卡片本体（和 C# 菜单同一套色） ---------- */
+  .screen{--ct:#12161F;--cb:#1B2130;--tx:#E8EDF7;--mu:#8B95A8;--dm:#6C768A;--ac:#4C8DFF;--edge:rgba(255,255,255,.10)}
+  .wrap{position:relative;z-index:1}
+  .card{position:relative;width:246px;border-radius:18px;overflow:hidden;z-index:2;
+    background:linear-gradient(180deg,var(--ct),var(--cb));border:1px solid var(--edge);color:var(--tx)}
+  .hd{display:flex;align-items:center;gap:10px;padding:13px 14px 0}
+  .hd .ic{width:26px;height:26px;border-radius:9px;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;flex:none;color:var(--ac)}
+  .hd .ic svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .hd b{display:block;font-size:12.5px;font-weight:600;line-height:1.25}
+  .hd em{display:block;font-style:normal;font-size:10px;color:var(--mu);margin-top:2px}
+  .sw{display:grid;grid-template-columns:repeat(4,44px);justify-content:space-between;row-gap:9px;padding:11px 14px 0}
+  .sw i{position:relative;width:44px;height:26px;border-radius:6px;display:block;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);overflow:hidden}
+  .sw i::after{content:"";position:absolute;left:2px;right:2px;bottom:2px;height:3px;border-radius:2px;background:var(--bar)}
+  .sw i.sel{box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),0 0 0 2px var(--ac)}
+  .ft{padding:11px 14px 13px;font-size:10.5px;color:var(--ac);display:flex;align-items:center;gap:5px}
+  .ft svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---------- 四种发光 ---------- */
+  .halo{position:absolute;z-index:0;border-radius:44px;pointer-events:none;
+    background:radial-gradient(50% 50% at 50% 50%,color-mix(in srgb,var(--ac) 60%,transparent),transparent 72%)}
+
+  /* 1 柔光晕：大范围、低 Alpha */
+  .g-soft .halo{inset:-66px;filter:blur(30px);opacity:.8}
+  .g-soft .card{box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 30%,transparent),
+    0 0 46px color-mix(in srgb,var(--ac) 34%,transparent),
+    0 18px 48px rgba(0,0,0,.55)}
+
+  /* 2 紧致光边：描边更亮，光晕收紧 */
+  .g-rim .halo{inset:-20px;filter:blur(12px);opacity:.7}
+  .g-rim .card{box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 72%,transparent),
+    0 0 18px color-mix(in srgb,var(--ac) 55%,transparent),
+    0 14px 36px rgba(0,0,0,.55)}
+
+  /* 3 背板灯：卡后面一整块发光板，边界更明显 */
+  .g-back .halo{inset:-24px;filter:blur(10px);opacity:1;
+    background:radial-gradient(58% 62% at 50% 60%,color-mix(in srgb,var(--ac) 92%,transparent),color-mix(in srgb,var(--ac) 40%,transparent) 55%,transparent 74%)}
+  .g-back .card{box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 38%,transparent),0 16px 46px rgba(0,0,0,.55)}
+
+  /* 4 呼吸：柔光晕 + 明暗起伏 */
+  .g-breathe .halo{inset:-58px;filter:blur(28px);animation:breathe 3.4s ease-in-out infinite}
+  .g-breathe .card{box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 30%,transparent),
+    0 0 28px color-mix(in srgb,var(--ac) 28%,transparent),
+    0 18px 48px rgba(0,0,0,.55)}
+  @keyframes breathe{0%,100%{opacity:.42;transform:scale(.97)}50%{opacity:.95;transform:scale(1.04)}}
+
+  .notes{max-width:1120px;margin:24px auto 44px;padding:16px 20px;background:#121A26;border:1px solid rgba(255,255,255,.06);
+    border-radius:12px;font-size:12.5px;line-height:1.9;color:#98A4BA}
+  .notes b{color:#E8EDF7}
+  .notes ul{margin:6px 0 0;padding-left:18px}
+  .notes code{font:600 11.5px/1.4 "Bahnschrift",monospace;color:#DCE3F0}
+  body.snap .head,body.snap .bar,body.snap .notes{display:none}
+  body.snap .grid{grid-template-columns:repeat(4,1fr);gap:10px;margin:0;padding:10px;max-width:none}
+  body.snap .desk{height:600px}
+  body.snap .cap{display:none}
+</style>
+</head>
+<body>
+<div class="head">
+  <div class="kicker">WORK COUNTDOWN · CARD GLOW</div>
+  <h1>主题卡片背面的发光：四种，跟主题强调色走</h1>
+  <p class="lede">被点开的胶囊（比如「修改主题」）背面加一层<b>主题色发光</b>：底下用强调色做柔光，再叠一层深色投影把卡片托起来。
+    下面四种只差「光晕多大、边界多硬、动没动」。右上角可以切主题，发光会跟着换色；浅色主题也能看。</p>
+</div>
+
+<div class="bar">
+  <span>主题</span>
+  <button class="tbtn" data-t="midnight" onclick="setTheme('midnight')">午夜蓝</button>
+  <button class="tbtn" data-t="sunset" onclick="setTheme('sunset')">落日橙</button>
+  <button class="tbtn" data-t="kongque" onclick="setTheme('kongque')">孔雀绿</button>
+  <button class="tbtn" data-t="ivory" onclick="setTheme('ivory')">象牙白</button>
+  <label class="chk"><input type="checkbox" id="breathe" onchange="toggleBreathe(this)"> 呼吸光动效</label>
+</div>
+
+<div class="grid">
+  <div class="cell">
+    <div class="desk screen g-soft">
+      <div class="wrap">
+        <div class="halo"></div>
+        <div class="card" data-card="1"></div>
+      </div>
+    </div>
+    <div class="cap"><b>1 · 柔光晕</b>大范围、低透明度的主题色柔光，边缘最软；卡片底下再加深色投影托住。</div>
+  </div>
+
+  <div class="cell">
+    <div class="desk screen g-rim">
+      <div class="wrap">
+        <div class="halo"></div>
+        <div class="card" data-card="2"></div>
+      </div>
+    </div>
+    <div class="cap"><b>2 · 紧致光边</b>1px 亮描边 + 收得很紧的光，像卡片自己在发光；存在感最强，适合深色桌面。</div>
+  </div>
+
+  <div class="cell">
+    <div class="desk screen g-back">
+      <div class="wrap">
+        <div class="halo"></div>
+        <div class="card" data-card="3"></div>
+      </div>
+    </div>
+    <div class="cap"><b>3 · 背板灯</b>卡后面一整块发光板，边界更清楚，像卡片背后有一盏灯；配浅色主题最明显。</div>
+  </div>
+
+  <div class="cell">
+    <div class="desk screen g-breathe">
+      <div class="wrap">
+        <div class="halo"></div>
+        <div class="card" data-card="4"></div>
+      </div>
+    </div>
+    <div class="cap"><b>4 · 呼吸光</b>柔光晕的底子，亮度和大小缓慢起伏（3.4s）；不想要动效可以只取静态版。</div>
+  </div>
+</div>
+
+<div class="notes">
+  <b>怎么落到 C#</b>
+  <ul>
+    <li>发光不用额外的窗口：就在同一张分层窗位图里，卡片下面先画一个<b>用强调色填充的圆角矩形，按 1/4 缩小再放大</b>当廉价模糊（现在阴影就是这么做的），再用多层不同半径叠出柔光。</li>
+    <li>参数按 DIP 写：<code>halo = accent 60% → 透明</code>，外扩 30–52，模糊 14–26；底下再叠一层黑色 55% 的 18/48 投影。</li>
+    <li>浅色主题（象牙白）把发光降到 45%，否则白底上会糊成一片；深色主题可以给到 60–72%。</li>
+    <li>呼吸动效只在展开后的卡片上跑，用菜单自己的 15ms 计时器，停止条件跟现在的菜单一样（空闲就停）。</li>
+  </ul>
+</div>
+
+<script>
+  var THEMES = {
+    midnight:{ct:'#12161F',cb:'#1B2130',tx:'#E8EDF7',mu:'#8B95A8',dm:'#6C768A',ac:'#4C8DFF',edge:'rgba(255,255,255,.10)'},
+    sunset:{ct:'#2E2019',cb:'#211610',tx:'#FBEEDF',mu:'#B49A83',dm:'#8E7763',ac:'#FF9A5A',edge:'rgba(255,255,255,.10)'},
+    kongque:{ct:'#0B2A1B',cb:'#062015',tx:'#E8F4EC',mu:'#8DB7A1',dm:'#6B8F7B',ac:'#0FA35C',edge:'rgba(255,255,255,.10)'},
+    ivory:{ct:'#FCFDFF',cb:'#EEF1F7',tx:'#1B2230',mu:'#5C6779',dm:'#8A93A5',ac:'#3D6BFF',edge:'rgba(24,32,48,.12)'}
+  };
+  var SW = [
+    {b:'#12161F',a:'#4C8DFF'},{b:'#0E1A1C',a:'#2FD4C4'},{b:'#211610',a:'#FF9A5A'},{b:'#20141A',a:'#FF7FA8'},
+    {b:'#101C15',a:'#5FD08A'},{b:'#001109',a:'#0FA35C'},{b:'#F7F4ED',a:'#8A6A4F'},{b:'#1B2130',a:'#B9C2D0'}
+  ];
+  var curTheme = 'midnight';
+
+  function cardHTML(){
+    return '<div class="hd"><span class="ic">'+
+      '<svg viewBox="0 0 24 24"><path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.15 0 1.9-.78 1.9-1.82 0-.55-.26-.98-.55-1.35-.3-.38-.52-.76-.52-1.22 0-.94.78-1.62 1.74-1.62h1.55c1.95 0 3.48-1.48 3.48-3.52 0-4.1-3.42-7.67-7.6-7.67Z"/>'+
+      '<circle cx="8.1" cy="10.2" r="1.15"/><circle cx="12" cy="7.7" r="1.15"/><circle cx="15.9" cy="10.2" r="1.15"/></svg></span>'+
+      '<div><b>修改主题</b><em>当前：经典 · 午夜蓝</em></div></div>'+
+      '<div class="sw">'+SW.map(function(s,i){
+        return '<i class="'+(i===0?'sel':'')+'" style="background:linear-gradient(180deg,'+s.b+',color-mix(in srgb,'+s.b+' 80%,#000));--bar:'+s.a+'"></i>';
+      }).join('')+'</div>'+
+      '<div class="ft">全部 39 套主题…<svg viewBox="0 0 24 24"><path d="M5 12h13M13.5 6.8 18.7 12l-5.2 5.2"/></svg></div>';
+  }
+
+  function setTheme(id){
+    curTheme = id;
+    var t = THEMES[id];
+    document.querySelectorAll('.screen').forEach(function(s){
+      s.style.setProperty('--ct',t.ct); s.style.setProperty('--cb',t.cb);
+      s.style.setProperty('--tx',t.tx); s.style.setProperty('--mu',t.mu);
+      s.style.setProperty('--dm',t.dm); s.style.setProperty('--ac',t.ac); s.style.setProperty('--edge',t.edge);
+    });
+    document.querySelectorAll('.tbtn').forEach(function(b){ b.classList.toggle('on', b.dataset.t===id); });
+    var em = document.querySelectorAll('.hd em');
+    var names = {midnight:'经典 · 午夜蓝',sunset:'经典 · 落日橙',kongque:'绿 · 孔雀',ivory:'经典 · 象牙白'};
+    em.forEach(function(e){ e.textContent = '当前：' + names[id]; });
+  }
+
+  function toggleBreathe(cb){
+    document.querySelectorAll('.g-breathe .halo').forEach(function(h){
+      h.style.animationPlayState = cb.checked ? 'running' : 'paused';
+    });
+  }
+
+  document.querySelectorAll('.card').forEach(function(c){ c.innerHTML = cardHTML(); });
+  setTheme('midnight');
+  document.getElementById('breathe').checked = true;
+
+  (function(){
+    var q = new URLSearchParams(location.search);
+    if(q.get('snap')==='1') document.body.classList.add('snap');
+    var t = q.get('theme'); if(t && THEMES[t]) setTheme(t);
+  })();
+</script>
+</body>
+</html>

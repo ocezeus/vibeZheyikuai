@@ -33,7 +33,7 @@ namespace WorkCountdown
             this.store = store;
             this.s = settings;
 
-            Text = "下班倒计时 · 第一次使用";
+            Text = "上班工具箱 · 第一次使用";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;

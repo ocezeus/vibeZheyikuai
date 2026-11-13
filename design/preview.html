@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>警戒带 · 反色呼吸（H1 / H2 / H3）</title>
+<style>
+  :root{--hz:#F5C400}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:#EDF0F6;color:#1B2230;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  .page-head{max-width:1010px;margin:0 auto;padding:44px 24px 6px}
+  .kicker{font:600 11px/1 "Bahnschrift","Segoe UI",sans-serif;letter-spacing:.28em;color:#7A8498}
+  h1{margin:12px 0 8px;font-size:29px;letter-spacing:-.02em;color:#151A26}
+  .page-head p{margin:0;color:#5C6779;font-size:13.5px;line-height:1.8;max-width:780px}
+  .page-head b{color:#1B2230}
+
+  section{max-width:1010px;margin:0 auto;padding:30px 24px 10px}
+  h2{display:flex;align-items:baseline;gap:12px;font-size:19px;margin:0 0 6px;color:#151A26}
+  h2 em{font:600 10.5px/1 "Bahnschrift",sans-serif;letter-spacing:.22em;color:#8A93A5;font-style:normal}
+  .lede{margin:0 0 22px;color:#5C6779;font-size:13px;line-height:1.75}
+
+  .grid{display:grid;grid-template-columns:1fr;gap:34px}
+  .viewport{width:960px;height:540px;overflow:hidden;border-radius:14px;box-shadow:0 18px 50px rgba(15,20,32,.22),0 1px 0 rgba(255,255,255,.6)}
+  .view{width:1280px;height:720px;transform:scale(.75);transform-origin:0 0}
+  .screen{position:relative;width:1280px;height:720px;overflow:hidden;background:#0b0f16}
+  .meta{display:flex;gap:12px;align-items:baseline;margin-top:14px}
+  .tag{font:700 10.5px/1 "Bahnschrift",sans-serif;letter-spacing:.16em;color:#14171C;background:var(--hz);border-radius:4px;padding:5px 8px;flex:none}
+  .name{font-size:15px;font-weight:700;color:#151A26}
+  .desc{font-size:12.5px;color:#5C6779;line-height:1.75;margin:6px 0 0}
+  .desc b{color:#1B2230}
+
+  /* 桌面底图 */
+  .desktop{position:absolute;inset:0;overflow:hidden}
+  .desktop .bg{position:absolute;inset:-10%;
+    background:
+      radial-gradient(52% 60% at 16% 18%,rgba(58,110,160,.55) 0,transparent 62%),
+      radial-gradient(46% 54% at 84% 12%,rgba(126,66,102,.42) 0,transparent 60%),
+      radial-gradient(58% 62% at 72% 92%,rgba(28,86,80,.45) 0,transparent 62%),
+      linear-gradient(158deg,#0A1018 0%,#111A26 55%,#080C12 100%)}
+  .win{position:absolute;border-radius:10px;background:rgba(16,22,31,.72);border:1px solid rgba(255,255,255,.07);box-shadow:0 30px 80px rgba(0,0,0,.45)}
+  .w1{left:70px;top:92px;width:520px;height:330px;background:rgba(237,241,248,.93);border-color:rgba(255,255,255,.7);box-shadow:0 30px 80px rgba(0,0,0,.35)}
+  .w2{right:84px;top:150px;width:430px;height:300px}
+  .win .bar{position:absolute;left:0;right:0;top:0;height:26px;border-radius:10px 10px 0 0;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.05)}
+  .win .bar::before{content:"";position:absolute;left:12px;top:9px;width:8px;height:8px;border-radius:50%;background:#E8635C;box-shadow:15px 0 0 #E5B24C,30px 0 0 #59C36A;opacity:.75}
+  .w1 .bar{background:rgba(22,30,44,.05);border-bottom:1px solid rgba(22,30,44,.08)}
+  .win .ln{position:absolute;left:22px;height:8px;border-radius:4px;background:rgba(255,255,255,.075)}
+  .win .ln.g{background:rgba(120,180,255,.13)}
+  .w1 .ln{background:rgba(22,30,44,.10)}
+  .w1 .ln.g{background:rgba(70,120,200,.20)}
+  .dock{position:absolute;left:0;right:0;bottom:0;height:44px;background:rgba(8,11,16,.78);border-top:1px solid rgba(255,255,255,.06)}
+
+  /* ============ 警戒带：反色呼吸 ============ */
+  .bandH{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:88px;overflow:hidden;box-shadow:0 12px 44px rgba(0,0,0,.42)}
+  .bandH .fillH{position:absolute;inset:0;background:var(--hz)}
+  .rail{position:absolute;left:0;right:0;height:6px;overflow:hidden}
+  .rail.top{top:0}
+  .rail.bottom{bottom:0}
+  .rail .tape{position:absolute;inset:-40px;background:repeating-linear-gradient(-45deg,var(--hz) 0 13px,#0B0B0C 13px 26px);animation:tapeRun 24s linear infinite}
+  @keyframes tapeRun{from{transform:translate(0,0)}to{transform:translate(18.4px,-18.4px)}}
+
+  .mqH{position:absolute;left:0;right:0;top:6px;bottom:6px;overflow:hidden}
+  .trackH{display:flex;width:max-content;height:100%;align-items:center;animation:hSlide 44s linear infinite}
+  @keyframes hSlide{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .seqH{display:flex;align-items:center;flex:none;height:100%}
+  .pairH{display:flex;align-items:center;flex:none;padding:0 30px}
+  .pairH .tri{width:17px;height:17px;flex:none;margin-right:12px}
+  .kindH{font-size:12.5px;font-weight:900;letter-spacing:.2em}
+  .sepDot{width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.45;margin:0 18px;flex:none}
+  .titleH{font-size:26px;font-weight:900;letter-spacing:.01em;white-space:nowrap}
+
+  .layerA{color:#0B0C0E;position:absolute;left:0;right:0;top:6px;bottom:6px;overflow:hidden}
+  .layerB{color:#FFD84D;position:absolute;left:0;right:0;top:6px;bottom:6px;overflow:hidden}
+  .layerB .kindH,.layerB .titleH{text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 9px rgba(0,0,0,.85),0 0 24px rgba(0,0,0,.5)}
+
+  /* H1 同步反色：底色和字色一起渐变 */
+  .h1 .fillH{animation:hBreathe 2.8s ease-in-out infinite}
+  .h1 .layerA{animation:hFadeOut 2.8s ease-in-out infinite}
+  .h1 .layerB{animation:hFadeIn 2.8s ease-in-out infinite}
+  @keyframes hBreathe{0%,100%{opacity:1}50%{opacity:0}}
+  @keyframes hFadeOut{0%,100%{opacity:1}50%{opacity:0}}
+  @keyframes hFadeIn{0%,100%{opacity:0}50%{opacity:1}}
+
+  /* H2 迟滞反色：底色呼吸，字在快透明时才换 */
+  .h2 .fillH{animation:hBreathe 2.8s ease-in-out infinite}
+  .h2 .layerA{animation:hInkA 2.8s linear infinite}
+  .h2 .layerB{animation:hInkB 2.8s linear infinite}
+  @keyframes hInkA{0%,30%{opacity:1}42%,58%{opacity:0}70%,100%{opacity:1}}
+  @keyframes hInkB{0%,30%{opacity:0}42%,58%{opacity:1}70%,100%{opacity:0}}
+
+  /* H3 屏息反色：透明态停 0.6s */
+  .h3 .fillH{animation:hHold 3.2s ease-in-out infinite}
+  .h3 .layerA{animation:hHoldA 3.2s linear infinite}
+  .h3 .layerB{animation:hHoldB 3.2s linear infinite}
+  @keyframes hHold{0%{opacity:1}32%,64%{opacity:0}100%{opacity:1}}
+  @keyframes hHoldA{0%,24%{opacity:1}34%,66%{opacity:0}76%,100%{opacity:1}}
+  @keyframes hHoldB{0%,24%{opacity:0}34%,66%{opacity:1}76%,100%{opacity:0}}
+
+  body.solo{background:#000;overflow:hidden}
+  body.solo .page-head,body.solo section>h2,body.solo .lede,body.solo .item:not(.chosen){display:none}
+  body.solo section{padding:0;margin:0;max-width:none}
+  body.solo .grid{gap:0}
+  body.solo .item.chosen .viewport{width:1280px;height:720px;border-radius:0;box-shadow:none}
+  body.solo .item.chosen .view{transform:none}
+  body.solo .item.chosen .meta{display:none}
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <div class="kicker">WORK COUNTDOWN · TAPE 2.1</div>
+  <h1>反色呼吸 · 双向滚动 · 文本铺满</h1>
+  <p>条高 88，内容只留「日程类型 + 标题」，重复铺满整条，文字向左滚、警示斜纹往右走。底色从实黄呼吸到透明，字跟着从黑反成黄。三个版本只差「什么时候反色」。<b>打开本页看动效</b>，GIF 是取样。</p>
+</header>
+
+<section>
+  <h2>H1 / H2 / H3 <em>3 CURVES</em></h2>
+  <p class="lede">共同点：2.8–3.2 秒一轮呼吸；条子两端始终有字；斜纹不跟着呼吸，始终在。</p>
+  <div class="grid">
+
+    <div class="item" data-key="h1">
+      <div class="viewport"><div class="view">
+        <div class="screen">
+          <div class="desktop">
+            <div class="bg"></div>
+            <div class="win w1"><div class="bar"></div>
+              <div class="ln" style="top:58px;width:300px"></div>
+              <div class="ln g" style="top:80px;width:210px"></div>
+              <div class="ln" style="top:102px;width:340px"></div>
+              <div class="ln" style="top:124px;width:160px"></div>
+            </div>
+            <div class="win w2"><div class="bar"></div>
+              <div class="ln" style="top:56px;width:250px"></div>
+              <div class="ln" style="top:78px;width:300px"></div>
+              <div class="ln g" style="top:100px;width:180px"></div>
+              <div class="ln" style="top:122px;width:260px"></div>
+            </div>
+            <div class="dock"></div>
+          </div>
+          <div class="bandH h1">
+            <div class="fillH"></div>
+            <div class="rail top"><div class="tape"></div></div>
+            <div class="rail bottom"><div class="tape"></div></div>
+            <div class="layerA"><div class="trackH"><div class="seqH"></div><div class="seqH"></div></div></div>
+            <div class="layerB"><div class="trackH"><div class="seqH"></div><div class="seqH"></div></div></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="meta"><span class="tag">H1</span><span class="name">同步反色</span></div>
+      <p class="desc"><b>底色和字色一起渐变。</b>黄条变淡的同时黑字变黄，中间有一段两边各半，字会发闷。最连续，但中段不好看。</p>
+    </div>
+
+    <div class="item" data-key="h2">
+      <div class="viewport"><div class="view">
+        <div class="screen">
+          <div class="desktop">
+            <div class="bg"></div>
+            <div class="win w1"><div class="bar"></div>
+              <div class="ln" style="top:58px;width:300px"></div>
+              <div class="ln g" style="top:80px;width:210px"></div>
+              <div class="ln" style="top:102px;width:340px"></div>
+              <div class="ln" style="top:124px;width:160px"></div>
+            </div>
+            <div class="win w2"><div class="bar"></div>
+              <div class="ln" style="top:56px;width:250px"></div>
+              <div class="ln" style="top:78px;width:300px"></div>
+              <div class="ln g" style="top:100px;width:180px"></div>
+              <div class="ln" style="top:122px;width:260px"></div>
+            </div>
+            <div class="dock"></div>
+          </div>
+          <div class="bandH h2">
+            <div class="fillH"></div>
+            <div class="rail top"><div class="tape"></div></div>
+            <div class="rail bottom"><div class="tape"></div></div>
+            <div class="layerA"><div class="trackH"><div class="seqH"></div><div class="seqH"></div></div></div>
+            <div class="layerB"><div class="trackH"><div class="seqH"></div><div class="seqH"></div></div></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="meta"><span class="tag">H2</span><span class="name">迟滞反色</span></div>
+      <p class="desc"><b>底色照常呼吸，字在黄条快没了才换。</b>黑字撑到透明度剩三成，再用 0.3 秒翻成黄字；回来时提前翻回黑字。没有发闷的中间态，像灯灭的一瞬字自己亮了。<b>推荐。</b></p>
+    </div>
+
+    <div class="item" data-key="h3">
+      <div class="viewport"><div class="view">
+        <div class="screen">
+          <div class="desktop">
+            <div class="bg"></div>
+            <div class="win w1"><div class="bar"></div>
+              <div class="ln" style="top:58px;width:300px"></div>
+              <div class="ln g" style="top:80px;width:210px"></div>
+              <div class="ln" style="top:102px;width:340px"></div>
+              <div class="ln" style="top:124px;width:160px"></div>
+            </div>
+            <div class="win w2"><div class="bar"></div>
+              <div class="ln" style="top:56px;width:250px"></div>
+              <div class="ln" style="top:78px;width:300px"></div>
+              <div class="ln g" style="top:100px;width:180px"></div>
+              <div class="ln" style="top:122px;width:260px"></div>
+            </div>
+            <div class="dock"></div>
+          </div>
+          <div class="bandH h3">
+            <div class="fillH"></div>
+            <div class="rail top"><div class="tape"></div></div>
+            <div class="rail bottom"><div class="tape"></div></div>
+            <div class="layerA"><div class="trackH"><div class="seqH"></div><div class="seqH"></div></div></div>
+            <div class="layerB"><div class="trackH"><div class="seqH"></div><div class="seqH"></div></div></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="meta"><span class="tag">H3</span><span class="name">屏息反色</span></div>
+      <p class="desc"><b>透明态停一会儿再回来。</b>3.2 秒一轮：黄条约 1 秒褪干净，全透明保持 0.6 秒（只剩黄字和两条斜纹），再慢慢涨回来。节奏更稳。</p>
+    </div>
+
+  </div>
+</section>
+
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+
+  var pair = '<div class="pairH">'
+    + '<svg class="tri" viewBox="0 0 24 24">'
+    + '<path d="M12 3.4 22.2 20.6H1.8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'
+    + '<path d="M12 9.4v5.1" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'
+    + '</svg>'
+    + '<span class="kindH">会议提醒</span><span class="sepDot"></span>'
+    + '<span class="titleH">产品评审会 · Q4 排期</span></div>';
+
+  document.querySelectorAll('.seqH').forEach(function(seq){
+    var html = '';
+    for (var i = 0; i < 3; i++) html += pair;
+    seq.innerHTML = html;
+  });
+
+  var d = q.get('d');
+  if (d){
+    document.body.classList.add('solo');
+    var item = document.querySelector('.item[data-key="' + d + '"]');
+    if (item) item.classList.add('chosen');
+  }
+
+  var fz = q.get('freeze');
+  if (fz !== null){
+    var t = parseFloat(fz) || 0;
+    var staticTxt = q.get('static') === '1';
+    document.querySelectorAll('.bandH, .bandH *').forEach(function(el){
+      if (staticTxt && el.classList.contains('trackH')) { el.style.animation = 'none'; return; }
+      var cs = getComputedStyle(el);
+      if (cs.animationName && cs.animationName !== 'none'){
+        el.style.animationDelay = '-' + t + 's';
+        el.style.animationPlayState = 'paused';
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

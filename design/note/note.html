@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>小纸条 · 会话功能设计稿（三版）</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#EEF1F6;font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif;color:#1B2230}
+  button{font-family:inherit;border:0;background:none;padding:0;color:inherit;cursor:pointer}
+  input{font-family:inherit;outline:none;border:0;background:none;color:inherit}
+  svg{display:block}
+  .topbar{max-width:1320px;margin:0 auto;padding:26px 24px 6px}
+  .kicker{font:600 11px/1 "Bahnschrift",sans-serif;letter-spacing:.28em;color:#7A8498}
+  h1{margin:11px 0 8px;font-size:25px;letter-spacing:-.01em}
+  .lede{margin:0 0 4px;max-width:1120px;color:#5C6779;font-size:13.5px;line-height:1.9}
+  .lede b{color:#1B2230;font-weight:600}
+  .lede code{font:600 11.5px/1.4 Consolas,monospace;color:#1B2230;background:#E2E7F0;border-radius:4px;padding:1px 5px}
+  .rules{display:flex;flex-wrap:wrap;gap:7px;margin:14px 0 0}
+  .rules span{font-size:11.5px;color:#4E596C;background:#fff;border-radius:999px;padding:6px 11px;box-shadow:0 1px 2px rgba(20,28,44,.06)}
+  .rules b{color:#1B2230}
+  .flashpick{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:12px;color:#5C6779}
+  .flashpick button{height:26px;padding:0 10px;border-radius:999px;background:#fff;border:1px solid #DDE3EC;font-size:11.5px;color:#4E596C}
+  .flashpick button.on{background:#1B2230;border-color:#1B2230;color:#fff}
+  .stagewrap{max-width:1320px;margin:0 auto;padding:8px 24px 40px}
+  .stage{margin-top:26px}
+  .stage-head{display:flex;align-items:baseline;gap:10px;margin:0 0 8px}
+  .stage-head .no{font:700 11px/1 "Bahnschrift",sans-serif;color:#8B94A6;letter-spacing:.16em}
+  .stage-head h2{margin:0;font-size:15.5px}
+  .stage-head p{margin:0;font-size:12.5px;color:#5C6779}
+  .viewport{width:1280px;max-width:100%;overflow:auto;border-radius:16px;box-shadow:0 22px 60px rgba(15,20,32,.22);background:#fff}
+  .screen{position:relative;width:1280px;height:720px;overflow:hidden;isolation:isolate;
+    --ac:#F2CC13;--ac2:rgba(242,204,19,.16);--ac3:rgba(242,204,19,.34);
+    --ct:#1D1802;--cb:#302904;--trk:#615208;--tx:#FEFAE7;--mu:#D9D4BE;--dm:#C0BBA3;
+    --ease:cubic-bezier(.22,.9,.28,1);
+    background:
+      radial-gradient(70% 80% at 6% 0%,rgba(255,255,255,.96),transparent 58%),
+      radial-gradient(55% 65% at 96% 92%,rgba(190,208,236,.72),transparent 60%),
+      linear-gradient(152deg,#F3F5F9 0%,#E6EAF2 52%,#DCE2EC 100%);
+    font-family:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",sans-serif}
+  .screen[data-theme="midnight"]{--ac:#4C8DFF;--ac2:rgba(76,141,255,.16);--ac3:rgba(76,141,255,.34);
+    --ct:#12161F;--cb:#1B2130;--trk:#2A3242;--tx:#E8EDF7;--mu:#A9B3C6;--dm:#8B95A8}
+  .screen::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+    background:radial-gradient(120% 90% at 50% 42%,transparent 55%,rgba(76,92,120,.12) 100%)}
+
+  /* ---------- 桌面背景装饰 ---------- */
+  .win{position:absolute;z-index:0;border-radius:12px;background:rgba(255,255,255,.66);
+    border:1px solid rgba(255,255,255,.9);box-shadow:0 22px 46px rgba(30,42,64,.12)}
+  .win .wbar{height:34px;display:flex;align-items:center;gap:6px;padding:0 13px;border-bottom:1px solid rgba(20,28,44,.06)}
+  .win .wbar i{width:8px;height:8px;border-radius:50%;background:#CBD3E1}
+  .win .wbody{padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+  .win .wbody b{display:block;height:9px;border-radius:5px;background:#E4E9F1}
+  .win .wbody b.h{height:14px;background:#D8DFEA}
+  .w1{left:46px;top:74px;width:520px;height:300px}
+  .w1 .wbody b:nth-child(1){width:38%}.w1 .wbody b:nth-child(2){width:82%}.w1 .wbody b:nth-child(3){width:66%}
+  .w1 .wbody b:nth-child(4){width:74%}.w1 .wbody b:nth-child(5){width:45%}
+  .w2{left:120px;top:430px;width:420px;height:206px;background:rgba(255,255,255,.5)}
+  .w2 .wbody b:nth-child(1){width:52%}.w2 .wbody b:nth-child(2){width:76%}.w2 .wbody b:nth-child(3){width:61%}.w2 .wbody b:nth-child(4){width:40%}
+
+  /* ---------- 卡片 ---------- */
+  .cardwrap{position:absolute;right:0;top:112px;z-index:4;display:flex;flex-direction:column;align-items:flex-end;gap:16px}
+  .card{position:relative;color:var(--tx);border-radius:18px;
+    background:linear-gradient(180deg,var(--ct),var(--cb));
+    box-shadow:0 24px 52px rgba(28,20,4,.38),inset 0 1px 0 rgba(255,255,255,.06);
+    overflow:visible}
+  .card.big{width:420px;height:282px}
+  .card.small{width:336px;height:102px;border-radius:14px;display:none}
+  .stage[data-s="flash"] .card.small{display:block}
+  .stage[data-s="flash"] .card.big{opacity:1}
+  .card .inner{position:absolute;inset:0;padding:18px;display:flex;flex-direction:column}
+  .statusrow{display:flex;align-items:center;gap:9px;height:26px;flex:none}
+  .statusrow .sdot{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac)}
+  .statusrow .st{font-size:14px;color:var(--mu);letter-spacing:.02em}
+  .icons{margin-left:auto;display:flex;align-items:center}
+  .iconbtn{position:relative;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:10px;color:var(--dm);transition:color .16s ease,background .16s ease,transform .16s ease}
+  .iconbtn svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .iconbtn:hover{color:var(--tx);background:rgba(255,255,255,.05)}
+  .iconbtn.plane{color:var(--ac)}
+  .iconbtn.plane .dot{position:absolute;right:7px;top:7px;width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 0 2px var(--ct)}
+  .iconbtn .tip{position:absolute;bottom:-26px;left:50%;transform:translateX(-50%) translateY(3px);font-size:11px;white-space:nowrap;color:var(--tx);background:rgba(12,10,2,.92);border:1px solid var(--ac3);border-radius:8px;padding:3px 7px;opacity:0;pointer-events:none;transition:opacity .16s ease,transform .16s ease}
+  .iconbtn:hover .tip{opacity:1;transform:translateX(-50%)}
+  .card .label{margin-top:10px;font-size:13px;color:var(--mu);flex:none}
+  .clock{margin-top:4px;font:700 56px/58px Consolas,"Cascadia Mono",monospace;letter-spacing:.01em;color:var(--tx);flex:none}
+  .progress{margin-top:12px;height:9px;border-radius:5px;background:var(--trk);position:relative;overflow:hidden;flex:none}
+  .progress i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;width:46%;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,transparent),var(--ac));
+    box-shadow:0 0 14px color-mix(in srgb,var(--ac) 45%,transparent)}
+  .row1{margin-top:11px;font-size:13px;color:var(--mu);flex:none}
+  .row2{margin-top:9px;font-size:13px;color:var(--mu);flex:none}
+  .row2 b{color:var(--tx);font-weight:600;margin-right:8px}
+  .row3{margin-top:9px;font-size:12px;color:var(--dm);flex:none}
+  .card.small .mini{position:absolute;inset:0;padding:14px}
+  .card.small .mini .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac)}
+  .card.small .mini .lab{position:absolute;left:24px;top:8px;font-size:11px;color:var(--mu)}
+  .card.small .mini .rt{position:absolute;right:14px;top:8px;font-size:11px;color:var(--mu)}
+  .card.small .mini .num{position:absolute;left:12px;top:22px;font:700 30px/32px Consolas,monospace;color:var(--tx)}
+  .card.small .bar{position:absolute;left:14px;right:14px;bottom:8px;height:4px;border-radius:2px;background:var(--trk);overflow:hidden}
+  .card.small .bar i{position:absolute;inset:0;width:46%;border-radius:2px;background:var(--ac)}
+
+  /* 右上角闪光：连续闪两次 + 未读每 5 秒轻闪 */
+  .corner-flash,.ring{display:none}
+  /* 贴边闪光：光沿着卡片的圆角边框走，而不是角落里一个圆点 */
+  .rim{position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;opacity:0;z-index:2}
+  .rim::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;
+    background:var(--ac);
+    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;mask-composite:exclude;
+    filter:drop-shadow(0 0 6px color-mix(in srgb,var(--ac) 70%,transparent))}
+  body[data-flash="2"] .rim::before{background:conic-gradient(from var(--rima,0deg),transparent 0 58%,
+    color-mix(in srgb,var(--ac) 78%,#fff) 72%,#fff 77%,var(--ac) 83%,transparent 90% 100%)}
+  body[data-flash="3"] .rim::before{background:conic-gradient(from 0deg,
+    var(--ac) 0 7%,transparent 10% 23%,var(--ac) 26% 33%,transparent 36% 48%,
+    var(--ac) 51% 58%,transparent 61% 73%,var(--ac) 76% 83%,transparent 86% 98%)}
+  .stage[data-s="flash"] .rim{animation:rimFlash 1.15s ease-out paused;animation-delay:-.07s}
+  body[data-flash="2"] .stage[data-s="flash"] .rim{animation:rimSweep 1.15s linear paused,rimFlash 1.15s ease-out paused;animation-delay:-.07s,-.07s}
+  .rim.flash-now{animation:rimFlash 1.15s ease-out both;opacity:1}
+  .rim.unread{animation:rimBreath 5s ease-in-out infinite}
+  .flash-caption{position:absolute;left:64px;top:140px;z-index:5;width:500px;padding:18px 20px;border-radius:14px;background:rgba(255,255,255,.88);border:1px solid rgba(255,255,255,.95);box-shadow:0 16px 38px rgba(20,30,50,.12);opacity:0;transform:translateY(4px);transition:opacity .24s ease,transform .24s var(--ease)}
+  .stage[data-s="flash"] .flash-caption{opacity:1;transform:none}
+  .flash-caption h3{margin:0 0 6px;font-size:15px}
+  .flash-caption p{margin:0;font-size:12.5px;line-height:1.8;color:#4E596C}
+  .flash-caption .arc{margin-top:12px;display:flex;align-items:center;gap:8px}
+  .flash-caption .arc i{display:block;width:64px;height:26px;border-radius:6px;background:#fff;box-shadow:0 1px 2px rgba(20,28,44,.08);position:relative;overflow:hidden}
+  .flash-caption .arc i::before{content:"";position:absolute;right:0;top:0;width:34px;height:100%;background:radial-gradient(closest-side at 74% 32%,var(--ac3),transparent 72%)}
+  .flash-caption .arc span{font-size:11.5px;color:#5C6779}
+  .card .tag{position:absolute;left:18px;bottom:-24px;font-size:11px;color:#6D7789;opacity:0;transition:opacity .2s ease}
+  .stage[data-s="flash"] .card .tag{opacity:1}
+
+  /* ---------- 通用：小纸条面板 ---------- */
+  .panel{position:absolute;right:434px;top:112px;z-index:5;display:flex;flex-direction:column;color:var(--tx);border-radius:18px;overflow:hidden;
+    background:linear-gradient(180deg,color-mix(in srgb,var(--ct) 94%,#fff 6%),var(--cb));
+    border:1px solid color-mix(in srgb,var(--ac) 46%,transparent);
+    box-shadow:0 26px 60px rgba(18,14,2,.4),inset 0 1px 0 rgba(255,255,255,.05);
+    opacity:0;transform:translateX(14px) scale(.98);transform-origin:100% 38%;pointer-events:none;
+    transition:opacity .18s ease,transform .34s var(--ease),height .36s var(--ease),width .34s var(--ease)}
+  .stage[data-s="select"] .panel,
+  .stage[data-s="chat"] .panel,
+  .stage[data-s="history"] .panel,
+  .stage[data-s="add"] .panel,
+  .stage[data-s="send"] .panel{opacity:1;transform:none;pointer-events:auto}
+  .stage[data-s="chat"] .panel,.stage[data-s="select"] .panel,.stage[data-s="send"] .panel{height:282px}
+  .stage[data-s="history"] .panel{height:476px}
+  .stage[data-s="add"] .pa{height:364px}
+  .stage[data-s="add"] .panel{z-index:6}
+  .pa{width:392px;display:flex;flex-direction:column}
+  .pa-head{display:flex;align-items:center;gap:10px;padding:14px 16px 10px}
+  .plane-badge{width:32px;height:32px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
+    color:var(--ac);background:var(--ac2);border:1px solid var(--ac3)}
+  .plane-badge svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .pa-title{min-width:0}
+  .pa-title b{display:block;font-size:14px;font-weight:600}
+  .pa-title em{display:block;font-style:normal;font-size:10.5px;color:var(--dm);margin-top:2px}
+  .pa-title em .id{font:600 10.5px Consolas,monospace;color:var(--ac);letter-spacing:.06em}
+  .ghost{margin-left:auto;height:28px;padding:0 10px;border-radius:999px;font-size:11.5px;color:var(--ac);
+    border:1px solid var(--ac3);background:color-mix(in srgb,var(--ac) 8%,transparent);transition:background .16s ease}
+  .ghost:hover{background:color-mix(in srgb,var(--ac) 16%,transparent)}
+  .pa-contacts{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:0 16px 10px;overflow:visible}
+  .cap{position:relative;display:flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:999px;
+    background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.1);color:var(--mu);
+    white-space:nowrap;opacity:0;transform:translateY(6px) scale(.96);
+    transition:background .18s ease,border-color .18s ease,color .18s ease,transform .18s var(--ease),box-shadow .18s ease}
+  .stage[data-s="select"] .cap,.stage[data-s="chat"] .cap,.stage[data-s="history"] .cap,.stage[data-s="send"] .cap{
+    opacity:1;transform:none;transition-delay:calc(var(--i)*45ms + 90ms)}
+  .cap:hover{transform:translateY(-1px);border-color:var(--ac3);color:var(--tx)}
+  .cap.on{color:var(--tx);border-color:color-mix(in srgb,var(--ac) 66%,transparent);
+    background:color-mix(in srgb,var(--ac) 14%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--ac) 22%,transparent)}
+  .cap .cap-dot{width:5px;height:5px;border-radius:50%;background:var(--ac);flex:none;opacity:0}
+  .cap.unread .cap-dot{opacity:1;box-shadow:0 0 6px var(--ac)}
+  .cap .time{font-size:10px;color:var(--dm);font-variant-numeric:tabular-nums}
+  .cap .badge{min-width:15px;height:15px;border-radius:8px;background:var(--ac);color:#1B1500;
+    font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px}
+  .cap.new{color:var(--ac);border-style:dashed;background:transparent;width:30px;padding:0;justify-content:center;font-size:14px;flex:none}
+  .pa-body{flex:1;min-height:0;display:flex;flex-direction:column;padding:0 16px 14px}
+  .pa-empty{display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--dm);
+    opacity:0;transition:opacity .2s ease}
+  .pa-empty svg{width:34px;height:34px;fill:none;stroke:currentColor;stroke-width:1.4}
+  .pa-empty p{margin:0;font-size:12px}
+  .stage[data-s="select"] .pa-empty{display:flex;opacity:1}
+  .pa-last{display:none;flex:none;flex-direction:column;gap:7px;opacity:0;transform:translateY(6px);
+    transition:opacity .22s ease,transform .26s var(--ease)}
+  .stage[data-s="chat"] .pa-last,.stage[data-s="send"] .pa-last{display:flex;opacity:1;transform:none;animation:fadeUp .26s var(--ease) both}
+  .msg{max-width:82%;padding:7px 10px;border-radius:12px;font-size:12.5px;line-height:1.55;position:relative}
+  .msg p{margin:0}
+  .msg em{font-style:normal;font-size:9.5px;color:var(--dm);margin-left:6px;white-space:nowrap}
+  .msg.them{align-self:flex-start;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);border-bottom-left-radius:4px}
+  .msg.me{align-self:flex-end;background:color-mix(in srgb,var(--ac) 16%,transparent);
+    border:1px solid color-mix(in srgb,var(--ac) 34%,transparent);border-bottom-right-radius:4px}
+  .msg .who{display:block;font-size:10px;color:var(--dm);margin-bottom:2px}
+  .pa-input{margin-top:auto;display:none;align-items:center;gap:8px;height:38px;padding:0 6px 0 12px;
+    border-radius:12px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.1);
+    opacity:0;transform:translateY(6px);transition:opacity .22s ease,transform .26s var(--ease),border-color .18s ease}
+  .stage[data-s="chat"] .pa-input,.stage[data-s="history"] .pa-input,.stage[data-s="send"] .pa-input{display:flex;opacity:1;transform:none;animation:fadeUp .26s var(--ease) both}
+  .pa-input:focus-within{border-color:color-mix(in srgb,var(--ac) 52%,transparent);background:rgba(255,255,255,.075)}
+  .pa-input input{flex:1;min-width:0;font-size:12.5px}
+  .pa-input input::placeholder{color:var(--dm)}
+  .send{width:28px;height:28px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;
+    color:#1B1500;background:var(--ac);transition:transform .16s ease,filter .16s ease}
+  .send svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .send:hover{transform:translateY(-1px);filter:brightness(1.08)}
+  .send:active{transform:scale(.94)}
+  .pa-history{display:none;flex:1;min-height:0;overflow:auto;margin:8px 0 10px;padding-right:2px;
+    opacity:0;transform:translateY(8px);transition:opacity .2s ease,transform .24s var(--ease)}
+  .stage[data-s="history"] .pa-history{display:block;opacity:1;transform:none}
+  .pa-history .hint{font-size:10px;color:var(--dm);margin:0 0 7px;letter-spacing:.02em}
+  .round{display:flex;gap:8px;padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.06);opacity:0;transform:translateY(7px);
+    transition:opacity .26s ease,transform .28s var(--ease)}
+  .stage[data-s="history"] .round{opacity:1;transform:none;transition-delay:calc(var(--i)*38ms + 90ms)}
+  .round:last-child{border-bottom:0}
+  .round .rn{width:16px;flex:none;font:700 10px/16px Consolas,monospace;color:var(--dm);text-align:center}
+  .round .rl{min-width:0;flex:1}
+  .round .rl p{margin:0 0 2px;font-size:12px;line-height:1.5;color:var(--mu);display:flex;gap:6px;align-items:baseline}
+  .round .rl p:last-child{margin-bottom:0}
+  .round .rl p b{font-weight:600;color:var(--tx);font-size:11px;flex:none;width:30px}
+  .round .rl p em{font-style:normal;font-size:9.5px;color:var(--dm);margin-left:auto;flex:none}
+  .round .rl p.me b{color:var(--ac)}
+
+  /* 加联系人面板 */
+  .pa-addsheet{position:absolute;inset:0;padding:16px;display:flex;flex-direction:column;gap:10px;
+    background:linear-gradient(180deg,color-mix(in srgb,var(--ct) 94%,#fff 6%),var(--cb));
+    opacity:0;transform:translateX(18px);pointer-events:none;transition:opacity .2s ease,transform .3s var(--ease)}
+  .stage[data-s="add"] .pa-addsheet{opacity:1;transform:none;pointer-events:auto}
+  .sheet-head{display:flex;align-items:center;height:24px}
+  .sheet-head b{font-size:13.5px}
+  .sheet-head .x{margin-left:auto;width:26px;height:26px;border-radius:8px;color:var(--dm);font-size:16px;line-height:1}
+  .sheet-head .x:hover{background:rgba(255,255,255,.06);color:var(--tx)}
+  .field{display:flex;align-items:center;gap:10px;height:40px;padding:0 12px;border-radius:10px;
+    background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1)}
+  .field span{font-size:11px;color:var(--dm);flex:none}
+  .field input{flex:1;min-width:0;font-size:13px;color:var(--tx)}
+  .field.id input{font:600 16px Consolas,monospace;letter-spacing:.28em;color:var(--ac)}
+  .found{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;
+    background:color-mix(in srgb,var(--ac) 9%,transparent);border:1px solid var(--ac3);
+    opacity:0;transform:translateY(6px) scale(.985);animation:none}
+  .stage[data-s="add"] .found{animation:popIn .34s var(--ease) .16s both}
+  .found .found-ic{width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--ac2);color:var(--ac)}
+  .found .found-ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .found-meta b{display:block;font:600 12.5px Consolas,monospace;letter-spacing:.08em}
+  .found-meta em{display:block;font-style:normal;font-size:10.5px;color:var(--dm);margin-top:2px}
+  .found-ok{margin-left:auto;font-size:10.5px;color:var(--ac);border:1px solid var(--ac3);border-radius:999px;padding:3px 8px}
+  .primary{height:38px;border-radius:10px;background:var(--ac);color:#1B1500;font-size:13px;font-weight:600;
+    transition:transform .16s ease,filter .16s ease}
+  .primary:hover{filter:brightness(1.07)}
+  .primary:active{transform:scale(.985)}
+  .sheet-tip{margin:0;font-size:10.5px;color:var(--dm);line-height:1.7}
+
+  /* ---------- B：便签纸 ---------- */
+  .pb{width:376px;right:434px;top:104px;border-radius:14px;overflow:visible;
+    background:linear-gradient(168deg,#FAF0CE,#EEDFB0);
+    border:1px solid rgba(120,92,20,.32);
+    box-shadow:0 26px 50px rgba(96,70,8,.32),0 2px 0 rgba(120,94,24,.1) inset;
+    color:#3A2E10;transform:translateX(14px) rotate(0deg) scale(.98);transform-origin:100% 30%;
+    transition:opacity .18s ease,transform .34s var(--ease),height .36s var(--ease)}
+  .screen[data-theme="midnight"] .pb{background:linear-gradient(170deg,#F1F3F8,#E2E6EF);border-color:rgba(40,52,80,.2);color:#1D2434}
+  .stage[data-s="select"] .pb,.stage[data-s="chat"] .pb,.stage[data-s="history"] .pb,.stage[data-s="add"] .pb,.stage[data-s="send"] .pb{
+    opacity:1;transform:rotate(-.5deg)}
+  .stage[data-s="chat"] .pb,.stage[data-s="select"] .pb,.stage[data-s="send"] .pb{height:296px}
+  .stage[data-s="history"] .pb{height:424px}
+  .stage[data-s="add"] .pb{height:432px}
+  .pb::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;border-radius:14px 14px 0 0;
+    background:repeating-linear-gradient(90deg,transparent 0 18px,rgba(120,94,24,.12) 18px 19px)}
+  .pb-head{display:flex;align-items:center;gap:10px;padding:16px 18px 6px}
+  .pb-head .pin{width:9px;height:9px;border-radius:50%;background:#D8613A;box-shadow:0 1px 0 rgba(0,0,0,.25)}
+  .pb-title b{display:block;font:600 17px/1.2 "KaiTi","STKaiti","Microsoft YaHei",serif;letter-spacing:.08em}
+  .pb-title em{display:block;font-style:normal;font-size:10.5px;color:#7C6A3C;margin-top:3px;font-family:Consolas,monospace}
+  .pb-head .ghost{margin-left:auto;border-color:rgba(120,94,24,.3);color:#6B5410;background:rgba(255,255,255,.35)}
+  .pb-head .ghost:hover{background:rgba(255,255,255,.6)}
+  .pb-tabs{display:flex;align-items:flex-end;gap:6px;padding:0 16px 0;height:34px}
+  .ptab{position:relative;height:28px;padding:0 11px;border-radius:10px 10px 0 0;font-size:11.5px;color:#6B5A2A;
+    background:rgba(255,255,255,.4);border:1px solid rgba(120,94,24,.16);border-bottom:0;opacity:0;transform:translateY(8px);
+    transition:opacity .22s ease,transform .24s var(--ease),background .16s ease;display:flex;align-items:center;gap:5px}
+  .stage[data-s="select"] .ptab,.stage[data-s="chat"] .ptab,.stage[data-s="history"] .ptab,.stage[data-s="send"] .ptab{
+    opacity:1;transform:none;transition-delay:calc(var(--i)*45ms + 80ms)}
+  .ptab.on{background:#FBF5E2;color:#3A2E10;font-weight:600;height:32px;box-shadow:0 -2px 0 #D8613A inset}
+  .ptab .u{width:5px;height:5px;border-radius:50%;background:#D8613A}
+  .pb-body{position:absolute;left:0;right:0;top:124px;bottom:0;padding:0 20px 16px;
+    background:linear-gradient(180deg,transparent 0 3px,transparent 3px),
+      repeating-linear-gradient(180deg,transparent 0 27px,rgba(120,94,24,.2) 27px 28px);
+    display:flex;flex-direction:column}
+  .pb-hint{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    color:#8A7742;font-family:"KaiTi","STKaiti",serif;font-size:15px;opacity:0;transition:opacity .2s ease}
+  .pb-hint svg{width:30px;height:30px;fill:none;stroke:#A98B3A;stroke-width:1.4}
+  .stage[data-s="select"] .pb-hint{opacity:1}
+  .pb-last{display:none;flex-direction:column;gap:5px;opacity:0;transform:translateY(6px);transition:opacity .22s ease,transform .24s var(--ease)}
+  .stage[data-s="chat"] .pb-last,.stage[data-s="send"] .pb-last{display:flex;opacity:1;transform:none;animation:fadeUp .24s var(--ease) both}
+  .pline{display:flex;gap:8px;align-items:baseline;font-size:13.5px;line-height:27px;color:#3F3110}
+  .pline b{font-weight:600;font-size:11px;flex:none;width:34px;color:#7C6A3C}
+  .pline.me b{color:#A8591F}
+  .pline em{font-style:normal;font-size:10px;color:#A08A55;margin-left:auto;flex:none}
+  .pb-input{margin-top:auto;display:none;align-items:center;gap:8px;height:34px;padding:0 4px 0 8px;
+    border-bottom:1.5px solid rgba(120,94,24,.45);opacity:0;transform:translateY(5px);transition:opacity .2s ease,transform .24s var(--ease)}
+  .stage[data-s="chat"] .pb-input,.stage[data-s="history"] .pb-input,.stage[data-s="send"] .pb-input{display:flex;opacity:1;transform:none;animation:fadeUp .24s var(--ease) both}
+  .pb-input input{flex:1;min-width:0;font:13px "KaiTi","STKaiti",serif;color:#3A2E10}
+  .pb-input input::placeholder{color:#A08A55}
+  .pb-send{width:26px;height:26px;border-radius:8px;color:#FBF5E2;background:#B4791F;display:flex;align-items:center;justify-content:center;transition:transform .16s ease}
+  .pb-send svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .pb-send:hover{transform:translateY(-1px)}
+  .pb-history{display:none;flex:1;min-height:0;overflow:auto;margin:4px 0 8px;opacity:0;transform:translateY(6px);
+    transition:opacity .2s ease,transform .24s var(--ease)}
+  .stage[data-s="history"] .pb-history{display:block;opacity:1;transform:none}
+  .pb-history .hint{font-size:10.5px;color:#6E5B2A;margin:0 0 5px;font-family:Consolas,monospace}
+  .pb-round{display:flex;gap:8px;align-items:baseline;font-size:12.5px;line-height:24px;color:#4A3B12;
+    font-family:"KaiTi","STKaiti",serif;border-bottom:1px dotted rgba(120,94,24,.22);opacity:0;transform:translateY(6px)}
+  .stage[data-s="history"] .pb-round{opacity:1;transform:none;transition:opacity .26s ease,transform .26s var(--ease);transition-delay:calc(var(--i)*34ms + 100ms)}
+  .pb-round .n{width:14px;flex:none;font:9px/1 Consolas,monospace;color:#A08A55;text-align:center}
+  .pb-round .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pb-round.me .t b{color:#A8591F}
+  .pb-add{position:absolute;left:16px;right:16px;top:16px;bottom:16px;z-index:8;
+    background:linear-gradient(168deg,#FBF2D2,#F0E2B6);border:1px solid rgba(120,92,20,.3);border-radius:10px;
+    box-shadow:0 16px 32px rgba(72,54,8,.22);padding:14px 16px;display:flex;flex-direction:column;gap:9px;
+    transform:rotateX(78deg) translateY(20px);transform-origin:50% 100%;opacity:0;pointer-events:none;
+    transition:transform .38s var(--ease),opacity .2s ease}
+  .stage[data-s="add"] .pb-add{transform:none;opacity:1;pointer-events:auto}
+  .pb-add h4{margin:0;font:600 15px "KaiTi","STKaiti",serif;color:#3A2E10;letter-spacing:.06em}
+  .pb-add .field{border:0;border-bottom:1.2px solid rgba(120,94,24,.4);border-radius:0;background:transparent;height:34px;padding:0 2px}
+  .pb-add .field span{font-size:10.5px;color:#8A7742}
+  .pb-add .field input{font:13px "KaiTi","STKaiti",serif;color:#3A2E10}
+  .pb-add .field.id input{font-family:Consolas,monospace;font-size:15px;letter-spacing:.3em;color:#8A5A00}
+  .pb-add .found{background:rgba(255,255,255,.5);border:1px dashed rgba(120,94,24,.35);border-radius:8px;padding:8px 10px;opacity:1;transform:none;animation:none}
+  .pb-add .found-ic{background:rgba(180,121,31,.16);color:#8A5A00;border-radius:7px;width:26px;height:26px}
+  .pb-add .found-meta b{color:#3A2E10;font:600 13px Consolas,monospace}
+  .pb-add .found-meta em{color:#8A7742}
+  .pb-add .found-ok{color:#8A5A00;border-color:rgba(120,94,24,.3)}
+  .pb-add .primary{background:#B4791F;color:#FBF5E2}
+  .pb-add .sheet-tip{color:#8A7742}
+
+  /* ---------- C：极简双栏 ---------- */
+  .pc{width:470px;right:434px;top:112px;border-radius:20px;overflow:hidden;display:flex;flex-direction:row;
+    background:linear-gradient(180deg,color-mix(in srgb,var(--ct) 93%,#fff 7%),var(--cb));
+    border:1px solid color-mix(in srgb,var(--ac) 40%,transparent);
+    box-shadow:0 30px 70px rgba(18,14,2,.42),inset 0 1px 0 rgba(255,255,255,.05)}
+  .stage[data-s="chat"] .pc,.stage[data-s="select"] .pc,.stage[data-s="send"] .pc{height:298px}
+  .stage[data-s="history"] .pc{height:512px}
+  .stage[data-s="add"] .pc{height:364px}
+  .pc-rail{width:150px;flex:none;border-right:1px solid rgba(255,255,255,.07);padding:14px 10px;display:flex;flex-direction:column;gap:7px;background:rgba(255,255,255,.015)}
+  .pc-rail .mine{font:600 9.5px Consolas,monospace;color:var(--dm);letter-spacing:.08em;padding:0 6px 4px}
+  .pcap{display:flex;align-items:center;gap:8px;height:36px;padding:0 9px;border-radius:10px;color:var(--mu);white-space:nowrap;
+    opacity:0;transform:translateX(-6px);transition:opacity .2s ease,transform .24s var(--ease),background .16s ease,color .16s ease}
+  .stage[data-s="select"] .pcap,.stage[data-s="chat"] .pcap,.stage[data-s="history"] .pcap,.stage[data-s="send"] .pcap{
+    opacity:1;transform:none;transition-delay:calc(var(--i)*45ms + 80ms)}
+  .pcap:hover{background:rgba(255,255,255,.05);color:var(--tx)}
+  .pcap.on{background:color-mix(in srgb,var(--ac) 13%,transparent);color:var(--tx);
+    box-shadow:inset 2px 0 0 var(--ac)}
+  .pcap .av{width:22px;height:22px;border-radius:8px;flex:none;background:var(--ac2);border:1px solid var(--ac3);
+    color:var(--ac);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .pcap .nm{font-size:12px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .pcap .un{width:5px;height:5px;border-radius:50%;background:var(--ac);box-shadow:0 0 6px var(--ac);flex:none;opacity:0}
+  .pcap.unread .un{opacity:1}
+  .pcap.add{color:var(--ac);border:1px dashed color-mix(in srgb,var(--ac) 38%,transparent);border-radius:10px;justify-content:center;font-size:11.5px;height:32px;margin-top:2px}
+  .pc-main{flex:1;min-width:0;display:flex;flex-direction:column;padding:16px 16px 14px}
+  .pc-empty{display:none;flex:1;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--dm);opacity:0;transition:opacity .2s ease}
+  .pc-empty svg{width:30px;height:30px;fill:none;stroke:currentColor;stroke-width:1.4}
+  .pc-empty p{margin:0;font-size:11.5px}
+  .stage[data-s="select"] .pc-empty{display:flex;opacity:1}
+  .pc-head{display:none;align-items:center;gap:8px;margin-bottom:8px}
+  .stage[data-s="chat"] .pc-head,.stage[data-s="history"] .pc-head,.stage[data-s="send"] .pc-head{display:flex;animation:fadeUp .24s var(--ease) both}
+  .pc-head b{font-size:13px}
+  .pc-head em{font-style:normal;font-size:10px;color:var(--dm);font-family:Consolas,monospace}
+  .pc-head .mini-plane{margin-left:auto;color:var(--ac)}
+  .pc-head .mini-plane svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .pc-last{display:none;flex-direction:column;gap:6px;flex:none;opacity:0;transform:translateY(6px);transition:opacity .22s ease,transform .24s var(--ease)}
+  .stage[data-s="chat"] .pc-last,.stage[data-s="send"] .pc-last{display:flex;opacity:1;transform:none;animation:fadeUp .26s var(--ease) both}
+  .pc-last .msg{max-width:88%}
+  .pc-history{display:none;flex:1;min-height:0;overflow:auto;margin:8px 0;opacity:0;transform:translateY(6px);transition:opacity .2s ease,transform .24s var(--ease)}
+  .stage[data-s="history"] .pc-history{display:block;opacity:1;transform:none}
+  .pc-history .hint{font-size:10px;color:var(--dm);margin:0 0 6px}
+  .pc-history .pair{display:flex;flex-direction:column;gap:5px;margin-bottom:9px;opacity:0;transform:translateY(7px)}
+  .stage[data-s="history"] .pc-history .pair{opacity:1;transform:none;transition:opacity .26s ease,transform .26s var(--ease);transition-delay:calc(var(--i)*40ms + 80ms)}
+  .pc-history .msg{max-width:84%;font-size:11.5px;padding:6px 9px}
+  .pc-input{margin-top:auto;display:none;align-items:center;gap:8px;height:38px;padding:0 6px 0 12px;border-radius:12px;
+    background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);opacity:0;transform:translateY(6px);
+    transition:opacity .22s ease,transform .24s var(--ease),border-color .16s ease}
+  .stage[data-s="chat"] .pc-input,.stage[data-s="history"] .pc-input,.stage[data-s="send"] .pc-input{display:flex;opacity:1;transform:none;animation:fadeUp .26s var(--ease) both}
+  .pc-input:focus-within{border-color:color-mix(in srgb,var(--ac) 52%,transparent)}
+  .pc-input input{flex:1;min-width:0;font-size:12.5px}
+  .pc-input input::placeholder{color:var(--dm)}
+  .pc-add{position:absolute;inset:0;z-index:9;background:linear-gradient(180deg,color-mix(in srgb,var(--ct) 95%,#fff 5%),var(--cb));
+    padding:16px;display:flex;flex-direction:column;gap:10px;opacity:0;transform:translateY(10px);pointer-events:none;
+    transition:opacity .2s ease,transform .28s var(--ease)}
+  .stage[data-s="add"] .pc-add{opacity:1;transform:none;pointer-events:auto}
+  .pc-add .pc-addhead{display:flex;align-items:center;height:24px}
+  .pc-add .pc-addhead b{font-size:13.5px}
+  .pc-add .x{margin-left:auto;width:26px;height:26px;border-radius:8px;color:var(--dm);font-size:16px}
+  .pc-add .x:hover{background:rgba(255,255,255,.06);color:var(--tx)}
+  .pc-add .pc-addcols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:2px}
+  .pc-add .field{height:42px}
+  .pc-add .found{margin-top:2px}
+  .pc-add .primary{margin-top:auto}
+
+  /* ---------- 状态栏 / 页面控件 ---------- */
+  .statebar{display:flex;align-items:center;flex-wrap:wrap;gap:7px;margin:10px 0 0}
+  .statebar button{height:28px;padding:0 11px;border-radius:999px;font-size:11.5px;color:#4E596C;background:#fff;
+    border:1px solid #DDE3EC;transition:all .16s ease}
+  .statebar button:hover{border-color:#B9C4D6;color:#1B2230}
+  .statebar button.on{background:#1B2230;border-color:#1B2230;color:#fff}
+  .statebar .sp{width:8px}
+  .statebar .note{font-size:11px;color:#8B94A6;margin-left:auto}
+  .tools{display:flex;gap:7px;margin-left:10px}
+  .tools button{height:28px;padding:0 10px;border-radius:999px;font-size:11px;color:#4E596C;background:#F7F9FC;border:1px dashed #C9D2E0}
+  .tools button:hover{color:#1B2230;border-color:#9AA8BD}
+
+  /* ---------- 关键帧 ---------- */
+  @property --rima{syntax:'<angle>';initial-value:0deg;inherits:false}
+  @keyframes rimFlash{
+    0%{opacity:0} 8%{opacity:.95} 24%{opacity:.12} 40%{opacity:.9}
+    58%{opacity:.1} 72%{opacity:.5} 88%{opacity:0} 100%{opacity:0}}
+  @keyframes rimSweep{from{--rima:0deg} to{--rima:720deg}}
+  @keyframes rimBreath{0%,86%,100%{opacity:0} 90%{opacity:.55} 95%{opacity:.12}}
+  @keyframes flash2{
+    0%{opacity:0;transform:scale(.92)}
+    10%{opacity:.95;transform:scale(1)}
+    24%{opacity:.18;transform:scale(1.02)}
+    38%{opacity:.1}
+    50%{opacity:.92;transform:scale(1.01)}
+    66%{opacity:.14}
+    80%{opacity:.28}
+    100%{opacity:0;transform:scale(1.03)}}
+  @keyframes ring2{
+    0%{opacity:0;transform:scale(.5)}
+    14%{opacity:.85;transform:scale(.9)}
+    34%{opacity:0;transform:scale(1.35)}
+    52%{opacity:.8;transform:scale(.86)}
+    74%{opacity:0;transform:scale(1.45)}
+    100%{opacity:0;transform:scale(1.5)}}
+  @keyframes pulse5{
+    0%,84%,100%{opacity:0;transform:scale(.96)}
+    88%{opacity:.5;transform:scale(1)}
+    94%{opacity:0;transform:scale(1.02)}}
+  @keyframes fadeUp{
+    0%{opacity:0;transform:translateY(7px)}
+    100%{opacity:1;transform:none}}
+  @keyframes popIn{
+    0%{opacity:0;transform:translateY(8px) scale(.97)}
+    100%{opacity:1;transform:none}}
+  @keyframes bubbleIn{
+    0%{opacity:0;transform:translateY(9px) scale(.98)}
+    100%{opacity:1;transform:none}}
+  .msg.just{animation:bubbleIn .3s var(--ease) both}
+  .cap.just,.pcap.just,.ptab.just{animation:popIn .34s var(--ease) both}
+
+  /* clean 模式：截图 / 单独预览用 */
+  body.still *,body.still *::before,body.still *::after{transition:none!important;animation:none!important}
+  body.still .found{opacity:1!important;transform:none!important}
+  body.still .stage[data-s="flash"] .rim{opacity:.95!important;animation:none!important}
+  body.still[data-flash="2"] .stage[data-s="flash"] .rim{--rima:-55deg}
+  body.still[data-flash="3"] .stage[data-s="flash"] .rim{opacity:1!important}
+  body.clean .topbar,body.clean .statebar,body.clean .stage-head{display:none}
+  body.clean .stagewrap{padding:0;margin:0;max-width:none}
+  body.clean .stage{margin:0}
+  body.clean .viewport{border-radius:0;box-shadow:none;overflow:hidden}
+  body.clean .screen{border-radius:0}
+  body[data-only="a"] .stage:not([data-v="a"]),
+  body[data-only="b"] .stage:not([data-v="b"]),
+  body[data-only="c"] .stage:not([data-v="c"]){display:none}
+  body[data-only] .stagewrap{padding:0;margin:0;max-width:none}
+  body[data-only] .viewport{border-radius:0;box-shadow:none}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="kicker">DRAFT · 2026-11-12</div>
+  <h1>小纸条 · 会话功能（三版设计稿）</h1>
+  <p class="lede">
+    入口在卡片右上角 <b>¥ 左边</b>，小飞机图标；点开是会话选择，联系人是胶囊。hover / 点联系人看 <b>最后一条 + 输入框</b>，
+    点输入框展开 <b>已保存的 8 条消息</b>。有新纸条时 <b>光贴着大小卡片的圆角边框连闪两次</b>，未读每 5 秒沿边框轻闪。
+    <b>A 抽屉式</b>和 <b>C 极简双栏</b>都会做，在 设置 → 纸条 里切换；B 便签纸保留作备选。点下面的状态按钮逐帧看动画；<code>?v=a&amp;state=chat&amp;clean=1</code> 可以单看某一版。
+  </p>
+  <div class="rules">
+    <span><b>ID</b> 每台电脑一个 5 位数（如 48372）</span>
+    <span><b>8 条</b> 每对 ID 只留最近 8 条消息</span>
+    <span><b>闪光</b> 贴着圆角边框闪 2 次；未读 5s 沿边框轻闪</span>
+    <span><b>A 抽屉式</b> · <b>C 双栏</b> 两套都在，设置里切换</span>
+  </div>
+  <div class="flashpick">闪光贴边样式：
+    <button data-f="1">① 整圈亮边</button>
+    <button data-f="2">② 边框扫光</button>
+    <button data-f="3">③ 四角弧光</button>
+  </div>
+</div>
+
+<div class="stagewrap">
+
+  <!-- ===================== A：抽屉式 ===================== -->
+  <section class="stage" data-v="a" data-s="entry">
+    <div class="stage-head"><span class="no">VARIANT A</span><h2>抽屉式 · 和卡片同一族</h2>
+      <p>深色抽屉从卡片侧边拉出，主题色细边和 v3.2 的胶囊一致；联系人横排胶囊，历史是紧凑的「轮」列表。</p></div>
+    <div class="viewport"><div class="screen" data-theme="gold">
+      <div class="win w1"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody"><b class="h"></b><b></b><b></b><b></b><b></b></div></div>
+      <div class="win w2"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody"><b class="h"></b><b></b><b></b><b></b></div></div>
+
+      <div class="cardwrap">
+        <div class="card big">
+          <div class="corner-flash"></div><div class="ring"></div>
+          <div class="inner">
+            <div class="statusrow"><span class="sdot"></span><span class="st">工作中</span>
+              <div class="icons">
+                <button class="iconbtn plane" title="小纸条"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg><span class="dot"></span><span class="tip">小纸条 · 2 条未读</span></button>
+                <button class="iconbtn" title="工资"><svg viewBox="0 0 24 24"><path d="M6.5 5.5 12 12l5.5-6.5M12 12v7M8 12.6h8M8 16.2h8"/></svg></button>
+                <button class="iconbtn" title="设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/></svg></button>
+                <button class="iconbtn" title="刷新"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.8 4.6v4h-4"/></svg></button>
+                <button class="iconbtn" title="收起"><svg viewBox="0 0 24 24"><path d="m9 5 6 7-6 7"/></svg></button>
+              </div>
+            </div>
+            <div class="label">距离下班</div>
+            <div class="clock">07:50:50</div>
+            <div class="progress"><i></i></div>
+            <div class="row1">上班 09:52 · 预计下班 20:22</div>
+            <div class="row2"><b>距午休</b> 1h05m</div>
+            <div class="row3">已工作 52m · 应勤 10h30m</div>
+          </div>
+        </div>
+        <div class="card small">
+          <div class="corner-flash"></div><div class="ring"></div>
+          <div class="mini"><span class="dot"></span><span class="lab">距离下班</span><span class="rt">下班 20:04</span>
+            <span class="num">05:30:56</span><div class="bar"><i></i></div></div>
+        </div>
+      </div>
+
+      <div class="flash-caption">
+        <h3>收到新纸条：贴着圆角边框连闪 2 次</h3>
+        <p>光沿着<b>卡片的圆角边框</b>跑/亮两次（1.15s），不再是角落里一个圆点。大卡片、小卡片都一样；<b>没读</b>的话每 5 秒沿边框轻闪一次，点开小纸条读掉就停。</p>
+        <div class="arc"><i></i><span>一次「亮 → 暗 → 亮」都贴着圆角边框；未读时每 5s 再沿边框轻闪一次</span></div>
+      </div>
+
+      <aside class="panel pa">
+        <div class="pa-head">
+          <span class="plane-badge"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg></span>
+          <div class="pa-title"><b>小纸条</b><em>我的 ID <span class="id">48372</span> · 这台电脑</em></div>
+          <button class="ghost add-open">＋ 联系人</button>
+        </div>
+        <div class="pa-contacts">
+          <button class="cap on unread" style="--i:0"><span class="cap-dot"></span><span class="cap-name">阿哲</span><span class="time">17:41</span><span class="badge">2</span></button>
+          <button class="cap" style="--i:1"><span class="cap-name">小满</span><span class="time">16:58</span></button>
+          <button class="cap unread" style="--i:2"><span class="cap-dot"></span><span class="cap-name">老周</span><span class="time">15:20</span></button>
+          <button class="cap new" style="--i:3" aria-label="添加联系人">＋</button>
+        </div>
+        <div class="pa-body">
+          <div class="pa-empty">
+            <svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg>
+            <p>点一个联系人，或者 hover 看看最后一张纸条</p>
+          </div>
+          <div class="pa-last">
+            <div class="msg them"><span class="who">阿哲 · 17:41</span><p>晚上的评审推迟到 8 点</p></div>
+            <div class="msg me"><p>收到，我改完就过去</p><em>17:42</em></div>
+          </div>
+          <div class="pa-history">
+            <p class="hint">最近 8 条 · 每对 ID 只留 8 条，更早的不再保留</p>
+            <div class="round" style="--i:0"><span class="rn">1</span><div class="rl"><p class="me"><b>你</b>早，今天的评审几点？<em>09:12</em></p></div></div>
+            <div class="round" style="--i:1"><span class="rn">2</span><div class="rl"><p><b>阿哲</b>下午 4 点，会议室 B<em>09:15</em></p></div></div>
+            <div class="round" style="--i:2"><span class="rn">3</span><div class="rl"><p class="me"><b>你</b>接口那版发你邮箱了<em>10:02</em></p></div></div>
+            <div class="round" style="--i:3"><span class="rn">4</span><div class="rl"><p><b>阿哲</b>收到，中午看<em>10:04</em></p></div></div>
+            <div class="round" style="--i:4"><span class="rn">5</span><div class="rl"><p class="me"><b>你</b>评审材料加了两页压测<em>13:40</em></p></div></div>
+            <div class="round" style="--i:5"><span class="rn">6</span><div class="rl"><p><b>阿哲</b>好，辛苦；8 点评审推迟到 8 点<em>13:44</em></p></div></div>
+            <div class="round" style="--i:6"><span class="rn">7</span><div class="rl"><p class="me"><b>你</b>压测刚跑完，马上发你<em>17:40</em></p></div></div>
+            <div class="round" style="--i:7"><span class="rn">8</span><div class="rl"><p><b>阿哲</b>晚上的评审推迟到 8 点<em>17:41</em></p></div></div>
+          </div>
+          <div class="pa-input"><input placeholder="写一句，回车发送…"><button class="send" aria-label="发送"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg></button></div>
+        </div>
+        <div class="pa-addsheet">
+          <div class="sheet-head"><b>＋ 添加联系人</b><button class="x add-close">×</button></div>
+          <label class="field id"><span>5 位 ID</span><input value="73512" maxlength="5" inputmode="numeric"></label>
+          <div class="found">
+            <span class="found-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.4" r="3.4"/><path d="M5.2 19.5c.8-3.4 3.6-5.2 6.8-5.2s6 1.8 6.8 5.2"/></svg></span>
+            <div class="found-meta"><b>ID 73512</b><em>刚刚在线 · 还没聊过</em></div>
+            <span class="found-ok">找到了</span>
+          </div>
+          <label class="field"><span>备注</span><input value="老李"></label>
+          <button class="primary add-confirm">添加为联系人</button>
+          <p class="sheet-tip">每对 ID 只保留最近 8 轮对话；对方离线时纸条会等它开机再送。</p>
+        </div>
+      </aside>
+    </div></div>
+    <div class="statebar">
+      <button data-s="entry">01 入口</button>
+      <button data-s="flash">02 未读闪光</button>
+      <button data-s="select">03 会话选择</button>
+      <button data-s="chat">04 最后一轮 + 输入框</button>
+      <button data-s="history">05 展开 8 轮历史</button>
+      <button data-s="add">06 添加联系人</button>
+      <div class="tools"><button class="replay">重播闪光</button><button class="unread-toggle">未读 5s 呼吸</button></div>
+      <span class="note">A · 抽屉式</span>
+    </div>
+  </section>
+
+  <!-- ===================== B：便签纸 ===================== -->
+  <section class="stage" data-v="b" data-s="entry">
+    <div class="stage-head"><span class="no">VARIANT B</span><h2>便签纸 · 手写感（未采用，备选）</h2>
+      <p>纸条是一张真的便签：米色纸、红线、手写体；联系人做成标签页，展开历史像把纸往下拉长。</p></div>
+    <div class="viewport"><div class="screen" data-theme="gold">
+      <div class="win w1"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody"><b class="h"></b><b></b><b></b><b></b><b></b></div></div>
+      <div class="win w2"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody"><b class="h"></b><b></b><b></b><b></b></div></div>
+
+      <div class="cardwrap">
+        <div class="card big">
+          <div class="corner-flash"></div><div class="ring"></div>
+          <div class="inner">
+            <div class="statusrow"><span class="sdot"></span><span class="st">工作中</span>
+              <div class="icons">
+                <button class="iconbtn plane" title="小纸条"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg><span class="dot"></span><span class="tip">小纸条 · 2 条未读</span></button>
+                <button class="iconbtn" title="工资"><svg viewBox="0 0 24 24"><path d="M6.5 5.5 12 12l5.5-6.5M12 12v7M8 12.6h8M8 16.2h8"/></svg></button>
+                <button class="iconbtn" title="设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/></svg></button>
+                <button class="iconbtn" title="刷新"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.8 4.6v4h-4"/></svg></button>
+                <button class="iconbtn" title="收起"><svg viewBox="0 0 24 24"><path d="m9 5 6 7-6 7"/></svg></button>
+              </div>
+            </div>
+            <div class="label">距离下班</div>
+            <div class="clock">07:50:50</div>
+            <div class="progress"><i></i></div>
+            <div class="row1">上班 09:52 · 预计下班 20:22</div>
+            <div class="row2"><b>距午休</b> 1h05m</div>
+            <div class="row3">已工作 52m · 应勤 10h30m</div>
+          </div>
+        </div>
+        <div class="card small">
+          <div class="corner-flash"></div><div class="ring"></div>
+          <div class="mini"><span class="dot"></span><span class="lab">距离下班</span><span class="rt">下班 20:04</span>
+            <span class="num">05:30:56</span><div class="bar"><i></i></div></div>
+        </div>
+      </div>
+
+      <div class="flash-caption">
+        <h3>收到新纸条：贴着圆角边框连闪 2 次</h3>
+        <p>便签纸也用同一套贴边闪光：光贴着圆角边框走两次；未读时每 5 秒沿边框轻闪一次。</p>
+        <div class="arc"><i></i><span>读完点一下输入框，边框闪光就停</span></div>
+      </div>
+
+      <aside class="panel pb">
+        <div class="pb-head">
+          <span class="pin"></span>
+          <div class="pb-title"><b>小纸条</b><em>我的 ID 48372</em></div>
+          <button class="ghost add-open">＋ 联系人</button>
+        </div>
+        <div class="pb-tabs">
+          <button class="ptab on" style="--i:0">阿哲<span class="u"></span></button>
+          <button class="ptab" style="--i:1">小满</button>
+          <button class="ptab" style="--i:2">老周</button>
+          <button class="ptab" style="--i:3">＋</button>
+        </div>
+        <div class="pb-body">
+          <div class="pb-hint">
+            <svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg>
+            <span>点一个标签页，看最后一张纸条</span>
+          </div>
+          <div class="pb-last">
+            <div class="pline"><b>阿哲</b><span>晚上的评审推迟到 8 点</span><em>17:41</em></div>
+            <div class="pline me"><b>你</b><span>收到，我改完就过去</span><em>17:42</em></div>
+          </div>
+          <div class="pb-history">
+            <p class="hint">最近 8 条 · 每对 ID 只留 8 条，更早的不再保留</p>
+            <div class="pb-round" style="--i:0"><span class="n">1</span><span class="t"><b>你</b> 早，今天的评审几点？<em>09:12</em></span></div>
+            <div class="pb-round" style="--i:1"><span class="n">2</span><span class="t"><b>阿哲</b> 下午 4 点，会议室 B<em>09:15</em></span></div>
+            <div class="pb-round" style="--i:2"><span class="n">3</span><span class="t"><b>你</b> 接口那版发你邮箱了<em>10:02</em></span></div>
+            <div class="pb-round" style="--i:3"><span class="n">4</span><span class="t"><b>阿哲</b> 收到，中午看<em>10:04</em></span></div>
+            <div class="pb-round" style="--i:4"><span class="n">5</span><span class="t"><b>你</b> 评审材料加了两页压测<em>13:40</em></span></div>
+            <div class="pb-round" style="--i:5"><span class="n">6</span><span class="t"><b>阿哲</b> 好，辛苦<em>13:44</em></span></div>
+            <div class="pb-round" style="--i:6"><span class="n">7</span><span class="t"><b>你</b> 压测刚跑完，马上发你<em>17:40</em></span></div>
+            <div class="pb-round" style="--i:7"><span class="n">8</span><span class="t"><b>阿哲</b> 晚上的评审推迟到 8 点<em>17:41</em></span></div>
+          </div>
+          <div class="pb-input"><input placeholder="写一张小纸条…"><button class="pb-send" aria-label="发送"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg></button></div>
+        </div>
+        <div class="pb-add">
+          <h4>＋ 添加联系人</h4>
+          <label class="field id"><span>5 位 ID</span><input value="73512" maxlength="5" inputmode="numeric"></label>
+          <div class="found">
+            <span class="found-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.4" r="3.4"/><path d="M5.2 19.5c.8-3.4 3.6-5.2 6.8-5.2s6 1.8 6.8 5.2"/></svg></span>
+            <div class="found-meta"><b>ID 73512</b><em>刚刚在线 · 还没聊过</em></div>
+            <span class="found-ok">找到了</span>
+          </div>
+          <label class="field"><span>备注</span><input value="老李"></label>
+          <button class="primary add-confirm">添加为联系人</button>
+          <p class="sheet-tip">每对 ID 只留最近 8 轮；更早的纸条会被新的挤掉。</p>
+        </div>
+      </aside>
+    </div></div>
+    <div class="statebar">
+      <button data-s="entry">01 入口</button>
+      <button data-s="flash">02 未读闪光</button>
+      <button data-s="select">03 会话选择</button>
+      <button data-s="chat">04 最后一轮 + 输入框</button>
+      <button data-s="history">05 展开 8 轮历史</button>
+      <button data-s="add">06 添加联系人</button>
+      <div class="tools"><button class="replay">重播闪光</button><button class="unread-toggle">未读 5s 呼吸</button></div>
+      <span class="note">B · 便签纸</span>
+    </div>
+  </section>
+
+  <!-- ===================== C：极简双栏 ===================== -->
+  <section class="stage" data-v="c" data-s="entry">
+    <div class="stage-head"><span class="no">VARIANT C</span><h2>极简双栏 · 更像桌面 IM</h2>
+      <p>左边竖排联系人胶囊、右边对话；对话框不跟卡片同颜色，用更大的留白和更轻的描边，信息密度最高。</p></div>
+    <div class="viewport"><div class="screen" data-theme="gold">
+      <div class="win w1"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody"><b class="h"></b><b></b><b></b><b></b><b></b></div></div>
+      <div class="win w2"><div class="wbar"><i></i><i></i><i></i></div><div class="wbody"><b class="h"></b><b></b><b></b><b></b></div></div>
+
+      <div class="cardwrap">
+        <div class="card big">
+          <div class="corner-flash"></div><div class="ring"></div>
+          <div class="inner">
+            <div class="statusrow"><span class="sdot"></span><span class="st">工作中</span>
+              <div class="icons">
+                <button class="iconbtn plane" title="小纸条"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg><span class="dot"></span><span class="tip">小纸条 · 2 条未读</span></button>
+                <button class="iconbtn" title="工资"><svg viewBox="0 0 24 24"><path d="M6.5 5.5 12 12l5.5-6.5M12 12v7M8 12.6h8M8 16.2h8"/></svg></button>
+                <button class="iconbtn" title="设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7"/></svg></button>
+                <button class="iconbtn" title="刷新"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.8 4.6v4h-4"/></svg></button>
+                <button class="iconbtn" title="收起"><svg viewBox="0 0 24 24"><path d="m9 5 6 7-6 7"/></svg></button>
+              </div>
+            </div>
+            <div class="label">距离下班</div>
+            <div class="clock">07:50:50</div>
+            <div class="progress"><i></i></div>
+            <div class="row1">上班 09:52 · 预计下班 20:22</div>
+            <div class="row2"><b>距午休</b> 1h05m</div>
+            <div class="row3">已工作 52m · 应勤 10h30m</div>
+          </div>
+        </div>
+        <div class="card small">
+          <div class="corner-flash"></div><div class="ring"></div>
+          <div class="mini"><span class="dot"></span><span class="lab">距离下班</span><span class="rt">下班 20:04</span>
+            <span class="num">05:30:56</span><div class="bar"><i></i></div></div>
+        </div>
+      </div>
+
+      <div class="flash-caption">
+        <h3>收到新纸条：贴着圆角边框连闪 2 次</h3>
+        <p>极简版同样贴着圆角边框闪，不打断当前操作；未读每 5 秒沿边框轻闪一次。</p>
+        <div class="arc"><i></i><span>未读时每 5 秒沿边框轻闪一次，读完即停</span></div>
+      </div>
+
+      <aside class="panel pc">
+        <div class="pc-rail">
+          <div class="mine">我的 ID · 48372</div>
+          <button class="pcap on unread" style="--i:0"><span class="av">哲</span><span class="nm">阿哲</span><span class="un"></span></button>
+          <button class="pcap" style="--i:1"><span class="av">满</span><span class="nm">小满</span></button>
+          <button class="pcap unread" style="--i:2"><span class="av">周</span><span class="nm">老周</span><span class="un"></span></button>
+          <button class="pcap add" style="--i:3">＋ 新联系人</button>
+        </div>
+        <div class="pc-main">
+          <div class="pc-empty">
+            <svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg>
+            <p>左边点一个联系人</p>
+          </div>
+          <div class="pc-head"><b>阿哲</b><em>ID 62015</em><span class="mini-plane"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg></span></div>
+          <div class="pc-last">
+            <div class="msg them"><p>晚上的评审推迟到 8 点</p><em>17:41</em></div>
+            <div class="msg me"><p>收到，我改完就过去</p><em>17:42</em></div>
+          </div>
+          <div class="pc-history">
+            <p class="hint">最近 8 条 · 每对 ID 只留 8 条，更早的不再保留</p>
+            <div class="pair" style="--i:0"><div class="msg me"><p>早，今天的评审几点？</p><em>09:12</em></div><div class="msg them"><p>下午 4 点，会议室 B</p><em>09:15</em></div></div>
+            <div class="pair" style="--i:1"><div class="msg me"><p>接口那版发你邮箱了</p><em>10:02</em></div><div class="msg them"><p>收到，中午看</p><em>10:04</em></div></div>
+            <div class="pair" style="--i:2"><div class="msg me"><p>评审材料加了两页压测</p><em>13:40</em></div><div class="msg them"><p>好，辛苦</p><em>13:44</em></div></div>
+            <div class="pair" style="--i:3"><div class="msg me"><p>压测刚跑完，马上发你</p><em>17:40</em></div><div class="msg them"><p>晚上的评审推迟到 8 点</p><em>17:41</em></div></div>
+          </div>
+          <div class="pc-input"><input placeholder="写一句…"><button class="send" aria-label="发送"><svg viewBox="0 0 24 24"><path d="M21 3 3.6 10.3c-.8.3-.7 1.4.1 1.6l6 1.8 1.8 6c.2.8 1.3.9 1.6.1L21 3z"/><path d="m9.7 13.7 4.9-4.9"/></svg></button></div>
+        </div>
+        <div class="pc-add">
+          <div class="pc-addhead"><b>＋ 添加联系人</b><button class="x add-close">×</button></div>
+          <div class="pc-addcols">
+            <label class="field id"><span>5 位 ID</span><input value="73512" maxlength="5" inputmode="numeric"></label>
+            <label class="field"><span>备注</span><input value="老李"></label>
+          </div>
+          <div class="found">
+            <span class="found-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.4" r="3.4"/><path d="M5.2 19.5c.8-3.4 3.6-5.2 6.8-5.2s6 1.8 6.8 5.2"/></svg></span>
+            <div class="found-meta"><b>ID 73512</b><em>刚刚在线 · 还没聊过</em></div>
+            <span class="found-ok">找到了</span>
+          </div>
+          <button class="primary add-confirm">添加为联系人</button>
+          <p class="sheet-tip">每对 ID 只保留最近 8 轮对话；8 轮之前的会被自动丢掉。</p>
+        </div>
+      </aside>
+    </div></div>
+    <div class="statebar">
+      <button data-s="entry">01 入口</button>
+      <button data-s="flash">02 未读闪光</button>
+      <button data-s="select">03 会话选择</button>
+      <button data-s="chat">04 最后一轮 + 输入框</button>
+      <button data-s="history">05 展开 8 轮历史</button>
+      <button data-s="add">06 添加联系人</button>
+      <div class="tools"><button class="replay">重播闪光</button><button class="unread-toggle">未读 5s 呼吸</button></div>
+      <span class="note">C · 极简双栏</span>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var only = q.get('v');
+  var preset = q.get('state');
+  var theme = q.get('theme') || 'gold';
+  if (only) document.body.dataset.only = only;
+  if (q.get('clean') === '1') document.body.classList.add('clean');
+  if (q.get('still') === '1') document.body.classList.add('still');
+  document.querySelectorAll('.screen').forEach(function (s) { s.dataset.theme = theme; });
+  document.body.dataset.flash = q.get('flash') || '1';
+  document.querySelectorAll('.card').forEach(function (c) {
+    var rim = document.createElement('div');
+    rim.className = 'rim';
+    c.appendChild(rim);
+  });
+  document.querySelectorAll('.flashpick button').forEach(function (b) {
+    b.classList.toggle('on', b.dataset.f === document.body.dataset.flash);
+    b.addEventListener('click', function () {
+      document.body.dataset.flash = b.dataset.f;
+      document.querySelectorAll('.flashpick button').forEach(function (x) { x.classList.toggle('on', x === b); });
+    });
+  });
+
+  document.querySelectorAll('.stage').forEach(function (stage) {
+    var statebar = stage.querySelector('.statebar');
+    var buttons = statebar.querySelectorAll('button[data-s]');
+    function set(s) {
+      stage.dataset.s = s;
+      buttons.forEach(function (b) { b.classList.toggle('on', b.dataset.s === s); });
+    }
+    set(preset || 'entry');
+    if (q.get('scroll') === 'bottom') {
+      stage.querySelectorAll('.pa-history,.pb-history,.pc-history').forEach(function (el) { el.scrollTop = el.scrollHeight; });
+    }
+    buttons.forEach(function (b) {
+      b.addEventListener('click', function () { set(b.dataset.s); });
+    });
+
+    // 重播闪光：给两个卡片的光斑加一次性动画
+    var replay = statebar.querySelector('.replay');
+    if (replay) replay.addEventListener('click', function () {
+      stage.querySelectorAll('.rim').forEach(function (el) {
+        el.classList.remove('flash-now');
+        void el.offsetWidth;
+        el.classList.add('flash-now');
+      });
+      setTimeout(function () {
+        stage.querySelectorAll('.rim').forEach(function (el) { el.classList.remove('flash-now'); });
+      }, 1400);
+    });
+
+    // 未读 5s 呼吸
+    var loopBtn = statebar.querySelector('.unread-toggle');
+    if (loopBtn) loopBtn.addEventListener('click', function () {
+      var on = !loopBtn.classList.contains('on');
+      loopBtn.classList.toggle('on', on);
+      stage.querySelectorAll('.rim').forEach(function (el) { el.classList.toggle('unread', on); });
+    });
+
+    // 打开 / 关闭加联系人
+    stage.querySelectorAll('.add-open, .pcap.add, .cap.new').forEach(function (b) {
+      b.addEventListener('click', function () { set('add'); });
+    });
+    stage.querySelectorAll('.add-close').forEach(function (b) {
+      b.addEventListener('click', function () { set('select'); });
+    });
+    stage.querySelectorAll('.pa-contacts .cap:not(.new)').forEach(function (cap) {
+      cap.addEventListener('click', function () {
+        stage.querySelectorAll('.cap').forEach(function (c) { c.classList.remove('on'); });
+        cap.classList.add('on');
+        set('chat');
+      });
+      cap.addEventListener('mouseenter', function () {
+        if (stage.dataset.s === 'select' || stage.dataset.s === 'chat' || stage.dataset.s === 'history') set('chat');
+      });
+    });
+    stage.querySelectorAll('.pcap:not(.add)').forEach(function (cap) {
+      cap.addEventListener('click', function () {
+        stage.querySelectorAll('.pcap').forEach(function (c) { c.classList.remove('on'); });
+        cap.classList.add('on');
+        set('chat');
+      });
+      cap.addEventListener('mouseenter', function () {
+        if (stage.dataset.s === 'select' || stage.dataset.s === 'chat' || stage.dataset.s === 'history') set('chat');
+      });
+    });
+    stage.querySelectorAll('.ptab:not(:last-child)').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        stage.querySelectorAll('.ptab').forEach(function (c) { c.classList.remove('on'); });
+        tab.classList.add('on');
+        set('chat');
+      });
+    });
+
+    // 点输入框 → 展开 8 轮历史
+    stage.querySelectorAll('.pa-input input, .pb-input input, .pc-input input').forEach(function (inp) {
+      inp.addEventListener('focus', function () { if (stage.dataset.s === 'chat' || stage.dataset.s === 'send') set('history'); });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); send(); }
+      });
+    });
+
+    function send() {
+      var map = { a: '.pa-last .msg.me p', b: '.pb-last .pline.me span', c: '.pc-last .msg.me p' };
+      var sel = map[stage.dataset.v];
+      var inp = stage.querySelector('.pa-input input, .pb-input input, .pc-input input');
+      if (!inp) return;
+      var text = inp.value.trim();
+      if (!text) return;
+      var target = stage.querySelector(sel);
+      if (target) {
+        target.textContent = text;
+        var bubble = target.closest('.msg, .pline');
+        if (bubble) {
+          bubble.classList.remove('just');
+          void bubble.offsetWidth;
+          bubble.classList.add('just');
+        }
+      }
+      inp.value = '';
+      if (stage.dataset.s === 'history') {
+        var list = stage.querySelector('.pa-history, .pb-history, .pc-history');
+        if (list) list.scrollTop = list.scrollHeight;
+      }
+    }
+    stage.querySelectorAll('.send, .pb-send').forEach(function (b) { b.addEventListener('click', send); });
+
+    // 添加成功后：回到列表并插入新胶囊
+    stage.querySelectorAll('.add-confirm').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var name = '老李';
+        if (stage.dataset.v === 'a') {
+          var row = stage.querySelector('.pa-contacts');
+          var cap = document.createElement('button');
+          cap.className = 'cap just';
+          cap.style.setProperty('--i', '4');
+          cap.innerHTML = '<span class="cap-name">' + name + '</span><span class="time">刚刚</span>';
+          row.insertBefore(cap, row.querySelector('.cap.new'));
+        } else if (stage.dataset.v === 'b') {
+          var tabs = stage.querySelector('.pb-tabs');
+          var t = document.createElement('button');
+          t.className = 'ptab just';
+          t.innerHTML = name;
+          tabs.insertBefore(t, tabs.lastElementChild);
+        } else {
+          var rail = stage.querySelector('.pc-rail');
+          var p = document.createElement('button');
+          p.className = 'pcap just';
+          p.innerHTML = '<span class="av">李</span><span class="nm">' + name + '</span>';
+          rail.insertBefore(p, rail.querySelector('.pcap.add'));
+        }
+        set('select');
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

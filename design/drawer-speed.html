@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>抽屉卡节奏试验台</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#EDF0F6;font-family:"Microsoft YaHei","Segoe UI",sans-serif;color:#1B2230}
+  .head{max-width:1010px;margin:0 auto;padding:30px 24px 4px}
+  .kicker{font:600 11px/1 "Bahnschrift",sans-serif;letter-spacing:.28em;color:#7A8498}
+  h1{margin:10px 0 6px;font-size:25px;letter-spacing:-.01em}
+  .lede{margin:0;color:#5C6779;font-size:13px;line-height:1.8;max-width:820px}
+  .lede b{color:#1B2230}
+
+  .stage{max-width:1010px;margin:0 auto;padding:14px 24px 0}
+  .viewport{width:960px;height:540px;overflow:hidden;border-radius:14px;box-shadow:0 18px 50px rgba(15,20,32,.2)}
+  .view{width:1280px;height:720px;transform:scale(.75);transform-origin:0 0}
+  .screen{position:relative;width:1280px;height:720px;overflow:hidden;background:#0b0f16;
+    background-image:
+      radial-gradient(52% 60% at 16% 18%,rgba(58,110,160,.55) 0,transparent 62%),
+      radial-gradient(46% 54% at 84% 12%,rgba(126,66,102,.42) 0,transparent 60%),
+      radial-gradient(58% 62% at 72% 92%,rgba(28,86,80,.45) 0,transparent 62%),
+      linear-gradient(158deg,#0A1018 0%,#111A26 55%,#080C12 100%)}
+  .win{position:absolute;border-radius:10px;background:rgba(16,22,31,.7);border:1px solid rgba(255,255,255,.06)}
+  .w1{left:520px;top:90px;width:520px;height:330px}
+  .w2{left:700px;top:440px;width:420px;height:200px}
+
+  /* ---------- 卡片 ---------- */
+  .card{position:absolute;left:60px;top:300px;width:224px;height:68px;z-index:3;border-radius:14px;overflow:hidden;
+    background:linear-gradient(180deg,#FCFDFF,#F0F3F9);
+    box-shadow:0 16px 44px rgba(10,16,28,.4),0 1px 0 rgba(255,255,255,.9) inset}
+  .mini,.big{position:absolute;inset:0}
+  .mini .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:#3D6BFF}
+  .mini .lab{position:absolute;left:24px;top:8px;font-size:9.5px;color:#5C6779}
+  .mini .rt{position:absolute;right:14px;top:8px;font-size:9.5px;color:#5C6779}
+  .mini .num{position:absolute;left:13px;top:23px;font:700 27px/31px "Bahnschrift",sans-serif}
+  .mini .bar{position:absolute;left:14px;right:14px;bottom:6px;height:3px;border-radius:2px;background:#D9DFEA;overflow:hidden}
+  .mini .bar i{position:absolute;inset:0;width:62%;background:linear-gradient(90deg,#2F5DFF,#7FA6FF)}
+  .big{padding:16px 18px;display:flex;flex-direction:column}
+  .big .hd{display:flex;align-items:center;gap:8px;font-size:10px;color:#5C6779}
+  .big .hd .d{width:6px;height:6px;border-radius:50%;background:#3D6BFF}
+  .big .cap{margin-top:12px;font-size:10.5px;color:#5C6779}
+  .big .time{margin-top:2px;font:700 40px/44px "Bahnschrift",sans-serif}
+  .big .bar{margin-top:12px;height:5px;border-radius:3px;background:#D9DFEA;position:relative;overflow:hidden}
+  .big .bar i{position:absolute;left:0;width:190px;height:5px;border-radius:3px;background:linear-gradient(90deg,#2F5DFF,#6E9BFF)}
+  .big .sub{margin-top:10px;font-size:11px;color:#5C6779}
+  .big .sub b{color:#1B2230;font-weight:600}
+
+  /* ---------- 抽屉 ---------- */
+  .drawer{position:absolute;left:60px;top:300px;height:68px;width:224px;z-index:1;overflow:hidden;
+    border-radius:14px;background:#F5C400;
+    box-shadow:0 14px 34px rgba(6,10,18,.45),inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(90,60,0,.16)}
+  .dwrap{position:absolute;left:236px;width:382px;top:0;height:68px;
+    display:flex;flex-direction:column;justify-content:center;gap:7px}
+  .dwrap h3{margin:0;font-size:17px;line-height:1.2;font-weight:700;letter-spacing:-.01em;color:#33260A;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta{display:flex;align-items:center;gap:9px;font-size:13px;line-height:1.2;white-space:nowrap;color:#5C4400}
+  .meta .t{font:600 13px/1.2 "Bahnschrift",sans-serif}
+  .meta i{flex:none;width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.45}
+  .meta .lock{margin-left:2px;font:600 13px/1.2 "Bahnschrift",sans-serif;color:#8A3D00}
+
+  /* ---------- 警戒带 ---------- */
+  .band{position:absolute;left:0;right:0;top:360px;transform:translateY(-50%);height:60px;z-index:2;overflow:hidden;opacity:0}
+  .band .fill{position:absolute;inset:0;background:#F5C400}
+  .band .rail{position:absolute;left:0;right:0;height:8px;overflow:hidden;background:#0B0C0E}
+  .band .rail.top{top:0}.band .rail.bottom{bottom:0}
+  .band .rail i{position:absolute;inset:-30px;background:repeating-linear-gradient(-45deg,#F5C400 0 14px,#0B0C0E 14px 28px);
+    animation:tape 1s linear infinite}
+  @keyframes tape{from{transform:translateX(0)}to{transform:translateX(39.6px)}}
+  .band .mq{position:absolute;left:0;right:0;top:8px;bottom:8px;overflow:hidden}
+  .band .track{display:flex;width:max-content;height:100%;align-items:center;animation:slide 18s linear infinite}
+  @keyframes slide{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .band .pair{display:flex;align-items:center;gap:13px;padding:0 19px;white-space:nowrap}
+  .band .tri{width:15px;height:15px;flex:none}
+  .band .t{font-size:22px;font-weight:900;color:#241A00;letter-spacing:-.01em}
+  .band .dot2{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.45}
+  .band .s{font:700 15px/1 "Bahnschrift",sans-serif;color:#5C4400}
+
+  /* ---------- 控制面板 ---------- */
+  .panel{max-width:1010px;margin:14px auto 0;padding:0 24px}
+  .ctrls{background:#fff;border-radius:12px;padding:14px 18px}
+  .row{display:flex;align-items:center;gap:22px}
+  .row + .row{margin-top:12px;padding-top:12px;border-top:1px solid #EEF1F6}
+  .ctl{display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5C6779;flex:1;white-space:nowrap}
+  .ctl b{display:inline-block;min-width:64px;text-align:right;color:#1B2230;font:600 12.5px/1 "Bahnschrift",sans-serif}
+  .ctl input[type=range]{width:150px;flex:none;accent-color:#F5C400}
+  .btns{display:flex;gap:8px;margin-left:auto}
+  button{border:1px solid #D8DEE9;background:#fff;color:#1B2230;border-radius:8px;padding:7px 12px;font-size:12.5px;cursor:pointer}
+  button:hover{border-color:#B9C2D0}
+  .tips{margin:10px 0 34px;font-size:12.5px;color:#5C6779;line-height:1.8}
+  .tips b{color:#1B2230}
+  .tips code{font:600 11.5px/1.4 "Bahnschrift",monospace;color:#1B2230}
+  .now{font:600 12px/1 "Bahnschrift",sans-serif;color:#8A93A5;margin-top:8px;letter-spacing:.02em}
+  .now em{font-style:normal;color:#1B2230}
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div class="kicker">WORK COUNTDOWN · DRAWER TIMING LAB</div>
+  <h1>抽屉卡节奏试验台</h1>
+  <p class="lede">拖动下面的滑块调<b>展开 / 收起 / 抽屉滑出</b>三个时长，改完会立刻从头放一遍。<b>只循环抽屉</b>勾上就只反复播放最后那一下，调速度最直观。</p>
+</div>
+
+<div class="stage">
+  <div class="viewport"><div class="view">
+    <div class="screen">
+      <div class="win w1"></div><div class="win w2"></div>
+
+      <div class="card" id="card">
+        <div class="mini" id="mini">
+          <div class="dot"></div><div class="lab">距离下班</div><div class="rt">下班 20:04</div>
+          <div class="num">02:07:32</div>
+          <div class="bar"><i></i></div>
+        </div>
+        <div class="big" id="big">
+          <div class="hd"><span class="d"></span>接下来 · 产品评审会</div>
+          <div class="cap">距离开始</div>
+          <div class="time">00:10:00</div>
+          <div class="bar"><i></i></div>
+          <div class="sub"><b>16:45 – 17:15</b> · 3F 云杉会议室</div>
+          <div class="sub" style="margin-top:auto;padding-top:9px;border-top:1px solid #E7EBF3;font-size:10px;color:#9AA3B4">今天还有 2 个日程</div>
+        </div>
+      </div>
+
+      <div class="drawer" id="drawer">
+        <div class="dwrap">
+          <h3>产品评审会 · Q4 排期</h3>
+          <div class="meta"><span class="t">16:45 – 17:15</span><i></i><span>3F 云杉会议室</span><i></i><span class="lock">还有 10 分钟</span></div>
+        </div>
+      </div>
+
+      <div class="band" id="band">
+        <div class="fill"></div>
+        <div class="rail top"><i></i></div>
+        <div class="rail bottom"><i></i></div>
+        <div class="mq"><div class="track"><div class="seq"></div><div class="seq"></div></div></div>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<div class="panel">
+  <div class="ctrls">
+    <div class="row">
+      <label class="ctl">抽屉滑出 <input type="range" id="rDrawer" min="300" max="1200" step="50" value="550"><b id="vDrawer">550 ms</b></label>
+      <label class="ctl">卡片展开 <input type="range" id="rExpand" min="300" max="1200" step="50" value="400"><b id="vExpand">400 ms</b></label>
+      <label class="ctl">卡片收起 <input type="range" id="rCollapse" min="300" max="1200" step="50" value="400"><b id="vCollapse">400 ms</b></label>
+    </div>
+    <div class="row">
+      <label class="ctl" style="flex:0 0 auto"><input type="checkbox" id="onlyDrawer"> 只循环抽屉</label>
+      <div class="btns">
+        <button id="p2" data-preset="650,550,600">上一版 650/550/600</button>
+        <button id="p1" data-preset="900,900,700">预览原速 900/900/700</button>
+        <button id="replay">重播</button>
+        <button id="shipped">回到当前 App（400 / 400 / 550）</button>
+      </div>
+    </div>
+  </div>
+  <div class="now" id="now"></div>
+  <div class="tips">当前 App 是 <b>展开 400 / 收起 400 / 抽屉 550</b>（ms）。挑好告诉我数字，我直接改 <code>Widget.TapeExpandMs</code>、<code>TapeCollapseMs</code> 和 <code>DrawerForm.SlideMs</code>。</div>
+</div>
+
+<script>
+(function(){
+  var pair = '<div class="pair">'
+    + '<svg class="tri" viewBox="0 0 24 24"><path d="M12 3.4 22.2 20.6H1.8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9.4v5.1" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>'
+    + '<span class="t">产品评审会 · Q4 排期</span>'
+    + '<span class="dot2"></span><span class="s">16:45 – 17:15</span>'
+    + '<span class="dot2"></span><span class="s">3F 云杉会议室</span>'
+    + '<span class="dot2"></span><span class="s">还有 10 分钟</span></div>';
+  document.querySelectorAll('.seq').forEach(function(seq){
+    var h=''; for(var i=0;i<3;i++) h+=pair; seq.innerHTML=h;
+  });
+
+  var el = {
+    card: document.getElementById('card'),
+    mini: document.getElementById('mini'),
+    big: document.getElementById('big'),
+    drawer: document.getElementById('drawer'),
+    band: document.getElementById('band'),
+    rDrawer: document.getElementById('rDrawer'),
+    rExpand: document.getElementById('rExpand'),
+    rCollapse: document.getElementById('rCollapse'),
+    only: document.getElementById('onlyDrawer'),
+    now: document.getElementById('now')
+  };
+  var P = { drawer: 550, expand: 400, collapse: 400, gap: 300, bandIn: 320, bandHold: 2600, bandOut: 620, hold: 1800 };
+  var t0 = performance.now(), raf = 0;
+  var SHOT = new URLSearchParams(location.search).get('shot');
+
+  function clamp(v){ return v<0?0:(v>1?1:v); }
+  function easeOut(t){ t=clamp(t); return 1-Math.pow(1-t,3); }
+  function easeInOut(t){ t=clamp(t); return t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2; }
+  function cssEase(t){ // cubic-bezier(.22,.9,.28,1)
+    t=clamp(t); if(t<=0) return 0; if(t>=1) return 1;
+    var lo=0,hi=1,i,mid;
+    for(i=0;i<22;i++){ mid=(lo+hi)/2; if(bx(mid)<t) lo=mid; else hi=mid; }
+    return by((lo+hi)/2);
+  }
+  function bx(u){ var v=1-u; return 3*v*v*u*0.22+3*v*u*u*0.28+u*u*u; }
+  function by(u){ var v=1-u; return 3*v*v*u*0.90+3*v*u*u+u*u*u; }
+
+  function setCard(w,h){ el.card.style.width=w+'px'; el.card.style.height=h+'px'; }
+  function setDrawer(w){ el.drawer.style.width=w+'px'; }
+  function setBand(a){ el.band.style.opacity=a; }
+  function setFaces(mini,big){ el.mini.style.opacity=mini; el.big.style.opacity=big; }
+
+  var W0=224,W1=300,H0=68,H1=232,DW0=224,DW1=640;
+
+  function cmpText(){
+    var d = Math.round((P.drawer - 550) / 550 * 100);
+    if (d === 0) return '和现在一样快';
+    return d < 0 ? ('比现在快 ' + (-d) + '%') : ('比现在慢 ' + d + '%');
+  }
+
+  function frame(now){
+    var t = now - t0;
+    if (SHOT !== null) t = +SHOT;
+    if (el.only.checked){
+      var slide = P.drawer, hold = 900, back = P.drawer*0.7, pause = 500;
+      var cycle = slide + hold + back + pause;
+      var u = t % cycle;
+      setCard(W0,H0); setFaces(1,0); setBand(0);
+      if (u < slide) setDrawer(DW0 + (DW1-DW0)*cssEase(u/slide));
+      else if (u < slide+hold) setDrawer(DW1);
+      else if (u < slide+hold+back) setDrawer(DW0 + (DW1-DW0)*(1-cssEase((u-slide-hold)/back)));
+      else setDrawer(DW0);
+      el.now.textContent = '只循环抽屉 · 滑出 ' + P.drawer + 'ms（' + cmpText() + '）';
+      if (SHOT === null) raf = requestAnimationFrame(frame);
+      return;
+    }
+
+    var te=P.expand, tb0=te+P.bandIn, tb1=tb0+P.bandHold, tb2=tb1+P.bandOut,
+        tc2=tb2+P.collapse, td0=tc2+P.gap, td1=td0+P.drawer, end=td1+P.hold;
+    t = t % end;
+
+    // 卡片：展开 → 保持 → 收起
+    if (t < te){
+      var p = easeInOut(t/te);
+      setCard(W0+(W1-W0)*p, H0+(H1-H0)*p);
+      setFaces(1, clamp((t/te-0.55)/0.35));
+    } else if (t < tb2){
+      setCard(W1,H1); setFaces(0,1);
+    } else if (t < tc2){
+      var q = easeInOut((t-tb2)/P.collapse);
+      setCard(W1-(W1-W0)*q, H1-(H1-H0)*q);
+      setFaces(clamp((q-0.45)/0.35), 1);
+    } else {
+      setCard(W0,H0); setFaces(1,0);
+    }
+
+    // 警戒带：淡入、停留、淡出
+    var ba = 0;
+    if (t >= te && t < tb0) ba = easeOut((t-te)/P.bandIn);
+    else if (t >= tb0 && t < tb1) ba = 1;
+    else if (t >= tb1 && t < tb2) ba = 1-easeOut((t-tb1)/P.bandOut);
+    setBand(ba);
+
+    // 抽屉：爆出
+    if (t < td0) setDrawer(DW0);
+    else setDrawer(DW0 + (DW1-DW0)*cssEase((t-td0)/P.drawer));
+
+    el.now.textContent = '展开 ' + P.expand + ' · 收起 ' + P.collapse + ' · 抽屉 ' + P.drawer + ' ms（' + cmpText() + '）'
+      + (t >= td0 && t < td1 ? '　← 抽屉滑出中' : (t < te ? '　← 展开中' : (t < tc2 ? '　← 警戒带' : '')));
+
+    if (SHOT === null) raf = requestAnimationFrame(frame);
+  }
+
+  function start(){ cancelAnimationFrame(raf); t0 = performance.now(); raf = requestAnimationFrame(frame); }
+  function sync(){
+    P.drawer = +el.rDrawer.value; P.expand = +el.rExpand.value; P.collapse = +el.rCollapse.value;
+    document.getElementById('vDrawer').textContent = P.drawer + ' ms';
+    document.getElementById('vExpand').textContent = P.expand + ' ms';
+    document.getElementById('vCollapse').textContent = P.collapse + ' ms';
+    start();
+  }
+  [el.rDrawer, el.rExpand, el.rCollapse, el.only].forEach(function(x){
+    x.addEventListener('input', sync);
+    x.addEventListener('change', sync);
+  });
+  document.getElementById('replay').addEventListener('click', start);
+  document.querySelectorAll('button[data-preset]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var v = btn.getAttribute('data-preset').split(',');
+      el.rExpand.value = v[0]; el.rCollapse.value = v[1]; el.rDrawer.value = v[2];
+      el.only.checked = false;
+      sync();
+    });
+  });
+  document.getElementById('shipped').addEventListener('click', function(){
+    el.rDrawer.value = 550; el.rExpand.value = 400; el.rCollapse.value = 400;
+    el.only.checked = false;
+    sync();
+  });
+  el.now.textContent = '展开 ' + P.expand + ' · 收起 ' + P.collapse + ' · 抽屉 ' + P.drawer + ' ms（' + cmpText() + '）';
+  start();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+        // ───────────────────────── tape：设计 & 绘制 ─────────────────────────
+
+        private void DrawTape(Graphics g)
+        {
+            double now = Environment.TickCount - startAt;
+            double fade = exiting
+                ? 1 - EaseInCubic(Clamp01((Environment.TickCount - exitAt) / 620.0))
+                : EaseOutCubic(Clamp01(now / 320.0));
+            if (fade <= 0.004) return;
+
+            int h = TapeBandHeight(layout);
+            int top = (Height - h) / 2;
+            int rail = TapeRailHeight(layout);
+            int textTop = top + rail, textH = h - rail * 2;
+
+            // 呼吸：1 = 实黄底黑字，0 = 全透明黄字
+            double b = 0.5 + 0.5 * Math.Cos(2 * Math.PI * (now / 1000.0) / TapeBreathSec);
+            b = Clamp01(b);
+
+            using (var br = new SolidBrush(Color.FromArgb(Alpha(b * fade), 245, 196, 0)))
+                g.FillRectangle(br, 0, top, Width, h);
+
+            DrawTapeRails(g, top, h, rail, fade);
+            DrawTapeText(g, textTop, textH, fade, b);
+        }
+
+        /// <summary>上下两条警示斜纹：整体水平向右平移，40/100 DIP/s 由 TapeStripeSpeed 决定。</summary>
+        private void DrawTapeRails(Graphics g, int top, int h, int rail, double a)
+        {
+            float stripe = Math.Max(4f, TapeStripeDip * layout);
+            float period = Math.Max(stripe * 2.828f, TapePeriodDip * layout);
+            double speed = TapeStripeSpeed * layout;
+            float off = (float)(((Environment.TickCount - startAt) / 1000.0 * speed) % period);
+            var rects = new[] { new Rectangle(0, top, Width, rail), new Rectangle(0, top + h - rail, Width, rail) };
+            foreach (var r in rects)
+            {
+                using (var br = new SolidBrush(Color.FromArgb(Alpha(a), 11, 12, 14)))
+                    g.FillRectangle(br, r);
+                var sv = g.Save();
+                g.SetClip(r);
+                using (var pen = new Pen(Color.FromArgb(Alpha(a), 245, 196, 0), stripe))
+                {
+                    pen.StartCap = LineCap.Flat;
+                    pen.EndCap = LineCap.Flat;
+                    float reach = r.Height + stripe;
+                    for (float x = -reach - period; x < Width + reach + period; x += period)
+                        g.DrawLine(pen, x + off, r.Bottom + stripe, x + off + reach + stripe, r.Top - stripe);
+                }
+                g.Restore(sv);
+            }
+        }
+
+        /// <summary>「⚠ 类型 · 标题」重复铺满，整体向左滚；黑字和黄字按呼吸交叉淡入淡出。</summary>
+        private void DrawTapeText(Graphics g, int top, int h, double fade, double b)
+        {
+            if (tapePairW <= 1) return;
+            double now = Environment.TickCount - startAt;
+            float off = (float)(((now / 1000.0) * TapeTextSpeed * layout) % tapePairW);
+            double aBlack = b * fade;
+            double aYellow = (1 - b) * fade;
+
+            var sv = g.Save();
+            g.SetClip(new Rectangle(0, top, Width, h));
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+            for (float x = -off; x < Width; x += tapePairW)
+            {
+                if (aBlack > 0.01)
+                    DrawTapePair(g, x, top, h, Color.FromArgb(11, 12, 14), aBlack);
+                if (aYellow > 0.01)
+                {
+                    // 透明相里给黄字垫一层黑影子，浅色壁纸上也读得清
+                    DrawTapePair(g, x + 1.5f * layout, top, h, Color.FromArgb(11, 12, 14), aYellow * 0.55);
+                    DrawTapePair(g, x, top, h, Color.FromArgb(255, 216, 77), aYellow);
+                }
+            }
+            g.Restore(sv);
+        }
+
+        private void DrawTapePair(Graphics g, float x, int top, int h, Color c, double a)
+        {
+            float tri = Math.Max(8f, TapeTriDip * layout);
+            float cy = top + h / 2f;
+            using (var br = new SolidBrush(Color.FromArgb(Alpha(a), c)))
+            using (var pen = new Pen(Color.FromArgb(Alpha(a), c), Math.Max(1f, 1.6f * layout)))
+            {
+                pen.LineJoin = LineJoin.Round;
+                float tx = x + tri / 2f;
+                g.DrawPolygon(pen, new PointF[]
+                {
+                    new PointF(tx, cy - tri / 2f),
+                    new PointF(x + tri, cy + tri / 2f),
+                    new PointF(x, cy + tri / 2f)
+                });
+                g.DrawLine(pen, tx, cy - tri * 0.16f, tx, cy + tri * 0.10f);
+                g.FillEllipse(br, tx - 1.2f * layout, cy + tri * 0.20f, 2.4f * layout, 2.4f * layout);
+
+                float kx = x + tri + 11 * layout;
+                g.DrawString(kind, fTapeKind, br, kx, cy - fTapeKind.GetHeight(g) / 2f);
+
+                float dx = kx + tapeKindW + 15 * layout;
+                g.FillEllipse(br, dx, cy - 1.5f * layout, 3 * layout, 3 * layout);
+
+                float tx2 = dx + 3 * layout + 15 * layout;
+                g.DrawString(ev.title ?? "", fTapeTitle, br, tx2, cy - fTapeTitle.GetHeight(g) / 2f);
+            }
+        }
+
+        private static float MeasureFor(Graphics g, string s, Font f)
+        {
+            if (string.IsNullOrEmpty(s)) return 0;
+            return g.MeasureString(s, f, 1000000, StringFormat.GenericTypographic).Width;
+        }
+
+        private static int Alpha(double a)
+        {
+            return (int)Math.Round(255 * Clamp01(a));
+        }
+

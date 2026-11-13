@@ -1,0 +1,82 @@
+        private void DrawTape(Graphics g)
+        {
+            double now = Environment.TickCount - startAt;
+            double fade = exiting
+                ? 1 - EaseInCubic(Clamp01((Environment.TickCount - exitAt) / 620.0))
+                : EaseOutCubic(Clamp01(now / 320.0));
+            if (fade <= 0.004) return;
+
+            int h = TapeBandHeight(layout);
+            int top = (Height - h) / 2;
+            int rail = TapeRailHeight(layout);
+            int textTop = top + rail;
+
+            // 呼吸：1 = 实黄底黑字，0 = 全透明黄字
+            double b = 0.5 + 0.5 * Math.Cos(2 * Math.PI * (now / 1000.0) / TapeBreathSec);
+            b = Clamp01(b);
+
+            using (var br = new SolidBrush(Color.FromArgb(Alpha(b * fade), 245, 196, 0)))
+                g.FillRectangle(br, 0, top, Width, h);
+
+            DrawTapeRails(g, top, h, rail, fade);
+            DrawTapeText(g, textTop, fade, b);
+        }
+
+        /// <summary>
+        /// 文字只画一遍：颜色在黑 → 黄之间插值，不再叠两层半透明字（叠层会出重影）。
+        /// </summary>
+        private void DrawTapeText(Graphics g, int top, double fade, double b)
+        {
+            if (tapeMaskTile == null || tapePairW <= 1) return;
+            double t = 1 - b;
+            int cr = (int)Math.Round(11 + (255 - 11) * t);
+            int cg = (int)Math.Round(12 + (216 - 12) * t);
+            int cb = (int)Math.Round(14 + (77 - 14) * t);
+            var color = Color.FromArgb(cr, cg, cb);
+            // 影子只在快透明时出现，中间相不参与，避免看起来像双影
+            double shadow = Math.Max(0, 0.5 - b) / 0.5 * 0.5 * fade;
+
+            float off = (float)(((Environment.TickCount - startAt) / 1000.0 * TapeTextSpeed * layout) % tapePairW);
+            int step = Math.Max(1, (int)Math.Round(tapePairW));
+            for (int x = (int)Math.Round(-off); x < Width; x += step)
+            {
+                if (shadow > 0.01)
+                    DrawTinted(g, tapeMaskTile, x + Math.Max(1, (int)Math.Round(layout)), top, Color.FromArgb(11, 12, 14), shadow);
+                DrawTinted(g, tapeMaskTile, x, top, color, fade);
+            }
+        }
+
+        private static void DrawTinted(Graphics g, Bitmap tile, int x, int y, Color c, double a)
+        {
+            if (a <= 0.004) return;
+            var cm = new ColorMatrix(new float[][]
+            {
+                new float[] { c.R / 255f, 0, 0, 0, 0 },
+                new float[] { 0, c.G / 255f, 0, 0, 0 },
+                new float[] { 0, 0, c.B / 255f, 0, 0 },
+                new float[] { 0, 0, 0, (float)Clamp01(a), 0 },
+                new float[] { 0, 0, 0, 0, 1 }
+            });
+            using (var ia = new ImageAttributes())
+            {
+                ia.SetColorMatrix(cm);
+                g.DrawImage(tile, new Rectangle(x, y, tile.Width, tile.Height),
+                    0, 0, tile.Width, tile.Height, GraphicsUnit.Pixel, ia);
+            }
+        }
+
+        /// <summary>把「⚠ 类型 · 标题」预渲染成一张白色蒙版，运行时按颜色矩阵染色。</summary>
+        private void BuildTapeTiles(int textH)
+        {
+            if (textH < 8 || tapePairW <= 1) return;
+            int w = Math.Max(1, (int)Math.Ceiling(tapePairW));
+            tapeMaskTile = new Bitmap(w, textH);
+            using (var g = Graphics.FromImage(tapeMaskTile))
+            {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                DrawTapePair(g, 0, 0, textH, Color.White, 1.0);
+            }
+        }
+

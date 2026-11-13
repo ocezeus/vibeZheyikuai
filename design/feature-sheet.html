@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>上班工具箱 v2.9.9 · 功能总览</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#F6F7FA;color:#1B2230;
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .sheet{width:1000px;margin:0 auto;padding:40px 44px 56px;background:#F6F7FA}
+
+  /* 页头 */
+  .brand{display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+  .kicker{font:700 11px/1 "Bahnschrift","Segoe UI",sans-serif;letter-spacing:.3em;color:#8A93A5}
+  h1{margin:10px 0 6px;font-size:36px;letter-spacing:-.02em}
+  .sub{margin:0;color:#5C6779;font-size:14px;line-height:1.8}
+  .ver{flex:none;text-align:right}
+  .ver b{display:block;font:700 26px/1 "Bahnschrift","Segoe UI",sans-serif;color:#1B2230}
+  .ver span{font-size:11px;color:#8A93A5;letter-spacing:.08em}
+  .rule{height:3px;background:linear-gradient(90deg,#F5C400 0 220px,#E6E9F0 220px);border-radius:2px;margin:22px 0 26px}
+
+  /* 卡片示例 */
+  .hero{display:flex;align-items:center;gap:18px;background:#0E141C;border-radius:16px;padding:22px 24px;
+    box-shadow:0 18px 44px rgba(15,20,32,.25);overflow:hidden}
+  .mock{position:relative;height:68px;flex:none}
+  .wcard{position:absolute;left:0;top:0;width:224px;height:68px;border-radius:14px;
+    background:linear-gradient(180deg,#FCFDFF,#F0F3F9);box-shadow:0 7px 18px rgba(0,0,0,.45)}
+  .wcard .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:#3D6BFF}
+  .wcard .lab{position:absolute;left:24px;top:8px;font-size:9.5px;color:#5C6779}
+  .wcard .rt{position:absolute;right:14px;top:8px;font-size:9.5px;color:#5C6779}
+  .wcard .num{position:absolute;left:13px;top:23px;font:700 27px/31px "Bahnschrift",sans-serif;color:#1B2230}
+  .wcard .bar{position:absolute;left:14px;right:14px;bottom:6px;height:3px;border-radius:2px;background:#D9DFEA;overflow:hidden}
+  .wcard .bar i{position:absolute;inset:0;width:64%;background:linear-gradient(90deg,#2F5DFF,#7FA6FF)}
+  .wdrawer{position:absolute;left:224px;top:0;width:416px;height:68px;border-radius:0 14px 14px 0;background:#F5C400;
+    padding:0 22px;display:flex;flex-direction:column;justify-content:center;gap:7px;
+    box-shadow:0 7px 18px rgba(0,0,0,.4)}
+  .wdrawer h3{margin:0;font-size:17px;line-height:1.2;color:#33260A;letter-spacing:-.01em}
+  .wdrawer .meta{display:flex;align-items:center;gap:9px;font-size:13px;line-height:1.2;color:#5C4400;white-space:nowrap}
+  .wdrawer .meta .t{font:600 13px/1.2 "Bahnschrift",sans-serif}
+  .wdrawer .meta i{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.45}
+  .wdrawer .meta .lock{margin-left:2px;font:600 13px/1.2 "Bahnschrift",sans-serif;color:#8A3D00}
+  .hero .cap{color:#CBD4E2;font-size:12.5px;line-height:1.95;margin-left:6px}
+  .hero .cap b{color:#fff;font-weight:600}
+
+  /* 分节 */
+  .grid{margin-top:26px}
+  .sec{margin-bottom:24px;break-inside:avoid}
+  .sec h2{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:17px;letter-spacing:-.01em}
+  .sec h2 .n{flex:none;width:26px;height:26px;border-radius:8px;background:#1B2230;color:#F5C400;
+    font:700 12px/26px "Bahnschrift",sans-serif;text-align:center}
+  .sec ul{margin:0;padding-left:0;list-style:none;columns:1}
+  .sec li{position:relative;padding-left:16px;margin:0 0 9px;font-size:13.5px;line-height:1.75;color:#3C4657;break-inside:avoid}
+  .sec li::before{content:"";position:absolute;left:2px;top:9px;width:5px;height:5px;border-radius:50%;background:#D7A400}
+  .sec li b{color:#1B2230;font-weight:600}
+  .sec li em{font-style:normal;color:#8A93A5}
+  .tag{display:inline-block;padding:1px 7px;margin-right:6px;border-radius:5px;background:#FFF3C4;color:#7A5A00;
+    font-size:11.5px;font-weight:600;letter-spacing:.02em}
+
+  /* 页脚 */
+  .foot{margin-top:8px;padding-top:18px;border-top:1px solid #E3E7EF;display:flex;justify-content:space-between;
+    gap:20px;color:#8A93A5;font-size:11.5px;line-height:1.7}
+  .foot b{color:#5C6779;font-weight:600}
+
+  /* 打印：A4 两栏 */
+  @page{size:A4;margin:10mm}
+  @media print{
+    html,body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .sheet{width:auto;padding:0}
+    h1{font-size:24px;margin:4px 0 3px}
+    .sub{font-size:10.2px;line-height:1.55}
+    .ver b{font-size:23px}
+    .ver span{font-size:9px}
+    .rule{margin:9px 0 10px;height:3px}
+    .hero{padding:9px 12px;box-shadow:none;border-radius:9px;gap:12px}
+    .mock{zoom:.74}
+    .hero .cap{font-size:9.6px;line-height:1.58}
+    .grid{column-count:2;column-gap:12mm;margin-top:14px}
+    .sec{margin-bottom:10px}
+    .sec h2{font-size:13px;margin-bottom:5px}
+    .sec h2 .n{width:19px;height:19px;line-height:19px;font-size:9.5px;border-radius:6px}
+    .sec li{font-size:10.2px;line-height:1.55;margin-bottom:4.5px;padding-left:12px}
+    .sec li::before{top:6px;width:4px;height:4px}
+    .tag{font-size:9px;padding:0 4px}
+    .wdrawer h3{font-size:15px}
+    .wdrawer .meta{font-size:12px}
+    .foot{font-size:9px;margin-top:10px;padding-top:12px}
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="brand">
+    <div>
+      <div class="kicker">WORK COUNTDOWN · FEATURE SHEET</div>
+      <h1>上班工具箱</h1>
+      <p class="sub">贴在屏幕边上的倒计时小卡片：到点提醒、警戒带、抽屉卡、飞书打卡与日程，一屏看完今天还剩多久。</p>
+    </div>
+    <div class="ver"><b>v2.9.9</b><span>2026-11 · WINDOWS 10/11</span></div>
+  </div>
+  <div class="rule"></div>
+
+  <div class="hero">
+    <div class="mock" style="width:640px">
+      <div class="wcard">
+        <div class="dot"></div><div class="lab">距离下班</div><div class="rt">下班 20:04</div>
+        <div class="num">02:07:32</div>
+        <div class="bar"><i></i></div>
+      </div>
+      <div class="wdrawer">
+        <h3>产品评审会 · Q4 排期</h3>
+        <div class="meta"><span class="t">16:45 – 17:15</span><i></i><span>3F 云杉会议室</span><i></i><span class="lock">还有 10 分钟</span></div>
+      </div>
+    </div>
+    <div class="cap"><b>收起时只有一条</b>，点开是整张卡片；<br>提醒结束后从卡片旁边拉出<b>抽屉卡</b>，<br>一直留到这场日程结束。</div>
+  </div>
+
+  <div class="grid">
+
+    <section class="sec">
+      <h2><span class="n">01</span>核心倒计时</h2>
+      <ul>
+        <li>距离下班的<b>时:分:秒</b>；最后 60 分钟自动切成 <b>分:秒.厘秒</b>（20Hz 刷新）</li>
+        <li>固定班次 / 弹性工时（上班时间 + 每日时长）两种算法</li>
+        <li>午休可<b>扣除工时</b>，下班时间按实际工时推算</li>
+        <li>工作日、单双休、节假日例外、临时调休上班</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">02</span>卡片</h2>
+      <ul>
+        <li>收起 224×68、展开 280×188；点击展开/收起，拖拽移动，<b>贴左 / 贴右 / 自由摆放</b></li>
+        <li>20 秒没动自动收起（可调）；始终置顶可关；整卡透明度可调</li>
+        <li>进度条 + 流动光带，最后一圈在两端淡入淡出；<b>最后 30 分钟</b>进度条变彩色</li>
+        <li>分层窗逐像素合成：圆角、文字、图标都是抗锯齿的，小字走灰阶不镶彩边</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">03</span>卡片第二行</h2>
+      <ul>
+        <li>跟着一天走：<b>距午休 → 午休中 → 距晚休 → 晚休中 → 距下班 / 马上下班</b></li>
+        <li>收起时右侧小字显示 <em>休 34m</em> / <em>晚 1h20m</em></li>
+        <li>午休或晚休被停用、今天不生效时，这一行自动让位，不影响另一边</li>
+        <li>内置午休没填结束时间时，会拿午休时段的一条普通日程顶上（<em>v2.9.9 修复</em>）</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">04</span>到点提醒</h2>
+      <ul>
+        <li>会议、普通日程、固定日程（午休/晚休/下班/自建）到点都会提醒，提前量各自可调</li>
+        <li>两种范围：<b>只在卡片内</b>（圆形柔光 / 进度条拉伸）或 <b>全屏</b></li>
+        <li>全屏三种样式：圆形柔光 / 进度条拉伸 / <b>警戒带</b>（黄黑长条 + 呼吸反色 + 跑马灯）</li>
+        <li>提醒<b>常驻到时段结束</b>；右上角 × 或点任意处关闭，同一场今天不再弹</li>
+        <li>下班没打卡：常驻「该下班啦」，每 5 分钟重播，打卡后自动消失</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">05</span>警戒带 → 抽屉卡</h2>
+      <ul>
+        <li>触发时小卡先<b>展开</b>（400ms），再让黄条横贯全屏；<b>卡片不做覆盖</b></li>
+        <li>黄条走完、卡片收回（400ms），<b>0.3 秒后</b>从贴边的一侧反向拉出抽屉（550ms）</li>
+        <li>抽屉是实心工业黄、和卡片同高 68 DIP、外角 14；两行字：<b>标题 / 时间段 · 地点 · 剩余时间</b></li>
+        <li>文字同色系三阶（暖黑 / 深褐 / 深橙），没有「会议提醒」这类标签</li>
+        <li>贴左的往右拉、贴右的往左拉；一直留到日程结束，<b>点一下收回</b></li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">06</span>日程</h2>
+      <ul>
+        <li>内置三条固定日程：午休 / 晚休 / 下班，可改名、改时间、换配色、停用（不能删）</li>
+        <li>自建固定日程：<b>每天 / 单数周 / 双数周</b>、重复到某天、开始与结束各提醒一次、39 套配色任选</li>
+        <li>手动日程：日历选日期 + 15 分钟一档 + 时长 + 位置；「快速填入」3/5/15/30 分钟后、1 小时后</li>
+        <li>飞书日历自动同步会议，会议与普通日程的提前量分开设置</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">07</span>飞书打卡</h2>
+      <ul>
+        <li>读飞书考勤对话里的<b>上班 / 下班打卡</b>，算迟到早退</li>
+        <li>用 <b>lark-cli</b> 授权，设置里一键「自动找」考勤机器人会话</li>
+        <li>不接飞书也能用，只按班次时间倒计时</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">08</span>外观</h2>
+      <ul>
+        <li><b>39 套内置主题</b>（深色 / 浅色），色卡直接预览占比</li>
+        <li>自建主题：只选<b>背景色 + 进度条色</b>，文字 / 轨道 / 对比度自动推导；可编辑、可删</li>
+        <li>背景光效：原样式（默认）/ 角落柔光 A / 进度条同色光 B / A+B</li>
+        <li>卡片透明度、窗口置顶、减少动态效果</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">09</span>操作</h2>
+      <ul>
+        <li>左键展开 / 收起；右键菜单：设置、提醒预览、窗口置顶、开机自启、退出</li>
+        <li>托盘图标常驻，单击唤回；关闭设置窗不影响卡片</li>
+        <li>设置支持<b>导出 / 导入</b>，换机一键搬家</li>
+        <li>单实例运行，重复启动只把已有窗口叫出来</li>
+      </ul>
+    </section>
+
+    <section class="sec">
+      <h2><span class="n">10</span>适配与数据</h2>
+      <ul>
+        <li>100%–300% 缩放、多显示器、4K 都按系统 DPI 渲染</li>
+        <li>全屏提醒用桌面截图做底图，不依赖大尺寸分层窗（4K 下更稳）</li>
+        <li>配置与日志在 <b>%APPDATA%\WorkCountdown</b>；便携模式：exe 旁放 <b>portable.txt</b> 存到同目录 data\</li>
+        <li>只依赖 Windows 自带的 .NET Framework 4.x，不用装运行时</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <div class="foot">
+    <div><b>上班工具箱 v2.9.9</b> · 单文件 exe，免安装（也要以一次「安装.cmd」放桌面快捷方式）</div>
+    <div>106 条逻辑断言 + 157 条界面验收 · 全绿</div>
+  </div>
+
+</div>
+</body>
+</html>

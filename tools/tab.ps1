@@ -1,4 +1,4 @@
-﻿param([string]$Out = 'dlg.png', [string]$TabName = '外观')
+param([string]$Out = 'dlg.png', [string]$TabName = '外观')
 # 用 UI Automation 选中设置对话框里的标签页，再 PrintWindow 抓图
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -31,7 +31,7 @@ $dlg = [IntPtr]::Zero
     [DW2]::GetWindowThreadProcessId($h, [ref]$p) | Out-Null
     if ($p -eq $procId -and [DW2]::IsWindowVisible($h)) {
         $el = $AE::FromHandle($h)
-        if ($el -ne $null -and $el.Current.Name -eq '下班倒计时 · 设置') { $script:dlg = $h }
+        if ($el -ne $null -and $el.Current.Name -like '上班工具箱*设置') { $script:dlg = $h }
     }
     return $true
 }, [IntPtr]::Zero) | Out-Null

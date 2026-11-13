@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>警戒带 · 同步反色（窄条版）</title>
+<style>
+  :root{--hz:#F5C400;--speed:60}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:#EDF0F6;color:#1B2230;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  .page-head{max-width:1010px;margin:0 auto;padding:44px 24px 6px}
+  .kicker{font:600 11px/1 "Bahnschrift","Segoe UI",sans-serif;letter-spacing:.28em;color:#7A8498}
+  h1{margin:12px 0 8px;font-size:29px;letter-spacing:-.02em;color:#151A26}
+  .page-head p{margin:0;color:#5C6779;font-size:13.5px;line-height:1.8;max-width:780px}
+  .page-head b{color:#1B2230}
+  section{max-width:1010px;margin:0 auto;padding:26px 24px 10px}
+  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:12px 14px;margin:6px 0 18px;padding:12px 16px;background:#fff;border-radius:10px;box-shadow:0 2px 10px rgba(20,30,50,.08);font-size:13px;color:#3A465C}
+  .controls input[type=range]{width:220px;accent-color:#F5C400}
+  .controls b{font-variant-numeric:tabular-nums;color:#151A26;min-width:66px;display:inline-block}
+  .sepv{width:1px;height:18px;background:#E3E8F0;margin:0 4px}
+  .hint{color:#8A93A5;font-size:12px}
+  .viewport{width:960px;height:540px;overflow:hidden;border-radius:14px;box-shadow:0 18px 50px rgba(15,20,32,.22),0 1px 0 rgba(255,255,255,.6)}
+  .view{width:1280px;height:720px;transform:scale(.75);transform-origin:0 0}
+  .screen{position:relative;width:1280px;height:720px;overflow:hidden;background:#0b0f16}
+
+  .desktop{position:absolute;inset:0;overflow:hidden}
+  .desktop .bg{position:absolute;inset:-10%;
+    background:
+      radial-gradient(52% 60% at 16% 18%,rgba(58,110,160,.55) 0,transparent 62%),
+      radial-gradient(46% 54% at 84% 12%,rgba(126,66,102,.42) 0,transparent 60%),
+      radial-gradient(58% 62% at 72% 92%,rgba(28,86,80,.45) 0,transparent 62%),
+      linear-gradient(158deg,#0A1018 0%,#111A26 55%,#080C12 100%)}
+  .win{position:absolute;border-radius:10px;background:rgba(16,22,31,.72);border:1px solid rgba(255,255,255,.07);box-shadow:0 30px 80px rgba(0,0,0,.45)}
+  .w1{left:70px;top:92px;width:520px;height:330px;background:rgba(237,241,248,.93);border-color:rgba(255,255,255,.7);box-shadow:0 30px 80px rgba(0,0,0,.35)}
+  .w2{right:84px;top:150px;width:430px;height:300px}
+  .win .bar{position:absolute;left:0;right:0;top:0;height:26px;border-radius:10px 10px 0 0;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.05)}
+  .win .bar::before{content:"";position:absolute;left:12px;top:9px;width:8px;height:8px;border-radius:50%;background:#E8635C;box-shadow:15px 0 0 #E5B24C,30px 0 0 #59C36A;opacity:.75}
+  .w1 .bar{background:rgba(22,30,44,.05);border-bottom:1px solid rgba(22,30,44,.08)}
+  .win .ln{position:absolute;left:22px;height:8px;border-radius:4px;background:rgba(255,255,255,.075)}
+  .win .ln.g{background:rgba(120,180,255,.13)}
+  .w1 .ln{background:rgba(22,30,44,.10)}
+  .w1 .ln.g{background:rgba(70,120,200,.20)}
+  .dock{position:absolute;left:0;right:0;bottom:0;height:44px;background:rgba(8,11,16,.78);border-top:1px solid rgba(255,255,255,.06)}
+
+  /* ============ 窄条警戒带 ============ */
+  .bandP{
+    position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+    width:100%;height:60px;border-radius:0;overflow:hidden;
+    filter:drop-shadow(0 8px 20px rgba(0,0,0,.55));
+  }
+  .bandP .fillP{position:absolute;inset:0;background:var(--hz)}
+  .rail{position:absolute;left:0;right:0;height:8px;overflow:hidden}
+  .rail.top{top:0}
+  .rail.bottom{bottom:0}
+  .rail .tape{
+    position:absolute;inset:-30px;
+    background:repeating-linear-gradient(-45deg,var(--hz) 0 14px,#0B0B0C 14px 28px);
+    animation:tapeRun .99s linear infinite;
+  }
+  @keyframes tapeRun{from{transform:translateX(0)}to{transform:translateX(39.6px)}}
+
+  .mqP{position:absolute;left:0;right:0;top:8px;bottom:8px;overflow:hidden}
+  .trackP{display:flex;width:max-content;height:100%;align-items:center;animation:pSlide 21s linear infinite}
+  @keyframes pSlide{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .seqP{display:flex;align-items:center;flex:none;height:100%}
+  .pairP{display:flex;align-items:center;flex:none;padding:0 17.5px;height:100%}
+  .pairP .tri{width:15px;height:15px;flex:none;margin-right:11px}
+  .kindP{font-size:11.5px;font-weight:900;letter-spacing:.2em}
+  .sepDot{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.45;margin:0 15px;flex:none}
+  .titleP{font-size:24px;font-weight:900;letter-spacing:.01em;white-space:nowrap}
+
+  .layerA{color:#0B0C0E;position:absolute;left:0;right:0;top:8px;bottom:8px;overflow:hidden}
+  .layerB{color:#FFD84D;position:absolute;left:0;right:0;top:8px;bottom:8px;overflow:hidden}
+  .layerB .kindP,.layerB .titleP{text-shadow:0 1px 2px rgba(0,0,0,.95),0 0 8px rgba(0,0,0,.85),0 0 20px rgba(0,0,0,.5)}
+
+  /* 同步反色：3 秒一轮，底色 / 黑字 / 黄字同一条曲线 */
+  .fillP{animation:pBreathe 2.333s ease-in-out infinite}
+  .layerA{animation:pFadeOut 2.333s ease-in-out infinite}
+  .layerB{animation:pFadeIn 2.333s ease-in-out infinite}
+  @keyframes pBreathe{0%,100%{opacity:1}50%{opacity:0}}
+  @keyframes pFadeOut{0%,100%{opacity:1}50%{opacity:0}}
+  @keyframes pFadeIn{0%,100%{opacity:0}50%{opacity:1}}
+
+  body.solo{background:#000;overflow:hidden}
+  body.solo .page-head,body.solo section h1,body.solo .controls,body.solo .lede,body.solo .meta{display:none}
+  body.solo section{padding:0;margin:0;max-width:none}
+  body.solo .viewport{width:1280px;height:720px;border-radius:0;box-shadow:none}
+  body.solo .view{transform:none}
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <div class="kicker">WORK COUNTDOWN · TAPE 2.3</div>
+  <h1>同步反色 · 满屏 · 两条速度都能调</h1>
+  <p>条子顶满屏幕，高 60，文字 24，上下留白压到 12px；内容只留「类型 + 标题」，重复间距 35px。文字向左、斜纹向右，<b>两条速度都能在下面拖</b>，找到你顺眼的一组再告诉我。</p>
+</header>
+
+<section>
+  <div class="controls">
+    <span>文字速度</span>
+    <input id="speed" type="range" min="20" max="160" step="5" value="70">
+    <b><span id="speedVal">70</span> px/s</b>
+    <span class="sepv"></span>
+    <span>斜纹速度</span>
+    <input id="tape" type="range" min="0" max="160" step="5" value="100">
+    <b><span id="tapeVal">100</span> px/s</b>
+    <span class="hint">间距 35px · 呼吸 2.33s</span>
+  </div>
+
+  <div class="viewport"><div class="view">
+    <div class="screen">
+      <div class="desktop">
+        <div class="bg"></div>
+        <div class="win w1"><div class="bar"></div>
+          <div class="ln" style="top:58px;width:300px"></div>
+          <div class="ln g" style="top:80px;width:210px"></div>
+          <div class="ln" style="top:102px;width:340px"></div>
+          <div class="ln" style="top:124px;width:160px"></div>
+        </div>
+        <div class="win w2"><div class="bar"></div>
+          <div class="ln" style="top:56px;width:250px"></div>
+          <div class="ln" style="top:78px;width:300px"></div>
+          <div class="ln g" style="top:100px;width:180px"></div>
+          <div class="ln" style="top:122px;width:260px"></div>
+        </div>
+        <div class="dock"></div>
+      </div>
+      <div class="bandP">
+        <div class="fillP"></div>
+        <div class="rail top"><div class="tape"></div></div>
+        <div class="rail bottom"><div class="tape"></div></div>
+        <div class="layerA"><div class="trackP"><div class="seqP"></div><div class="seqP"></div></div></div>
+        <div class="layerB"><div class="trackP"><div class="seqP"></div><div class="seqP"></div></div></div>
+      </div>
+    </div>
+  </div></div>
+
+  <p class="lede" style="margin-top:14px">条高 60 / 斜纹 8 / 文字 24；整屏宽；重复间距 35px；文字默认 70px/s 向左，斜纹默认 100px/s 向右；呼吸 2.33 秒一轮。</p>
+</section>
+
+<script>
+(function(){
+  var q = new URLSearchParams(location.search);
+
+  var pair = '<div class="pairP">'
+    + '<svg class="tri" viewBox="0 0 24 24">'
+    + '<path d="M12 3.4 22.2 20.6H1.8Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'
+    + '<path d="M12 9.4v5.1" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'
+    + '</svg>'
+    + '<span class="kindP">会议提醒</span><span class="sepDot"></span>'
+    + '<span class="titleP">产品评审会 · Q4 排期</span></div>';
+
+  document.querySelectorAll('.seqP').forEach(function(seq){
+    var html = '';
+    for (var i = 0; i < 3; i++) html += pair;
+    seq.innerHTML = html;
+  });
+
+  var tracks = document.querySelectorAll('.trackP');
+  var tapes = document.querySelectorAll('.tape');
+  var seqW = Math.max(200, document.querySelector('.seqP').offsetWidth || 0);
+
+  function setTextSpeed(px){
+    px = Math.max(5, px);
+    var dur = seqW / px;              // 一整段（3 个 pair）走完的时长
+    tracks.forEach(function(t){ t.style.animationDuration = dur + 's'; });
+    document.getElementById('speedVal').textContent = Math.round(px);
+  }
+  function setTapeSpeed(px){
+    px = Math.max(0, px);
+    var dur = 39.6 / Math.max(1, px);    // 两个周期，横向位移 39.6px
+    tapes.forEach(function(t){
+      t.style.animationDuration = dur + 's';
+      t.style.animationPlayState = px <= 0 ? 'paused' : 'running';
+    });
+    document.getElementById('tapeVal').textContent = Math.round(px);
+  }
+
+  var slider = document.getElementById('speed');
+  slider.addEventListener('input', function(){ setTextSpeed(parseFloat(slider.value) || 70); });
+  var tapeSlider = document.getElementById('tape');
+  tapeSlider.addEventListener('input', function(){ setTapeSpeed(parseFloat(tapeSlider.value) || 100); });
+
+  var qs = parseFloat(q.get('speed'));
+  var qt = parseFloat(q.get('tape'));
+  if (!isNaN(qs)) slider.value = qs;
+  if (!isNaN(qt)) tapeSlider.value = qt;
+  setTextSpeed(isNaN(qs) ? 70 : qs);
+  setTapeSpeed(isNaN(qt) ? 100 : qt);
+
+  var d = q.get('d');
+  if (d){
+    document.body.classList.add('solo');
+    document.querySelector('.viewport').style.width = '1280px';
+  }
+
+  var fz = q.get('freeze');
+  if (fz !== null){
+    var t = parseFloat(fz) || 0;
+    document.querySelectorAll('.bandP, .bandP *').forEach(function(el){
+      var cs = getComputedStyle(el);
+      if (cs.animationName && cs.animationName !== 'none'){
+        el.style.animationDelay = '-' + t + 's';
+        el.style.animationPlayState = 'paused';
+      }
+    });
+  }
+})();
+</script>
+</body>
+</html>

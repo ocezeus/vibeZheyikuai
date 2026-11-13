@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>上班工具箱 · 工资面板方案</title>
+<style>
+  :root{
+    --bg1:#1a202e; --bg2:#262e40;
+    --ink:#ecf1fa; --muted:#9aa6bd; --dim:#6f7b92;
+    --accent:#4c8dff; --success:#4fd1a1; --gold:#f2b34c;
+    --line:rgba(236,241,250,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:#0d111b;
+    color:#dfe6f3;
+    font-family:"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    padding:34px 40px 50px;
+  }
+  .page-head{max-width:960px;margin:0 auto 24px}
+  .page-head h1{font-size:22px;letter-spacing:.5px;margin:0 0 8px;font-weight:700}
+  .page-head p{margin:0;color:#8d99b0;font-size:13px;line-height:1.7}
+  .page-head b{color:#cfd9ea;font-weight:600}
+  .grid{
+    max-width:960px;margin:0 auto;
+    display:grid;grid-template-columns:420px 420px;gap:34px 36px;
+    justify-content:center;
+  }
+  .option{width:420px}
+  .option h2{
+    font-size:14px;margin:0 0 10px;color:#aebbd1;font-weight:600;
+    display:flex;align-items:center;gap:8px
+  }
+  .option h2 .tag{
+    font-size:10px;color:#8fa6cc;border:1px solid rgba(120,150,200,.35);
+    padding:2px 7px;border-radius:20px;font-weight:500
+  }
+  .option h2 .rec{color:#7fe3bd;border-color:rgba(79,209,161,.4);background:rgba(79,209,161,.08)}
+  .option p.note{margin:10px 2px 0;font-size:11.5px;color:#7b879d;line-height:1.6}
+  .option p.note em{font-style:normal;color:#9fb0cc}
+
+  /* ---------- 卡片外壳 ---------- */
+  .card{
+    width:420px;border-radius:18px;position:relative;overflow:hidden;
+    background:linear-gradient(180deg,var(--bg1),var(--bg2));
+    box-shadow:0 18px 50px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.035);
+  }
+  .card-inner{padding:16px 18px 0}
+  .row-status{display:flex;align-items:center;height:24px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:9px;box-shadow:0 0 8px rgba(76,141,255,.7)}
+  .status{font-size:12px;color:var(--muted);letter-spacing:.2px}
+  .tools{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .tool{
+    width:24px;height:24px;border-radius:8px;display:grid;place-items:center;
+    color:#8491a8;font-size:14px;line-height:1
+  }
+  .tool.salary{color:var(--accent);background:rgba(76,141,255,.13);font-weight:700;font-size:13px}
+  .tool svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+  .big-label{font-size:11.5px;color:var(--muted);margin-top:10px}
+  .countdown{
+    font-family:Consolas,"SFMono-Regular",monospace;
+    font-size:46px;line-height:1.06;letter-spacing:1px;font-weight:700;color:var(--ink);
+    margin-top:2px;font-variant-numeric:tabular-nums;
+  }
+  .bar{height:5px;border-radius:6px;background:rgba(255,255,255,.10);margin-top:10px;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#3d7ff0,#64a0ff)}
+  .subline{font-size:11.5px;color:var(--muted);margin-top:9px}
+  .lunch{font-size:11.5px;color:var(--ink);margin-top:7px}
+  .lunch em{font-style:normal;color:var(--muted);font-weight:400;margin-right:6px}
+  .foot{font-size:10.5px;color:var(--dim);margin-top:7px;padding-bottom:14px}
+
+  /* ---------- 工资区通用 ---------- */
+  .salary-sec{
+    border-top:1px solid var(--line);
+    margin:0 18px;padding:13px 0 16px;position:relative;
+  }
+  .salary-sec::before{
+    content:"";position:absolute;left:-18px;right:-18px;top:-1px;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(76,141,255,.38),transparent);
+  }
+  .s-head{display:flex;align-items:center;gap:8px}
+  .s-title{font-size:11px;color:var(--muted);letter-spacing:.6px}
+  .live{
+    display:inline-flex;align-items:center;gap:4px;font-size:9.5px;color:#7fe3bd;
+    background:rgba(79,209,161,.09);border:1px solid rgba(79,209,161,.22);
+    border-radius:20px;padding:2px 7px 2px 6px;
+  }
+  .live i{width:4px;height:4px;border-radius:50%;background:#4fd1a1;animation:blink 1.6s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  .pin{
+    margin-left:auto;font-size:9.5px;color:#8fa6cc;border:1px solid rgba(120,150,200,.3);
+    border-radius:20px;padding:2px 8px;
+  }
+  .pin.on{color:#9fc0ff;border-color:rgba(76,141,255,.45);background:rgba(76,141,255,.10)}
+  .money{
+    font-family:Consolas,"SFMono-Regular",monospace;
+    font-variant-numeric:tabular-nums;font-weight:700;color:var(--ink);
+    letter-spacing:.2px;white-space:nowrap;
+  }
+  .money .cur{font-size:.56em;color:var(--muted);margin-right:3px;font-weight:600}
+  .money .dec{color:#a9c7ff}
+  .hero{font-size:39px;line-height:1.15;margin-top:3px}
+  .hero .cur{font-size:20px}
+  .mini-row{display:flex;align-items:baseline;gap:7px;margin-top:6px;font-size:10.5px;color:var(--dim)}
+  .mini-row b{font-size:12px;color:var(--muted);font-weight:600;font-family:Consolas,monospace}
+
+  /* ---------- A 主数字 ---------- */
+  .a-progress{display:flex;align-items:center;gap:10px;margin-top:11px}
+  .a-progress .bar{flex:1;margin:0;height:5px}
+  .a-progress .bar>i{background:linear-gradient(90deg,#3d7ff0,#6fb0ff 70%,#8ee6c4)}
+  .a-progress span{font-size:10px;color:var(--dim);font-family:Consolas,monospace;white-space:nowrap}
+  .a-stats{display:flex;align-items:flex-end;margin-top:12px;gap:0}
+  .a-stat{flex:1}
+  .a-stat+.a-stat{border-left:1px solid var(--line);padding-left:14px}
+  .a-stat .k{font-size:9.5px;color:var(--dim);letter-spacing:.4px}
+  .a-stat .v{font-family:Consolas,monospace;font-size:15px;color:var(--ink);font-weight:600;margin-top:2px;white-space:nowrap}
+  .a-stat .v small{font-size:10px;color:var(--muted);font-weight:400}
+
+  /* ---------- B 双栏账本 ---------- */
+  .b-wrap{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:2px}
+  .b-col{padding-right:14px}
+  .b-col+.b-col{border-left:1px solid var(--line);padding-left:14px;padding-right:0}
+  .b-col .k{font-size:10px;color:var(--dim);letter-spacing:.4px}
+  .b-col .hero{font-size:29px}
+  .b-col .hero .cur{font-size:15px}
+  .b-ring{display:flex;align-items:center;gap:9px;margin-top:9px}
+  .ring{width:34px;height:34px;flex:none}
+  .ring circle{fill:none;stroke-width:3.4}
+  .ring .bg{stroke:rgba(255,255,255,.10)}
+  .ring .fg{stroke:url(#ringGrad);stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%}
+  .b-ring .txt{font-size:9.5px;color:var(--dim);line-height:1.55}
+  .b-ring .txt b{display:block;font-size:11px;color:var(--muted);font-family:Consolas,monospace}
+  .b-list{margin-top:8px}
+  .b-list div{display:flex;justify-content:space-between;font-size:10px;color:var(--dim);line-height:1.9;gap:6px}
+  .b-list b{font-family:Consolas,monospace;color:var(--muted);font-weight:600;white-space:nowrap}
+  .b-list .gold{color:var(--gold)}
+  .b-pay{margin-top:10px;display:flex;align-items:center;gap:7px;font-size:10px;color:#c9d6ea}
+  .b-pay .cal{width:20px;height:20px;border-radius:6px;background:rgba(242,179,76,.13);color:var(--gold);display:grid;place-items:center;font-size:10px}
+
+  /* ---------- C 工资条 ---------- */
+  .slip{
+    margin-top:11px;border-radius:11px;padding:11px 13px 9px;
+    background:rgba(10,14,22,.32);
+    border:1px solid rgba(255,255,255,.055);
+    position:relative;
+  }
+  .slip::before,.slip::after{
+    content:"";position:absolute;width:14px;height:14px;border-radius:50%;
+    background:linear-gradient(180deg,var(--bg2),var(--bg2));
+    top:50%;transform:translateY(-50%);
+  }
+  .slip::before{left:-8px}
+  .slip::after{right:-8px}
+  .slip-top{display:flex;align-items:flex-end;justify-content:space-between;gap:10px}
+  .slip-top .k{font-size:10px;color:var(--dim);letter-spacing:.6px}
+  .slip-top .hero{font-size:31px;margin-top:1px}
+  .slip-top .hero .cur{font-size:16px}
+  .slip-badge{font-size:9px;color:#c3d5f2;background:rgba(76,141,255,.12);border:1px solid rgba(76,141,255,.25);border-radius:20px;padding:2px 7px;white-space:nowrap}
+  .dash{border-top:1px dashed rgba(255,255,255,.13);margin:9px 0 5px}
+  .slip-line{display:flex;justify-content:space-between;font-size:10.5px;line-height:1.95;color:var(--dim)}
+  .slip-line b{font-family:Consolas,monospace;color:#b9c9e0;font-weight:600}
+  .slip-line.total{color:#dfe8f7;margin-top:2px}
+  .slip-line.total b{color:var(--gold);font-size:12px}
+  .slip-barcode{display:flex;gap:2px;height:9px;margin-top:8px;opacity:.35}
+  .slip-barcode i{flex:1;background:#aebdd3}
+  .slip-barcode i:nth-child(3n){flex:.45}
+  .slip-barcode i:nth-child(4n){flex:.7;opacity:.5}
+
+  /* ---------- D 里程碑 ---------- */
+  .d-hero{text-align:center;padding-top:2px}
+  .d-hero .k{font-size:10px;color:var(--dim);letter-spacing:.8px}
+  .d-hero .hero{font-size:42px;margin-top:1px}
+  .d-hero .hero .cur{font-size:21px}
+  .d-sub{font-size:10.5px;color:var(--muted);margin-top:3px}
+  .d-sub b{color:#cfe1ff;font-family:Consolas,monospace;font-weight:600}
+  .d-line{margin:14px 2px 0;position:relative;height:34px}
+  .d-line .track{position:absolute;left:0;right:0;top:12px;height:4px;border-radius:4px;background:rgba(255,255,255,.09)}
+  .d-line .fill{position:absolute;left:0;top:12px;height:4px;border-radius:4px;background:linear-gradient(90deg,#3d7ff0,#6fb0ff)}
+  .d-line .mark{position:absolute;top:4px;width:20px;height:20px;margin-left:-10px;display:grid;place-items:center}
+  .d-line .mark i{width:8px;height:8px;border-radius:50%;background:#2b3b57;border:2px solid #1a202e;box-shadow:0 0 0 1px rgba(120,150,200,.3)}
+  .d-line .mark.done i{background:var(--accent);box-shadow:0 0 0 1px rgba(76,141,255,.5),0 0 10px rgba(76,141,255,.5)}
+  .d-line .now{position:absolute;top:0;transform:translateX(-50%);width:2px;height:22px;background:var(--ink);border-radius:2px;box-shadow:0 0 8px rgba(236,241,250,.5)}
+  .d-line .now::after{content:"";position:absolute;left:-3px;top:21px;width:8px;height:8px;border-radius:50%;background:var(--ink)}
+  .d-times{display:flex;justify-content:space-between;font-size:8.5px;color:#5f6b81;font-family:Consolas,monospace;margin-top:-1px}
+  .d-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:10px;color:var(--dim)}
+  .d-foot b{font-family:Consolas,monospace;color:#cfe1ff;font-weight:600;font-size:11px}
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <h1>工资面板 · 4 个方案</h1>
+    <p>模拟数据：月薪 <b>¥28,000</b> · 本月 <b>21</b> 个工作日 · 今日 <b>09:28</b> 打卡 · 当前 <b>16:05</b> · 发薪日 <b>11/15</b>。
+    今日收入按「时薪 × 已工作秒数」实时累计，保留 <b>3 位小数</b>。右上角第 4 个按钮（¥）点击展开，双击固定。</p>
+  </div>
+
+  <div class="grid">
+
+    <!-- ================= A ================= -->
+    <section class="option">
+      <h2>方案 A · 主数字 <span class="tag rec">推荐</span></h2>
+      <div class="card">
+        <div class="card-inner">
+          <div class="row-status">
+            <span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown" id="cd">01:54:37</div>
+          <div class="bar"><i style="width:82.7%"></i></div>
+          <div class="subline">上班 09:28 · 预计下班 18:00</div>
+          <div class="lunch"><em>距晚休</em>1h55m</div>
+          <div class="foot">已工作 6h37m · 计薪 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head">
+            <span class="s-title">今日收入</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin on">已固定</span>
+          </div>
+          <div class="money hero"><span class="cur">¥</span><span class="int" data-int>1,102</span><span class="dec" data-dec>.778</span></div>
+          <div class="a-progress">
+            <div class="bar"><i style="width:82.7%"></i></div>
+            <span>82.7%</span>
+          </div>
+          <div class="a-stats">
+            <div class="a-stat">
+              <div class="k">本月收入</div>
+              <div class="v">¥<span data-month>11,769.442</span></div>
+            </div>
+            <div class="a-stat">
+              <div class="k">发薪日 11/15</div>
+              <div class="v">4 <small>天后 · ¥28,000.000</small></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>信息层级最清楚</em>：今日数字最大，月收入/发薪日做次要信息；和现有卡片排版最接近，改动风险最低。</p>
+    </section>
+
+    <!-- ================= B ================= -->
+    <section class="option">
+      <h2>方案 B · 双栏账本 <span class="tag">信息最全</span></h2>
+      <div class="card">
+        <div class="card-inner">
+          <div class="row-status">
+            <span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown">01:54:37</div>
+          <div class="bar"><i style="width:82.7%"></i></div>
+          <div class="subline">上班 09:28 · 预计下班 18:00</div>
+          <div class="foot">已工作 6h37m · 计薪 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head" style="margin-bottom:8px">
+            <span class="s-title">收入账本</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin">双击固定</span>
+          </div>
+          <div class="b-wrap">
+            <div class="b-col">
+              <div class="k">今日收入</div>
+              <div class="money hero"><span class="cur">¥</span><span data-today>1,102.778</span></div>
+              <div class="b-ring">
+                <svg class="ring" viewBox="0 0 36 36">
+                  <defs><linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#4c8dff"/><stop offset="1" stop-color="#6fe3be"/>
+                  </linearGradient></defs>
+                  <circle class="bg" cx="18" cy="18" r="14.5"/>
+                  <circle class="fg" cx="18" cy="18" r="14.5" stroke-dasharray="91.1" stroke-dashoffset="15.8"/>
+                </svg>
+                <div class="txt"><b>82.7%</b>今日进度</div>
+              </div>
+            </div>
+            <div class="b-col">
+              <div class="k">本月收入</div>
+              <div class="money hero"><span class="cur">¥</span><span data-month>11,769.442</span></div>
+              <div class="b-list">
+                <div><span>日薪</span><b>¥1,333.333</b></div>
+                <div><span>时薪</span><b>¥166.667</b></div>
+                <div><span>已出勤</span><b>8.8 天</b></div>
+              </div>
+              <div class="b-pay"><span class="cal">薪</span>11/15 · <b class="gold" style="color:var(--gold)">4 天后</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>一屏看全</em>：今日/本月并列，日薪、时薪、出勤、发薪日都有位置；代价是字号比 A 小，眼睛要先找主数字。</p>
+    </section>
+
+    <!-- ================= C ================= -->
+    <section class="option">
+      <h2>方案 C · 工资条 <span class="tag">计算器感</span></h2>
+      <div class="card">
+        <div class="card-inner">
+          <div class="row-status">
+            <span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown">01:54:37</div>
+          <div class="bar"><i style="width:82.7%"></i></div>
+          <div class="subline">上班 09:28 · 预计下班 18:00</div>
+          <div class="foot">已工作 6h37m · 计薪 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head">
+            <span class="s-title">今日工资条</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin on">已固定</span>
+          </div>
+          <div class="slip">
+            <div class="slip-top">
+              <div>
+                <div class="k">今日当前收入</div>
+                <div class="money hero"><span class="cur">¥</span><span data-today>1,102.778</span></div>
+              </div>
+              <span class="slip-badge">已工作 6h37m</span>
+            </div>
+            <div class="dash"></div>
+            <div class="slip-line"><span>日薪 · 28,000 ÷ 21 天</span><b>¥1,333.333</b></div>
+            <div class="slip-line"><span>时薪 · 日薪 ÷ 8h</span><b>¥166.667</b></div>
+            <div class="slip-line"><span>本月已出勤 · 8 天 + 今日</span><b>¥10,666.667</b></div>
+            <div class="slip-line total"><span>本月累计</span><b>¥<span data-month>11,769.442</span></b></div>
+            <div class="slip-barcode">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>把「怎么算的」摊开</em>：日薪、时薪、出勤天数都能核对，最像工资计算器；但小字多，扫一眼不如 A 快。</p>
+    </section>
+
+    <!-- ================= D ================= -->
+    <section class="option">
+      <h2>方案 D · 收入里程碑 <span class="tag">激励感</span></h2>
+      <div class="card">
+        <div class="card-inner">
+          <div class="row-status">
+            <span class="dot"></span><span class="status">工作中</span>
+            <div class="tools">
+              <span class="tool salary">¥</span>
+              <span class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06-2.83 2.83-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21h-4v-.09A1.6 1.6 0 0 0 9 19.44a1.6 1.6 0 0 0-1.77.32l-.06.06-2.83-2.83.06-.06A1.6 1.6 0 0 0 4.72 15a1.6 1.6 0 0 0-1.47-1H3v-4h.09A1.6 1.6 0 0 0 4.56 9a1.6 1.6 0 0 0-.32-1.77l-.06-.06 2.83-2.83.06.06A1.6 1.6 0 0 0 9 4.72a1.6 1.6 0 0 0 1-1.47V3h4v.09A1.6 1.6 0 0 0 15 4.56a1.6 1.6 0 0 0 1.77-.32l.06-.06 2.83 2.83-.06.06A1.6 1.6 0 0 0 19.28 9a1.6 1.6 0 0 0 1.47 1H21v4h-.09a1.6 1.6 0 0 0-1.51 1z"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.3"/><path d="M20 5v6h-6"/></svg></span>
+              <span class="tool"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></span>
+            </div>
+          </div>
+          <div class="big-label">距离下班</div>
+          <div class="countdown">01:54:37</div>
+          <div class="bar"><i style="width:82.7%"></i></div>
+          <div class="subline">上班 09:28 · 预计下班 18:00</div>
+          <div class="foot">已工作 6h37m · 计薪 8h00m</div>
+        </div>
+        <div class="salary-sec">
+          <div class="s-head">
+            <span class="s-title">今天已经赚到</span>
+            <span class="live"><i></i>实时</span>
+            <span class="pin">双击固定</span>
+          </div>
+          <div class="d-hero">
+            <div class="k">TODAY</div>
+            <div class="money hero"><span class="cur">¥</span><span data-today>1,102.778</span></div>
+            <div class="d-sub">下班前还能再赚 <b>¥<span data-remain>1,030.556</span></b></div>
+          </div>
+          <div class="d-line">
+            <div class="track"></div>
+            <div class="fill" style="width:82.7%"></div>
+            <div class="mark done" style="left:0%"><i></i></div>
+            <div class="mark done" style="left:33%"><i></i></div>
+            <div class="mark done" style="left:66%"><i></i></div>
+            <div class="mark" style="left:100%"><i></i></div>
+            <div class="now" style="left:82.7%"></div>
+          </div>
+          <div class="d-times"><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span></div>
+          <div class="d-foot">
+            <span>本月累计 <b>¥<span data-month>11,769.442</span></b></span>
+            <span>发薪日 <b>11/15</b></span>
+          </div>
+        </div>
+      </div>
+      <p class="note"><em>强调「今天赚到多少」</em>：大数字居中 + 时间轴，有游戏化激励感；比 A 多一行时间刻度，视觉更活但更像数据面板。</p>
+    </section>
+
+  </div>
+
+<script>
+  // 模拟实时累计：时薪 166.6667 / 3600 秒，保留三位小数
+  const rate = 166.6666667 / 3600;
+  const base = 1102.7778;          // 16:05:00 已累计
+  const monthBase = 10666.6667;    // 本月已完成 8 天
+  const started = Date.now();
+  const nf = new Intl.NumberFormat('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+
+  function fmt(v){
+    const s = nf.format(v);
+    const i = s.lastIndexOf('.');
+    return { int: s.slice(0, i), dec: s.slice(i) };
+  }
+
+  function tick(){
+    const t = (Date.now() - started) / 1000;
+    const today = base + rate * t;
+    const month = monthBase + today;
+    const remain = 1333.3333 - today;
+
+    document.querySelectorAll('[data-today]').forEach(el => el.textContent = nf.format(today));
+    document.querySelectorAll('[data-month]').forEach(el => el.textContent = nf.format(month));
+    document.querySelectorAll('[data-remain]').forEach(el => el.textContent = nf.format(Math.max(0, remain)));
+
+    const parts = fmt(today);
+    document.querySelectorAll('[data-int]').forEach(el => el.textContent = parts.int);
+    document.querySelectorAll('[data-dec]').forEach(el => el.textContent = parts.dec);
+
+    // 上班工具箱
+    const left = 1 * 3600 + 54 * 60 + 37 - Math.floor(t);
+    const hh = String(Math.floor(left / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((left % 3600) / 60)).padStart(2, '0');
+    const ss = String(left % 60).padStart(2, '0');
+    document.querySelectorAll('.countdown').forEach(el => el.textContent = hh + ':' + mm + ':' + ss);
+  }
+  tick();
+  setInterval(tick, 1000);
+</script>
+</body>
+</html>

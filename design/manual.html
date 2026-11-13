@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>上班工具箱 · 使用说明</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;background:#F6F7FA;color:#1B2230;
+    font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  .sheet{width:1000px;margin:0 auto;padding:40px 44px 56px;background:#F6F7FA}
+
+  .kicker{font:700 11px/1 "Bahnschrift","Segoe UI",sans-serif;letter-spacing:.3em;color:#8A93A5}
+  h1{margin:10px 0 6px;font-size:36px;letter-spacing:-.02em}
+  .sub{margin:0;color:#5C6779;font-size:14.5px;line-height:1.85}
+  .ver{float:right;text-align:right;margin-top:4px}
+  .ver b{display:block;font:700 22px/1 "Bahnschrift","Segoe UI",sans-serif;color:#1B2230}
+  .ver span{font-size:11px;color:#8A93A5;letter-spacing:.08em}
+  .rule{height:3px;background:linear-gradient(90deg,#F5C400 0 220px,#E6E9F0 220px);border-radius:2px;margin:22px 0 24px}
+
+  /* 示意图 */
+  .hero{display:flex;align-items:center;gap:20px;background:#0E141C;border-radius:16px;padding:22px 24px;overflow:hidden}
+  .mock{position:relative;height:68px;flex:none}
+  .wcard{position:absolute;left:0;top:0;width:224px;height:68px;border-radius:14px;
+    background:linear-gradient(180deg,#FCFDFF,#F0F3F9);box-shadow:0 7px 18px rgba(0,0,0,.45)}
+  .wcard .dot{position:absolute;left:14px;top:15px;width:5px;height:5px;border-radius:50%;background:#3D6BFF}
+  .wcard .lab{position:absolute;left:24px;top:8px;font-size:9.5px;color:#5C6779}
+  .wcard .rt{position:absolute;right:14px;top:8px;font-size:9.5px;color:#5C6779}
+  .wcard .num{position:absolute;left:13px;top:23px;font:700 27px/31px "Bahnschrift",sans-serif;color:#1B2230}
+  .wcard .bar{position:absolute;left:14px;right:14px;bottom:6px;height:3px;border-radius:2px;background:#D9DFEA;overflow:hidden}
+  .wcard .bar i{position:absolute;inset:0;width:64%;background:linear-gradient(90deg,#2F5DFF,#7FA6FF)}
+  .wdrawer{position:absolute;left:224px;top:0;width:416px;height:68px;border-radius:0 14px 14px 0;background:#F5C400;
+    padding:0 22px;display:flex;flex-direction:column;justify-content:center;gap:7px;box-shadow:0 7px 18px rgba(0,0,0,.4)}
+  .wdrawer h3{margin:0;font-size:17px;line-height:1.2;color:#33260A;letter-spacing:-.01em}
+  .wdrawer .meta{display:flex;align-items:center;gap:9px;font-size:13px;line-height:1.2;color:#5C4400;white-space:nowrap}
+  .wdrawer .meta .t{font:600 13px/1.2 "Bahnschrift",sans-serif}
+  .wdrawer .meta i{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.45}
+  .wdrawer .meta .lock{margin-left:2px;font:600 13px/1.2 "Bahnschrift",sans-serif;color:#8A3D00}
+  .hero .cap{color:#CBD4E2;font-size:12.5px;line-height:1.95;margin-left:6px}
+  .hero .cap b{color:#fff;font-weight:600}
+
+  /* 三分钟上手 */
+  .fast{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0 4px}
+  .fast div{background:#fff;border-radius:12px;padding:14px 16px}
+  .fast b{display:block;font:700 12px/1 "Bahnschrift",sans-serif;color:#D7A400;letter-spacing:.12em;margin-bottom:6px}
+  .fast strong{display:block;font-size:14px;margin-bottom:4px}
+  .fast span{font-size:12px;color:#5C6779;line-height:1.6}
+
+  /* 分节 */
+  .sec{margin-top:26px}
+  .sec h2{display:flex;align-items:center;gap:10px;margin:0 0 12px;font-size:18px;letter-spacing:-.01em}
+  .sec h2 .n{flex:none;width:28px;height:28px;border-radius:9px;background:#1B2230;color:#F5C400;
+    font:700 12.5px/28px "Bahnschrift",sans-serif;text-align:center}
+  .steps{margin:0;padding:0;list-style:none;counter-reset:step}
+  .steps li{position:relative;padding-left:30px;margin:0 0 11px;font-size:13.8px;line-height:1.8;color:#3C4657}
+  .steps li::before{counter-increment:step;content:counter(step);position:absolute;left:0;top:3px;width:19px;height:19px;
+    border-radius:50%;background:#FFF3C4;color:#7A5A00;font:700 11px/19px "Bahnschrift",sans-serif;text-align:center}
+  .steps li b{color:#1B2230;font-weight:600}
+  .plain{margin:0;padding:0;list-style:none}
+  .plain li{position:relative;padding-left:16px;margin:0 0 10px;font-size:13.8px;line-height:1.8;color:#3C4657}
+  .plain li::before{content:"";position:absolute;left:2px;top:10px;width:5px;height:5px;border-radius:50%;background:#D7A400}
+  .plain li b{color:#1B2230;font-weight:600}
+
+  .tip{margin:10px 0 0;padding:11px 14px;background:#FFF8E1;border-left:3px solid #F5C400;border-radius:0 8px 8px 0;
+    font-size:12.8px;line-height:1.75;color:#6B5A20}
+  .tip b{color:#4A3D12}
+  .tip code{font-family:"Bahnschrift",monospace;font-size:12px;color:#4A3D12;background:#FFF1BF;padding:1px 5px;border-radius:4px}
+
+  .foot{margin-top:26px;padding-top:16px;border-top:1px solid #E3E7EF;display:flex;justify-content:space-between;
+    gap:20px;color:#8A93A5;font-size:11.5px;line-height:1.7}
+  .foot b{color:#5C6779;font-weight:600}
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <div class="ver"><b>v2.9.9</b><span>使用说明 · 2026-11</span></div>
+  <div class="kicker">WORK COUNTDOWN · 使用说明</div>
+  <h1>上班工具箱</h1>
+  <p class="sub">贴屏幕边上的小卡片，一眼看到今天还剩多久。<br>下面按「装好之后怎么用」的顺序写，跟着做即可。</p>
+  <div class="rule"></div>
+
+  <div class="hero">
+    <div class="mock" style="width:640px">
+      <div class="wcard">
+        <div class="dot"></div><div class="lab">距离下班</div><div class="rt">下班 20:04</div>
+        <div class="num">02:07:32</div>
+        <div class="bar"><i></i></div>
+      </div>
+      <div class="wdrawer">
+        <h3>产品评审会 · Q4 排期</h3>
+        <div class="meta"><span class="t">16:45 – 17:15</span><i></i><span>3F 云杉会议室</span><i></i><span class="lock">还有 10 分钟</span></div>
+      </div>
+    </div>
+    <div class="cap">左边：平时看到的<b>小卡片</b>。<br>右边：开会前滑出的<b>黄色小卡</b>，<br>写着标题、时间、地点。</div>
+  </div>
+
+  <div class="fast">
+    <div><b>STEP 1</b><strong>双击安装</strong><span>运行「安装.cmd」，桌面出现「上班工具箱」图标。</span></div>
+    <div><b>STEP 2</b><strong>填三个信息</strong><span>第一次打开问你上班时间、是否弹性、午休多久，填完点「开始用」。</span></div>
+    <div><b>STEP 3</b><strong>瞄一眼就行</strong><span>卡片贴在屏幕右边，数字就是距离下班的时间，不用管它。</span></div>
+  </div>
+
+  <section class="sec">
+    <h2><span class="n">01</span>每天怎么看</h2>
+    <ul class="plain">
+      <li>大数字是<b>距离下班还有多久</b>；最后 1 小时会精确到零点几秒，看着更有盼头。</li>
+      <li>下面那行跟着一天走：<b>距午休 → 午休中 → 距晚休 → 晚休中 → 马上下班</b>。</li>
+      <li>右上是今天预计的下班时间，底部进度条是今天已经过去的部分。</li>
+      <li>卡片自动贴边，不挡东西；鼠标放上去才展开，<b>20 秒没动会自己收起来</b>（时长可调）。</li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2><span class="n">02</span>展开卡片看细节</h2>
+    <ul class="plain">
+      <li><b>单击</b>小卡片展开：大号倒计时、今天进度、下一段日程、今天还剩几个日程。</li>
+      <li>再点右上角箭头收起；卡片上按住能拖动，松手会自动贴到屏幕左边或右边。</li>
+      <li><b>右键</b>卡片是菜单：设置、预览提醒动画、窗口置顶、开机自动启动、导出 / 导入配置、退出。</li>
+    </ul>
+    <div class="tip"><b>小提示：</b>只想看倒计时、不想被展开打扰，把「自动收起」调短一点就行（右键 → 设置 → 外观）。</div>
+  </section>
+
+  <section class="sec">
+    <h2><span class="n">03</span>到点提醒长什么样</h2>
+    <ul class="steps">
+      <li>会议或日程快到点时，小卡片<b>先展开</b>，让你知道有安排。</li>
+      <li>接着一条<b>黄黑警示带横贯屏幕</b>滚过去；这段时间卡片不会被色块盖住。</li>
+      <li>警示带走完，卡片收回，旁边<b>滑出一张黄色小卡</b>，写着标题、时间段、地点和「还有多久」。</li>
+      <li>这张黄色小卡会<b>一直留到日程结束</b>，点一下就能收回，不挡事。</li>
+    </ul>
+    <div class="tip">想安静一点：右键 → 设置 → 提醒，把提醒范围改成<b>「只在卡片里」</b>，就不会全屏滚动了；也可以换成长条以外的样式。</div>
+  </section>
+
+  <section class="sec">
+    <h2><span class="n">04</span>加日程、改日程</h2>
+    <ul class="plain">
+      <li>右键 → 设置 → <b>提醒</b> 页，在「日程与提醒」里选日期、时间、时长、地点，点「添加日程」。</li>
+      <li>懒得一个个选，点<b>「快速填入」</b>：3 / 5 / 15 / 30 分钟后、1 小时后。</li>
+      <li>午休、晚休、下班是<b>内置的三条固定日程</b>，在「固定日程」页可以改时间、换配色、设成每天或单双周，还能设截止日期。</li>
+      <li>每条日程都能单独设「开始提醒」和「结束也提醒」；不要了就暂停它。</li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2><span class="n">05</span>接飞书打卡、同步会议（可选）</h2>
+    <ul class="steps">
+      <li>先在本机装好 lark-cli 并完成登录（命令行执行 <code>lark-cli auth login</code>）。</li>
+      <li>右键 → 设置 → 提醒 → 飞书对话，点<b>「自动找」</b>，选中你和考勤机器人的会话。</li>
+      <li>之后卡片会读你的真实打卡：迟到了会标出来，到下班点还没打卡会一直提醒，打完卡自动消失。</li>
+      <li>日历里的会议也会自动同步进来，快到点按上面的方式提醒你。</li>
+    </ul>
+    <div class="tip">不接飞书也能照常用，只是按你填的班次时间倒计时。</div>
+  </section>
+
+  <section class="sec">
+    <h2><span class="n">06</span>换个样子</h2>
+    <ul class="plain">
+      <li>右键 → 设置 → 外观：<b>39 套配色</b>，点一下立刻换。</li>
+      <li>想自己配：点<b>「＋ 新建主题」</b>，挑一个背景色、一个进度条色，文字颜色会自动配好。</li>
+      <li>同一页还能调卡片透明度、要不要始终置顶、要不要加背景光效（默认不加）。</li>
+    </ul>
+  </section>
+
+  <section class="sec">
+    <h2><span class="n">07</span>常见问题</h2>
+    <ul class="plain">
+      <li><b>卡片找不到了：</b>看屏幕右下角的托盘图标，单击就能叫回来。</li>
+      <li><b>换电脑不想重填：</b>右键菜单里「导出配置…」，在新电脑上「导入配置…」即可。</li>
+      <li><b>提醒停了：</b>先看「固定日程」里那条是不是被暂停了；再看「提醒」页的范围是不是设成了「只在卡片里」。</li>
+      <li><b>想换个地方放：</b>直接拖到想要的边，或者拖到中间自由摆放，松手生效。</li>
+      <li><b>出门带走：</b>把程序文件放到 U 盘任意文件夹，旁边建一个空的 <code>portable.txt</code>，设置就会存在同目录。</li>
+      <li><b>真出问题了：</b>右键 → 退出，重新打开一次；还不行就找我看日志。</li>
+    </ul>
+  </section>
+
+  <div class="foot">
+    <div><b>上班工具箱 v2.9.9</b> · 双击桌面图标即用，不需要装额外运行库</div>
+    <div>想改的地方几乎都在「右键 → 设置」里</div>
+  </div>
+
+</div>
+</body>
+</html>

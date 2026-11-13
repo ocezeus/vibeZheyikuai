@@ -1,0 +1,59 @@
+# 改动前基线证据（2026-11-13 15:44–15:50 抓取）
+
+被测版本：正在运行的 v3.3.2（PID 13800，`%LOCALAPPDATA%\Programs\WorkCountdown\WorkCountdown.exe`，FileVersion 3.3.2.0）
++ 改动前的 `test\NoteShot.exe`（2026-11-13 14:37 编译，早于 Lead 本轮改动）。
+
+## 1. 小纸条面板截图（NoteShot.exe，深色 huang-liuli，150% DPI）
+
+| 文件 | 尺寸 | 状态 |
+| --- | --- | --- |
+| `test/visual/verify-before/note-drawer/note-drawer-contacts.png` | 588×186 | 抽屉式：3 个联系人占 4 格中的 3 格，**没有滚动条 / 翻页提示** |
+| `test/visual/verify-before/note-drawer/note-drawer-chat.png` | 588×423 | 抽屉式聊天 |
+| `test/visual/verify-before/note-drawer/note-drawer-history.png` | 588×714 | 抽屉式历史 |
+| `test/visual/verify-before/note-drawer/note-drawer-add.png` | 588×423 | 添加页（标题「＋ 添加联系人」、字段「对方的 5 位 ID」） |
+| `test/visual/verify-before/note-columns/note-columns-contacts.png` | 705×447 | 双栏：3 个竖排联系人 + 虚线「＋ 新联系人」，**没有滚动条 / 右键删除** |
+
+## 2. 边框粗细（改动前实测）
+
+方法：在 `x = 面板宽/2` 处从 y=0 往下扫，统计「与内部底色色差 > 12」的连续像素行数。
+参考像素（note-drawer-chat.png）：y=0,1 = RGB(101,86,14)（边框），y=2 起 = RGB(38,33,12)（内部）。
+
+| 位置 | 改动前像素带 |
+| --- | --- |
+| 顶部 | **2 行** |
+| 底部 | **2 行** |
+| 边框—内部亮度差 | 101 − 39 = 62 |
+
+改动前代码：`float bw = Math.Max(1f, scale);`（1 DIP）。
+
+## 3. 大卡片右上角 5 个图标（改动前后要对比的基线）
+
+截图：`test/visual/verify-before/card-expanded.png`（`tools\shot.ps1 -Expand` 抓正在运行的 v3.3.2，420×456，scale=1.5；工资面板展开状态）。
+
+5 个图标命中矩形都是 24×24 DIP（36×36 px @1.5），但**可见图形**大小差很多：
+
+| 图标 | 命中矩形 | 可见包围盒 | 中心 |
+| --- | --- | --- | --- |
+| ✈ plane | 36×36 @ (201,15) | **26×25** | (217.5, 33) |
+| ¥ salary | 36×36 @ (243,15) | **13×17** | (260, 31) |
+| ⚙ gear | 36×36 @ (285,15) | **20×18** | (302.5, 32.5) |
+| ↻ refresh | 36×36 @ (327,15) | **19×19** | (345, 32) |
+| › chevron | 36×36 @ (369,15) | **11×18** | (387, 32.5) |
+
+基线结论：宽度极差 **15 px**（26−11）、高度极差 **8 px**（25−17）→ 这就是用户说的「几个按钮大小和高度不一致」。
+
+## 4. 改动前源码事实（滚动 / 右键删除还不存在）
+
+`src/NotePanelForm.cs`（改动前版本）：
+- 每屏固定最多画 `(columns ? 6 : 4)` 个联系人：`if (idx >= (columns ? 6 : 4)) break;`，**没有 `ContactScroll` / `VisibleContactCount` / `ScrollContacts`**。
+- 命中区枚举只有 `None, Contact, Input, AddContact, Close, IdField, RemarkField, Probe, ConfirmAdd, Send`，**没有 `Delete`**，没有 `DeleteId` / `ShowDelete` / `HideDelete` / `DeleteConversation`。
+- 边框 1 DIP：`float bw = Math.Max(1f, scale);`。
+
+`src/Models.cs`（改动前版本）：
+- 只有 `NoteSettings.AddContact(string contactId, string remark)`，且 `if (!ValidId(contactId)) return false;` → **任意 5 位字符加不进去**；没有 `ValidCode` / `IsRoom` / `AddConversation`。
+- `NoteRelay` 只有收件箱主题 `xzt/v1/msg/<id>` 和 presence，没有 `xzt/v1/room/*`。
+
+## 5. 本轮抓不到的基线（如实说明）
+
+- `tools\shot.ps1 -Expand` 抓大卡片可以（见上）；但「8 个联系人时能不能滚动 / 右键出不出删除」这种交互基线没法从旧 exe 直接出图（`NoteShot.exe` 写死 3 个联系人），只能以源码事实（第 4 节）+ 改动后探针断言对比。
+- 真鼠标右键基线在锁屏会话下不可靠，统一用离屏渲染 + 反射调用来验收。

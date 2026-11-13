@@ -8,7 +8,7 @@ using WorkCountdown;
 // 独立验收：主题色卡占比、浅色主题提醒动画不留亮边、休息提醒触发、日程快捷时间。
 class Check
 {
-    static BindingFlags F = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Static;
+    static BindingFlags F = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Public;
     static int pass, fail;
 
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
@@ -28,9 +28,16 @@ class Check
 
     static object Call(object o, string name, params object[] args)
     {
-        var m = o.GetType().GetMethod(name, F);
-        if (m == null) throw new Exception("no method " + name);
-        return m.Invoke(o, args);
+        MethodInfo found = null;
+        foreach (var mi in o.GetType().GetMethods(F))
+        {
+            if (mi.Name != name) continue;
+            if (mi.GetParameters().Length != args.Length) continue;
+            found = mi;
+            break;
+        }
+        if (found == null) throw new Exception("no method " + name + "/" + args.Length);
+        return found.Invoke(o, args);
     }
 
     static void CollectQuickChips(Control root, System.Collections.Generic.List<Button> into)
@@ -55,6 +62,59 @@ class Check
         var f = o.GetType().GetField(name, F);
         if (f == null) throw new Exception("no field " + name);
         return f.GetValue(o);
+    }
+
+    static TextBox FindTextBox(Control root)
+    {
+        if (root == null) return null;
+        foreach (Control c in root.Controls)
+        {
+            var tb = c as TextBox;
+            if (tb != null) return tb;
+            var inner = FindTextBox(c);
+            if (inner != null) return inner;
+        }
+        return null;
+    }
+
+    /// <summary>把面板离屏画到 bitmap（和 NoteShot 一样直接调 OnPaint），用于像素级验收。</summary>
+    static Bitmap RenderPanel(NotePanelForm p)
+    {
+        int w = (int)Get(p, "winWidth");
+        int h = (int)(float)Get(p, "heightNow");
+        var bmp = new Bitmap(Math.Max(1, w), Math.Max(1, h));
+        bmp.SetResolution(144, 144);
+        using (var g = Graphics.FromImage(bmp))
+            Call(p, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, bmp.Width, bmp.Height)));
+        return bmp;
+    }
+
+    /// <summary>把任意分层窗（卡片 / 气泡）离屏画到 bitmap。</summary>
+    static Bitmap RenderForm(Form form, int w, int h)
+    {
+        var bmp = new Bitmap(Math.Max(1, w), Math.Max(1, h));
+        bmp.SetResolution(144, 144);
+        using (var g = Graphics.FromImage(bmp))
+            Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, bmp.Width, bmp.Height)));
+        return bmp;
+    }
+
+    /// <summary>
+    /// 统计矩形里的「硬不透明」（a ≥ 250）和「半透明」（120 ≤ a &lt; 250）像素数：
+    /// 实心背景整块是 255，磨砂玻璃（Frost）底色是半透明，用来判断背景风格真的走了不同的绘制。
+    /// </summary>
+    static void AlphaSpread(Bitmap bmp, Rectangle r, out int soft, out int hard)
+    {
+        soft = hard = 0;
+        int top = Math.Max(0, r.Top), bottom = Math.Min(bmp.Height, r.Bottom);
+        int left = Math.Max(0, r.Left), right = Math.Min(bmp.Width, r.Right);
+        for (int y = top; y < bottom; y++)
+            for (int x = left; x < right; x++)
+            {
+                int a = bmp.GetPixel(x, y).A;
+                if (a >= 250) hard++;
+                else if (a >= 120) soft++;
+            }
     }
 
     static int Brightness(Color c) { return Math.Max(c.R, Math.Max(c.G, c.B)); }
@@ -87,6 +147,7 @@ class Check
     {
         // 探针只读配置，绝不回写用户自己的设置
         Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
+        Environment.SetEnvironmentVariable("WC_NO_RELAY", "1");
         try
         {
             return RunAll();
@@ -561,6 +622,28 @@ class Check
             Ok("扩散设置能存能读",
                 back.ui.reminderSpread == "screen" && back.ui.reminderSpreadStyle == "bar",
                 back.ui.reminderSpread + " / " + back.ui.reminderSpreadStyle);
+
+            // 警戒带（tape）是第三种扩散样式：要能存能读，也不能被 Normalize 打回 circle
+            var tape = new Settings();
+            tape.ui.reminderSpread = "screen";
+            tape.ui.reminderSpreadStyle = "tape";
+            var tapeBack = ser.Deserialize<Settings>(ser.Serialize(tape));
+            tapeBack.Normalize();
+            Ok("警戒带样式能存能读",
+                tapeBack.ui.reminderSpread == "screen" && tapeBack.ui.reminderSpreadStyle == "tape",
+                tapeBack.ui.reminderSpread + " / " + tapeBack.ui.reminderSpreadStyle);
+
+            var tapeBad = new Settings();
+            tapeBad.ui.reminderSpreadStyle = "tape ";
+            tapeBad.Normalize();
+            Ok("警戒带只认精确值（多余空格回落圆形）",
+                tapeBad.ui.reminderSpreadStyle == "circle", tapeBad.ui.reminderSpreadStyle);
+
+            Ok("警戒带几何：60 DIP、斜纹 8 DIP，按 layout 缩放",
+                ScreenReminderForm.TapeBandHeight(1f) == 60 && ScreenReminderForm.TapeBandHeight(2f) == 120 &&
+                ScreenReminderForm.TapeRailHeight(1f) == 8,
+                ScreenReminderForm.TapeBandHeight(1f) + " / " + ScreenReminderForm.TapeBandHeight(2f) +
+                " / " + ScreenReminderForm.TapeRailHeight(1f));
         }
 
         // ---- 5e. 背景光效设置 + 自建主题的背景/进度条分开 ----
@@ -1043,8 +1126,9 @@ class Check
                     string.Join("/", new string[] { cmbRepeat.Items[0].ToString(), cmbRepeat.Items[1].ToString(), cmbRepeat.Items[2].ToString() }));
 
                 var tabs = (TabControl)Get(dlg, "tabs");
-                Ok("四个页签", tabs.TabPages.Count == 4,
-                    tabs.TabPages[0].Text + "/" + tabs.TabPages[1].Text + "/" + tabs.TabPages[2].Text + "/" + tabs.TabPages[3].Text);
+                Ok("七个页签", tabs.TabPages.Count == 7,
+                    string.Join("/", new string[] { tabs.TabPages[0].Text, tabs.TabPages[1].Text,
+                        tabs.TabPages[2].Text, tabs.TabPages[3].Text, tabs.TabPages[4].Text, tabs.TabPages[5].Text, tabs.TabPages[6].Text }));
 
                 // 「会议室」改名「位置」
                 bool hasPlace = false, hasRoom = false;
@@ -1546,6 +1630,1794 @@ class Check
                 Ok("流光淡出已经接进绘制（尽头不再有亮带）", mid - end >= 8,
                     "中段最亮 " + mid + " / 尽头 " + end);
             }
+
+        // ---- 5f. 警戒带之后的抽屉卡（方案 A：实心黄 + 同色系三阶文字） ----
+        {
+            Ok("抽屉卡几何：440×68、压进卡片 24、内容宽 382",
+                DrawerForm.WidthDip == 440 && DrawerForm.HeightDip == 68
+                && DrawerForm.OverlapDip == 24 && DrawerForm.GapDip == 12 && DrawerForm.FarPadDip == 22
+                && DrawerForm.WidthDip - DrawerForm.OverlapDip - DrawerForm.GapDip - DrawerForm.FarPadDip == 382,
+                DrawerForm.WidthDip + " x " + DrawerForm.HeightDip + "，内容 " +
+                (DrawerForm.WidthDip - DrawerForm.OverlapDip - DrawerForm.GapDip - DrawerForm.FarPadDip));
+
+            double cTitle = Contrast(DrawerForm.InkColor, DrawerForm.TapeColor);
+            double cMeta = Contrast(DrawerForm.Ink2Color, DrawerForm.TapeColor);
+            double cLeft = Contrast(DrawerForm.Ink3Color, DrawerForm.TapeColor);
+            Ok("抽屉卡三阶文字都在暖色系且够读",
+                cTitle >= 8.5 && cMeta >= 4.5 && cLeft >= 4.5 && cTitle > cMeta && cMeta > cLeft,
+                "标题 " + cTitle.ToString("0.0") + ":1 副行 " + cMeta.ToString("0.0") + ":1 剩余 " + cLeft.ToString("0.0") + ":1");
+            Ok("抽屉卡底色就是警示黄 #F5C400",
+                DrawerForm.TapeColor.R == 245 && DrawerForm.TapeColor.G == 196 && DrawerForm.TapeColor.B == 0,
+                fmt(DrawerForm.TapeColor));
+
+            // 滑出节奏照抄 HTML 预览：0.9s + cubic-bezier(.22,.9,.28,1)（先窜出去再落定）
+            var ease = typeof(DrawerForm).GetMethod("CssEase", F);
+            double e20 = (double)ease.Invoke(null, new object[] { 0.2 });
+            double e50 = (double)ease.Invoke(null, new object[] { 0.5 });
+            double e100 = (double)ease.Invoke(null, new object[] { 1.0 });
+            Ok("抽屉滑出 0.55s、先快后慢（和预览同一条曲线）",
+                DrawerForm.SlideMs == 550 && e20 > 0.5 && e50 > 0.85 && e100 >= 0.999,
+                "0.2->" + e20.ToString("0.000") + " 0.5->" + e50.ToString("0.000") + " 1.0->" + e100.ToString("0.000"));
+
+            var ds = new Settings();
+            ds.lark.enabled = false;
+            ds.calendarEnabled = false;
+            var dev = new ReminderEvent();
+            dev.title = "产品评审会 · Q4 排期";
+            dev.place = "3F · 云杉会议室";
+            dev.source = "lark";
+            dev.start = Reminders.FormatStart(DateTime.Now.AddMinutes(10));
+            dev.end = Reminders.FormatStart(DateTime.Now.AddMinutes(40));
+            var cardRect = new Rectangle(800, 200, 224, 68);
+            using (var d = new DrawerForm(ds, dev, cardRect, false, 1f, false, null))
+            {
+                var full = (Bitmap)Call(d, "BuildFrame", 440);
+                var center = full.GetPixel(300, 34);
+                Ok("抽屉卡画的是实心黄",
+                    center.R == 245 && center.G == 196 && center.B == 0, fmt(center));
+                Ok("抽屉卡外角是圆的（左上角透明）", full.GetPixel(1, 1).A < 40,
+                    "alpha=" + full.GetPixel(1, 1).A);
+
+                int dark = 0;
+                for (int y = 6; y < 62; y++)
+                    for (int x = 24; x < 436; x++)
+                    {
+                        var px = full.GetPixel(x, y);
+                        if (px.R < 110 && px.G < 95) dark++;
+                    }
+                Ok("抽屉卡有标题和副行（有字，没留白）", dark > 300, dark + " 个深色像素");
+
+                var thin = (Bitmap)Call(d, "BuildFrame", 20);
+                int leak = 0;
+                for (int y = 0; y < thin.Height; y++)
+                    for (int x = 0; x < thin.Width; x++)
+                    {
+                        var px = thin.GetPixel(x, y);
+                        if (px.A > 40 && px.R < 110 && px.G < 95) leak++;
+                    }
+                Ok("抽屉卡没拉够时不提前露内容", leak == 0, leak + " 个提前露出的深色像素");
+            }
+
+            // 警戒带模式下卡片只画普通卡片：不做色块覆盖
+            Func<bool, Color> cardShot = delegate(bool tape)
+            {
+                var st = new Settings();
+                st.lark.enabled = false;
+                st.calendarEnabled = false;
+                st.ui.edge = "free";
+                st.ui.theme = "lv-kongque";
+                st.ui.reminderSpread = "screen";
+                st.ui.reminderSpreadStyle = "tape";
+                st.ui.cardGlow = "none";
+                using (var form = new WidgetForm(new SettingsStore(), st))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "collapsed", false);
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(420, 282);
+                    Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                    Set(form, "remindEvent", dev);
+                    Set(form, "reminding", true);
+                    Set(form, "tapeActive", tape);
+                    Set(form, "remindAt", DateTime.Now.AddMilliseconds(-900));
+                    Call(form, "Recompute");
+                    using (var bmp = new Bitmap(420, 282))
+                    {
+                        bmp.SetResolution(144, 144);
+                        using (var g = Graphics.FromImage(bmp))
+                            Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                        Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                        return bmp.GetPixel(210, 140);
+                    }
+                }
+            };
+            Color tapeCard = cardShot(true);
+            Color plainTape = cardShot(false);
+            Color a, b, ink;
+            ReminderStyles.Resolve(ReminderStyles.Follow, Themes.Get("lv-kongque"), out a, out b, out ink);
+            Ok("警戒带模式下卡片不做覆盖", Distance(tapeCard, a) > 60,
+                "卡片中心 " + fmt(tapeCard) + " / 提醒色 " + fmt(a));
+            Ok("非警戒带仍然做覆盖（对照）", Distance(plainTape, a) < 60,
+                "卡片中心 " + fmt(plainTape) + " / 提醒色 " + fmt(a));
+
+            // 提醒触发时先展开再放全屏：StartReminder 之后立刻就是「展开中 + 等全屏」
+            var fs = new Settings();
+            fs.lark.enabled = false;
+            fs.calendarEnabled = false;
+            fs.ui.edge = "right";
+            // 警戒带现在是「飞书会议」这一类自己的样式（四类各一套）
+            fs.SetStyleOf(Reminders.KindLark, new ReminderStyleDef("screen", "tape", ReminderStyles.Follow));
+            using (var form = new WidgetForm(new SettingsStore(), fs))
+            {
+                Set(form, "scale", 1f);
+                Set(form, "collapsed", true);
+                Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                Call(form, "Recompute");
+                Call(form, "StartReminder", dev);
+                bool expanding = (bool)Get(form, "animating")
+                    && (int)Get(form, "animToW") == (int)Call(form, "S", 280f);
+                bool waiting = (int)Get(form, "tapePhase") == 1 && (bool)Get(form, "tapeActive");
+                Ok("提醒触发时先把小卡展开，再等全屏", expanding && waiting,
+                    "animating=" + Get(form, "animating") + " 目标宽=" + Get(form, "animToW") +
+                    " phase=" + Get(form, "tapePhase"));
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+        // ---- 5f2. 四类日程各自的样式真的进了渲染（ScreenReminderForm 里取到的值） ----
+        {
+            var st = new Settings();
+            st.lark.enabled = false;
+            st.calendarEnabled = false;
+            st.Normalize();
+            st.SetStyleOf(Reminders.KindOutlook, new ReminderStyleDef("screen", "tape", "lv-kongque"));
+            st.SetStyleOf(Reminders.KindLark, new ReminderStyleDef("screen", "bar", "lan-yuming"));
+            st.SetStyleOf(Reminders.KindLocal, new ReminderStyleDef("card", "circle", ReminderStyles.Follow));
+            st.SetStyleOf(Reminders.KindFixed, new ReminderStyleDef("card", "circle", ReminderStyles.Follow));
+
+            var theme = Themes.Get("midnight");
+            var scr = Screen.PrimaryScreen.Bounds;
+            var tip = new Point(scr.Left + 20, scr.Top + 20);
+
+            Func<string, string, ReminderEvent> mk = delegate(string source, string title)
+            {
+                var e = new ReminderEvent();
+                e.title = title;
+                e.source = source;
+                e.start = Reminders.FormatStart(DateTime.Now.AddMinutes(10));
+                e.end = Reminders.FormatStart(DateTime.Now.AddMinutes(40));
+                return e;
+            };
+
+            Color ea, eb, eink;
+            ReminderStyles.Resolve("lv-kongque", theme, out ea, out eb, out eink);
+            using (var f = new ScreenReminderForm(st, mk("outlook", "Outlook 的会"), theme, scr, tip, null))
+            {
+                Ok("Outlook 类走它自己的警戒带", (bool)Get(f, "tape") && !(bool)Get(f, "bar"),
+                    "tape=" + Get(f, "tape") + " bar=" + Get(f, "bar"));
+                Ok("Outlook 类用孔雀配色", Distance((Color)Get(f, "a"), ea) < 4 && Distance((Color)Get(f, "b"), eb) < 4,
+                    fmt((Color)Get(f, "a")) + " / 期望 " + fmt(ea));
+                Ok("Outlook 的类型标签", (string)Get(f, "kind") == "Outlook 日程", (string)Get(f, "kind"));
+            }
+
+            ReminderStyles.Resolve("lan-yuming", theme, out ea, out eb, out eink);
+            using (var f = new ScreenReminderForm(st, mk("lark", "飞书的会"), theme, scr, tip, null))
+            {
+                Ok("飞书类走进度条拉伸", (bool)Get(f, "bar") && !(bool)Get(f, "tape"),
+                    "bar=" + Get(f, "bar") + " tape=" + Get(f, "tape"));
+                Ok("飞书类用玉茗配色", Distance((Color)Get(f, "a"), ea) < 4, fmt((Color)Get(f, "a")) + " / 期望 " + fmt(ea));
+            }
+
+            ReminderStyles.Resolve(ReminderStyles.Follow, theme, out ea, out eb, out eink);
+            using (var f = new ScreenReminderForm(st, mk("local", "普通日程"), theme, scr, tip, null))
+            {
+                Ok("普通日程走圆形柔光、跟随主题", !(bool)Get(f, "bar") && !(bool)Get(f, "tape")
+                    && Distance((Color)Get(f, "a"), ea) < 4,
+                    "bar=" + Get(f, "bar") + " tape=" + Get(f, "tape") + " " + fmt((Color)Get(f, "a")));
+            }
+
+            // 固定日程：每条自己的 styleId 优先于「固定日程」类的配色（旧规则不回退）
+            var lunch = st.ScheduleOf("lunch");
+            lunch.styleId = "lv-kongque";
+            var fixEv = mk("break", "午休");
+            fixEv.id = "fix:" + lunch.id;
+            ReminderStyles.Resolve("lv-kongque", theme, out ea, out eb, out eink);
+            using (var f = new ScreenReminderForm(st, fixEv, theme, scr, tip, null))
+            {
+                Ok("固定日程的自己配色优先于类别配色", Distance((Color)Get(f, "a"), ea) < 4,
+                    fmt((Color)Get(f, "a")) + " / 期望 " + fmt(ea));
+            }
+        }
+
+        // ---- 5g. 卡片第二行：午休没配好，也不能把晚休一起吞掉 ----
+        {
+            Func<Settings, DateTime, CardStatus> build = delegate(Settings st2, DateTime at)
+            {
+                var snap = new AttendanceSnapshot();
+                snap.ok = true;
+                snap.clockIn = at.Date.AddHours(9);
+                return StatusBuilder.Build(st2, snap, at, Themes.Get("ivory"));
+            };
+
+            // 内置午休只填了开始时间、没有结束时间（用户把午休改成 17:00 就是这个状态）
+            var broken = new Settings();
+            broken.lark.enabled = false;
+            broken.calendarEnabled = false;
+            broken.NormalizeSchedules();
+            broken.lunchStart = "17:00";
+            broken.lunchEnd = "17:00";
+            broken.ScheduleOf("lunch").start = "17:00";
+            broken.ScheduleOf("lunch").end = "";
+            broken.eveningEnabled = true;
+            broken.eveningStart = "17:50";
+            broken.eveningEnd = "19:00";
+            broken.ScheduleOf("evening").start = "17:50";
+            broken.ScheduleOf("evening").end = "19:00";
+            var nowAt = DateTime.Today.AddHours(11).AddMinutes(16);
+            var stb = build(broken, nowAt);
+            Ok("午休没配好时晚休照样显示",
+                stb.lunch == LunchState.EveningBefore && stb.lunchLabel == "距晚休",
+                stb.lunch + " / " + stb.lunchLabel + " " + stb.lunchValue);
+
+            // 老版本把午休时段建成普通日程：内置午休坏掉时拿它顶上
+            var withCustom = new Settings();
+            withCustom.lark.enabled = false;
+            withCustom.calendarEnabled = false;
+            withCustom.NormalizeSchedules();
+            withCustom.lunchStart = "17:00";
+            withCustom.lunchEnd = "17:00";
+            withCustom.ScheduleOf("lunch").start = "17:00";
+            withCustom.ScheduleOf("lunch").end = "";
+            withCustom.schedules.Add(FixedSchedule.Make("c-lunch", "custom", "午休", "11:50", "13:30", "theme"));
+            var stc = build(withCustom, nowAt);
+            Ok("午休没配好时用午休时段的普通日程顶上",
+                stc.lunch == LunchState.Before && stc.lunchLabel == "距午休" && stc.lunchValue == "34m",
+                stc.lunch + " / " + stc.lunchLabel + " " + stc.lunchValue);
+
+            // 正常配置下还是「距午休」
+            var normal = new Settings();
+            normal.lark.enabled = false;
+            normal.calendarEnabled = false;
+            normal.NormalizeSchedules();
+            normal.lunchStart = "11:50";
+            normal.lunchEnd = "13:30";
+            normal.ScheduleOf("lunch").start = "11:50";
+            normal.ScheduleOf("lunch").end = "13:30";
+            var stn = build(normal, nowAt);
+            Ok("午休正常时显示距午休",
+                stn.lunch == LunchState.Before && stn.lunchLabel == "距午休" && stn.lunchValue == "34m",
+                stn.lunch + " / " + stn.lunchLabel + " " + stn.lunchValue);
+        }
+
+        // ---- 5h. 进度条外发光的颜色跟着条子走（最后半小时条子是彩虹，光也得是） ----
+        {
+            var gs = new Settings();
+            gs.lark.enabled = false;
+            gs.calendarEnabled = false;
+            gs.ui.edge = "free";
+            gs.ui.theme = "lv-kongque";
+            gs.ui.cardGlow = "none";
+            gs.ui.reducedMotion = true;
+            using (var form = new WidgetForm(new SettingsStore(), gs))
+            {
+                Set(form, "scale", 1.5f);
+                Set(form, "collapsed", false);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                Call(form, "Recompute");
+                var st2 = Get(form, "status");
+                st2.GetType().GetProperty("progress").SetValue(st2, 0.55, null);
+                st2.GetType().GetProperty("targetIso").SetValue(
+                    st2, DateTime.Now.AddMinutes(10).ToString("yyyy-MM-ddTHH:mm:ss"), null);
+                using (var bmp = new Bitmap(420, 282))
+                {
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                    int barY = (int)Call(form, "S", 102f);
+                    int barH = (int)Call(form, "S", 4f);
+                    Color barPx = bmp.GetPixel(200, barY + barH / 2);
+                    Color haloPx = bmp.GetPixel(200, Math.Max(0, barY - 4));
+                    Color accent = Themes.Get("lv-kongque").accent;
+                    Ok("进度条外发光的颜色跟着条子走",
+                        Distance(haloPx, barPx) < Distance(haloPx, accent),
+                        "光 " + fmt(haloPx) + " / 条 " + fmt(barPx) + " / 主题色 " + fmt(accent));
+                }
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+        // ---- 5i. 右键胶囊菜单：几何、主题配色、原地长开 ----
+        {
+            // v3.6.0：菜单从 4 颗加到 6 颗（多了「预览通知」「检查更新」），列高 = 6×40 + 5×8 = 280
+            Ok("胶囊几何：6 颗 124×40、间距 8、列高 280、长开 246",
+                BubbleMenuForm.PillWDip == 124 && BubbleMenuForm.PillHDip == 40
+                && BubbleMenuForm.PillGapDip == 8 && BubbleMenuForm.PillRadiusDip == 20
+                && BubbleMenuForm.Labels.Length == 6 && BubbleMenuForm.ColumnHDip == 280
+                && BubbleMenuForm.PanelWDip == 246
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Theme) == 168
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Clock) == 130
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Schedule) == 222
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Preview) == 208
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Update) == 216
+                && BubbleMenuForm.ItemHDip(BubbleAction.Theme) == 208
+                && BubbleMenuForm.ItemHDip(BubbleAction.Clock) == 170
+                && BubbleMenuForm.ItemHDip(BubbleAction.Schedule) == 262
+                && BubbleMenuForm.ItemHDip(BubbleAction.Preview) == 248
+                && BubbleMenuForm.ItemHDip(BubbleAction.Update) == 256,
+                BubbleMenuForm.PillWDip + "x" + BubbleMenuForm.PillHDip + " 列高 " + BubbleMenuForm.ColumnHDip
+                + " 长开 168/130/222/208/216（+40 头 = 208/170/262/248/256）");
+
+            var bs = new Settings();
+            bs.lark.enabled = false;
+            bs.calendarEnabled = false;
+            bs.ui.theme = "midnight";
+            bs.ui.alwaysOnTop = true;
+            var card = new Rectangle(0, 300, 224, 68);
+            using (var m = new BubbleMenuForm(bs, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                float sc = (float)Get(m, "scale");
+                Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                var rects = (Rectangle[])Get(m, "pillRects");
+                Ok("六颗胶囊同宽同高、竖排等距",
+                    rects.Length == 6 && rects[0].Width == s(124) && rects[0].Height == s(40)
+                    && rects[3].Width == s(124) && rects[3].Height == s(40)
+                    && rects[1].Top - rects[0].Top == s(48) && rects[5].Top - rects[4].Top == s(48)
+                    && rects[5].Bottom <= m.Height,
+                    rects.Length + " 颗，第一颗 " + rects[0].Width + "x" + rects[0].Height + "，末颗底边 " + rects[5].Bottom);
+                Ok("卡片贴左时胶囊开在右边", (bool)Get(m, "toRight"), "toRight=" + Get(m, "toRight"));
+
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                using (var bmp = new Bitmap(m.Width, m.Height))
+                {
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(m, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, m.Width, m.Height)));
+                    Color center = bmp.GetPixel(rects[0].Left + rects[0].Width / 2, rects[0].Top + rects[0].Height / 2);
+                    Color corner = bmp.GetPixel(1, 1);
+                    Color round = bmp.GetPixel(rects[0].Left + 1, rects[0].Top + 1);
+                    Color bg = Themes.Get("midnight").bgTop;
+                    Ok("胶囊底色跟主题走（不是固定黑）",
+                        Distance(center, bg) < 50 && center.A > 200 && corner.A < 30 && round.A < 90,
+                        "中心 " + fmt(center) + " / 主题底 " + fmt(bg) + " / 角 a=" + corner.A);
+
+                    // 点「修改主题」：原地长开，头还在，下面出 8 个色卡
+                    Call(m, "OpenItem", 1);
+                    int extra = (int)Call(m, "S", (float)BubbleMenuForm.ExtraHDip(BubbleAction.Theme));
+                    Set(m, "animating", false);
+                    Set(m, "openExtra", (double)extra);
+                    Set(m, "openTo", (double)extra);
+                    var item = (Rectangle)Call(m, "ItemRect", 1);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(m, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, m.Width, m.Height)));
+                    Color head = bmp.GetPixel(item.Left + item.Width / 2, item.Top + s(20));
+                    Ok("点开后胶囊头还在、宽度长到 246",
+                        item.Width == s(246) && item.Height == s(208) && head.A > 200,
+                        item.Width + "x" + item.Height + " 头 a=" + head.A);
+
+                    int chips = 0;
+                    for (int y = item.Top + s(50); y < item.Top + s(112); y++)
+                        for (int x = item.Left + s(12); x < item.Right - s(12); x++)
+                        {
+                            Color px = bmp.GetPixel(x, y);
+                            if (px.A > 180 && Math.Abs(px.R - px.G) + Math.Abs(px.G - px.B) > 40) chips++;
+                        }
+                    Ok("长开的卡片里有主题色卡", chips > 30, chips + " 个有色像素");
+
+                    // 主题面板：一屏 4×3 = 12 张 + 底部「新建主题」，滚轮能往下滚
+                    int themeHits = 0, itemHits = 0;
+                    bool hasNew = false;
+                    foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
+                    {
+                        string key = (string)h.GetType().GetField("key").GetValue(h);
+                        if (key != null && key.StartsWith("theme:", StringComparison.Ordinal)) themeHits++;
+                        if (key == "newtheme") hasNew = true;
+                        itemHits++;
+                    }
+                    Ok("主题面板一屏 12 张色卡 + 新建主题",
+                        themeHits == 12 && hasNew, themeHits + " 张 / 新建=" + hasNew + " / 总命中 " + itemHits);
+
+                    var view = (Rectangle)Call(m, "ThemeView", item);
+                    int scroll0 = (int)Get(m, "themeScroll");
+                    Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0, view.Left + s(6), view.Top + s(20), -120));
+                    int scroll1 = (int)Get(m, "themeScroll");
+                    Ok("滚轮往下滚一行", scroll1 == scroll0 + s(40), scroll0 + " → " + scroll1 + "（期望 +" + s(40) + "）");
+
+                    for (int i = 0; i < 20; i++)
+                        Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0, view.Left + s(6), view.Top + s(20), -120));
+                    int scroll2 = (int)Get(m, "themeScroll");
+                    int max = (int)Call(m, "ThemeMaxScroll", view);
+                    Ok("滚到底就停住", scroll2 == max && max > 0, scroll2 + " / max " + max);
+
+                    themeHits = 0;
+                    foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
+                    {
+                        string key = (string)h.GetType().GetField("key").GetValue(h);
+                        if (key != null && key.StartsWith("theme:", StringComparison.Ordinal)) themeHits++;
+                    }
+                    // 39 套 = 9 行整 + 最后一行 3 张，滚到底看到的是 4+4+3 = 11~12 张
+                    Ok("滚过之后只留窗口里的那几张", themeHits >= 11 && themeHits <= 12, themeHits + " 张");
+
+                    // v3.6.0：第 5 颗「预览通知」——2 列 × 3 行 6 个 chip，命中区跟着绘制位置走
+                    Call(m, "OpenItem", (int)BubbleAction.Preview);
+                    int pExtra = (int)Call(m, "S", (float)BubbleMenuForm.ExtraHDip(BubbleAction.Preview));
+                    Set(m, "animating", false);
+                    Set(m, "openExtra", (double)pExtra);
+                    Set(m, "openTo", (double)pExtra);
+                    Set(m, "closeExtra", 0.0);
+                    Set(m, "closeTo", 0.0);
+                    Call(m, "LayoutWindow");
+                    var pItem = (Rectangle)Call(m, "ItemRect", (int)BubbleAction.Preview);
+                    var pChips = new Rectangle[BubbleMenuForm.PreviewKeys.Length];
+                    for (int i = 0; i < pChips.Length; i++)
+                        pChips[i] = (Rectangle)Call(m, "PreviewChipRect", pItem, i);
+                    var pKeys = new System.Collections.Generic.List<string>();
+                    foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
+                        pKeys.Add((string)h.GetType().GetField("key").GetValue(h));
+                    bool pKeyOk = pKeys.Count == 6;
+                    for (int i = 0; pKeyOk && i < 6; i++)
+                        pKeyOk = pKeys[i] == "preview:" + BubbleMenuForm.PreviewKeys[i];
+                    bool pChipOk = pItem.Width == s(246) && pItem.Height == s(40) + pExtra
+                        && pChips[0].X == pItem.X + s(12) && pChips[0].Y == pItem.Y + s(62)
+                        && pChips[0].Height == s(42)
+                        && pChips[1].Y == pChips[0].Y && pChips[1].X == pChips[0].Right + s(8)
+                        && pChips[2].X == pChips[0].X && pChips[2].Y == pChips[0].Y + s(50)
+                        && pChips[5].Y == pChips[2].Y + s(50) && pChips[5].Bottom <= pItem.Bottom;
+                    Ok("预览面板 2 列 × 3 行 6 个 chip，命中区和绘制位置一一对应",
+                        pKeyOk && pChipOk,
+                        pKeys.Count + " 个命中区 / chip0=" + pChips[0] + " chip5=" + pChips[5]);
+
+                    // v3.6.0：第 6 颗「检查更新」——Widget 推状态，胶囊里的按钮跟着变
+                    Call(m, "OpenItem", (int)BubbleAction.Update);
+                    int uExtra = (int)Call(m, "S", (float)BubbleMenuForm.ExtraHDip(BubbleAction.Update));
+                    Set(m, "animating", false);
+                    Set(m, "openExtra", (double)uExtra);
+                    Set(m, "openTo", (double)uExtra);
+                    Set(m, "closeExtra", 0.0);
+                    Set(m, "closeTo", 0.0);
+                    Call(m, "LayoutWindow");
+                    Func<string[]> uKeys = delegate
+                    {
+                        var ks = new System.Collections.Generic.List<string>();
+                        foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
+                            ks.Add((string)h.GetType().GetField("key").GetValue(h));
+                        return ks.ToArray();
+                    };
+                    bool idleHasCheck = Array.IndexOf(uKeys(), "update:check") >= 0
+                        && Array.IndexOf(uKeys(), "update:page") >= 0;
+                    m.SetUpdateState(UpdatePhase.Checking, "", "正在检查", "", 0, false);
+                    bool checking = m.CurrentUpdatePhase == UpdatePhase.Checking
+                        && Array.IndexOf(uKeys(), "update:check") < 0;
+                    m.SetUpdateState(UpdatePhase.Available, "3.6.1", "有新版本", "1. 预览通知\n2. 磨砂玻璃", 0, true);
+                    bool avail = m.CurrentUpdatePhase == UpdatePhase.Available
+                        && Array.IndexOf(uKeys(), "update:apply") >= 0;
+                    m.SetUpdateState(UpdatePhase.Downloading, "3.6.1", "", "", 42, true);
+                    bool downloading = m.CurrentUpdatePhase == UpdatePhase.Downloading
+                        && Array.IndexOf(uKeys(), "update:check") < 0 && Array.IndexOf(uKeys(), "update:apply") < 0;
+                    m.SetUpdateState(UpdatePhase.Ready, "3.6.1", "", "", 100, true);
+                    bool ready = m.CurrentUpdatePhase == UpdatePhase.Ready
+                        && Array.IndexOf(uKeys(), "update:apply") >= 0;
+                    m.SetUpdateState(UpdatePhase.UpToDate, "3.6.0", "已经是最新", "", 0, false);
+                    bool upToDate = m.CurrentUpdatePhase == UpdatePhase.UpToDate
+                        && Array.IndexOf(uKeys(), "update:check") >= 0;
+                    m.SetUpdateState(UpdatePhase.Error, "", "网络不通", "", 0, false);
+                    bool errored = m.CurrentUpdatePhase == UpdatePhase.Error
+                        && Array.IndexOf(uKeys(), "update:check") >= 0;
+                    Ok("检查更新面板：七个状态对应的按钮（检查 / 立即更新 / 链接）都对",
+                        idleHasCheck && checking && avail && downloading && ready && upToDate && errored,
+                        "idle=" + idleHasCheck + " checking=" + checking + " available=" + avail
+                        + " downloading=" + downloading + " ready=" + ready + " upToDate=" + upToDate + " error=" + errored);
+                }
+                m.CloseMenu();
+            }
+
+            // 浅色主题：胶囊也跟着变浅（主题统一）
+            var ls = new Settings();
+            ls.lark.enabled = false;
+            ls.calendarEnabled = false;
+            ls.ui.theme = "bai-yudu";
+            ls.ui.alwaysOnTop = true;
+            using (var m = new BubbleMenuForm(ls, Themes.Get("bai-yudu"), card, true, null, null, null, null, null))
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                var rects = (Rectangle[])Get(m, "pillRects");
+                using (var bmp = new Bitmap(m.Width, m.Height))
+                {
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(m, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, m.Width, m.Height)));
+                    Color center = bmp.GetPixel(rects[0].Left + rects[0].Width / 2, rects[0].Top + rects[0].Height / 2);
+                    Ok("浅色主题下胶囊也是浅色",
+                        BubbleMenuForm.Luminance(center) > 0.6 && center.A > 200,
+                        fmt(center) + " 亮度 " + BubbleMenuForm.Luminance(center).ToString("0.00"));
+                }
+                m.CloseMenu();
+            }
+
+            // v3.2：气泡改成主题色细边、去掉投影，关闭时先淡出再关窗
+            {
+                var ds = new Settings();
+                ds.lark.enabled = false;
+                ds.calendarEnabled = false;
+                ds.ui.theme = "midnight";
+                ds.ui.alwaysOnTop = true;
+                var m = new BubbleMenuForm(ds, Themes.Get("midnight"), card, true, null, null, null, null, null);
+                try
+                {
+                    Set(m, "openedAt", Environment.TickCount - 5000);
+                    float sc = (float)Get(m, "scale");
+                    Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                    var rects = (Rectangle[])Get(m, "pillRects");
+                    int cx = rects[0].Left + rects[0].Width / 2;
+                    int cy = rects[0].Top + rects[0].Height / 2;
+                    Color accent = Themes.Get("midnight").accent;
+                    Color edge, center;
+                    using (var bmp = new Bitmap(m.Width, m.Height))
+                    {
+                        using (var g = Graphics.FromImage(bmp))
+                            Call(m, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, m.Width, m.Height)));
+                        edge = bmp.GetPixel(cx, rects[0].Top);
+                        center = bmp.GetPixel(cx, cy);
+                        Color under = bmp.GetPixel(cx, Math.Min(m.Height - 1, rects[0].Bottom + s(6)));
+                        // 边线是「主题色按透明度压到底色上」的混色：比胶囊内部更偏主题色（午夜蓝 → 更蓝）
+                        Ok("气泡有一圈主题色细边",
+                            edge.A > 240 && (edge.B - edge.R) >= (center.B - center.R) + 12
+                            && Distance(edge, accent) < Distance(center, accent),
+                            "边 " + fmt(edge) + " / 内部 " + fmt(center) + " / 主题色 " + fmt(accent));
+                        Ok("气泡不再画投影", under.A < 12, "胶囊下方 6 DIP 的像素 a=" + under.A);
+                    }
+
+                    // 淡出：退场 1/4 处同一位置的透明度要明显掉下来
+                    Set(m, "closingForm", true);
+                    Set(m, "exitAt", Environment.TickCount - BubbleMenuForm.ExitMs / 4);
+                    int halfA;
+                    using (var bmp = new Bitmap(m.Width, m.Height))
+                    {
+                        using (var g = Graphics.FromImage(bmp))
+                            Call(m, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, m.Width, m.Height)));
+                        halfA = bmp.GetPixel(cx, cy).A;
+                    }
+                    Ok("收起时气泡整体淡出", halfA > 20 && halfA < center.A * 0.8,
+                        "a " + center.A + " → " + halfA);
+
+                    // 退场走完：StepAnim 自己把窗口关掉
+                    Set(m, "exitAt", Environment.TickCount - BubbleMenuForm.ExitMs - 10);
+                    Call(m, "StepAnim");
+                    Ok("淡出走完才关窗口", m.IsDisposed, "disposed=" + m.IsDisposed);
+                }
+                finally { if (!m.IsDisposed) m.Dispose(); }
+            }
+
+            // 日程提醒常驻时，点小卡要能展开大卡
+            var ws = new Settings();
+            ws.lark.enabled = false;
+            ws.calendarEnabled = false;
+            ws.ui.edge = "free";
+            using (var form = new WidgetForm(new SettingsStore(), ws))
+            {
+                Set(form, "collapsed", true);
+                Set(form, "reminding", true);
+                Set(form, "remindEvent", new ReminderEvent
+                {
+                    id = "probe-expand",
+                    title = "产品评审会",
+                    source = "local",
+                    start = Reminders.FormatStart(DateTime.Now.AddMinutes(-2)),
+                    end = Reminders.FormatStart(DateTime.Now.AddMinutes(28))
+                });
+                Call(form, "SetCollapsed", false);
+                bool animating = (bool)Get(form, "animating");
+                int toW = (int)Get(form, "animToW");
+                Ok("提醒期间点小卡能展开大卡",
+                    animating && toW == (int)Call(form, "S", 280f),
+                    "animating=" + animating + " 目标宽 " + toW);
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+        // ---- 5i2. v3.6.0 主题背景磨砂玻璃（卡片 / 纸条面板 / 胶囊气泡）----
+        {
+            // 1) 卡片：bgStyle=glass 时 Frost 画半透明底 + 噪点；solid 时整块不透明
+            Func<string, Settings> widgetSettings = delegate(string style)
+            {
+                var ws = new Settings();
+                ws.lark.enabled = false;
+                ws.calendarEnabled = false;
+                ws.ui.edge = "free";
+                ws.ui.theme = "midnight";
+                ws.ui.cardGlow = "none";
+                ws.ui.reducedMotion = true;
+                ws.ui.bgStyle = style;
+                return ws;
+            };
+            int solidSoft = 0, solidHard = 0, glassSoft = 0, glassHard = 0;
+            using (var form = new WidgetForm(new SettingsStore(), widgetSettings("solid")))
+            {
+                Set(form, "scale", 1.5f);
+                Set(form, "collapsed", false);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Call(form, "Recompute");
+                using (var bmp = RenderForm(form, 420, 282))
+                    AlphaSpread(bmp, new Rectangle(0, 0, 420, 282), out solidSoft, out solidHard);
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+            using (var form = new WidgetForm(new SettingsStore(), widgetSettings("glass")))
+            {
+                Set(form, "scale", 1.5f);
+                Set(form, "collapsed", false);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Call(form, "Recompute");
+                using (var bmp = RenderForm(form, 420, 282))
+                    AlphaSpread(bmp, new Rectangle(0, 0, 420, 282), out glassSoft, out glassHard);
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+            Ok("卡片「磨砂玻璃」背景是半透明的（实心背景整块不透明）",
+                solidHard > solidSoft * 4 && glassSoft > glassHard * 2,
+                "实心 硬/软=" + solidHard + "/" + solidSoft + "，玻璃 硬/软=" + glassHard + "/" + glassSoft);
+
+            // 2) 纸条面板：同一套 Frost，面板底色也跟着变半透明
+            var glassCard = new Rectangle(600, 200, 420, 282);
+            Func<string, Settings> noteSettings = delegate(string style)
+            {
+                var ns = new Settings();
+                ns.lark.enabled = false;
+                ns.calendarEnabled = false;
+                ns.note.style = "drawer";
+                ns.note.id = "48372";
+                ns.ui.theme = "midnight";
+                ns.ui.bgStyle = style;
+                return ns;
+            };
+            int nSolidSoft = 0, nSolidHard = 0, nGlassSoft = 0, nGlassHard = 0;
+            using (var p = new NotePanelForm(noteSettings("solid"), Themes.Get("midnight"), glassCard, true, null, null, null, null, null))
+            using (var bmp = RenderPanel(p))
+                AlphaSpread(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height), out nSolidSoft, out nSolidHard);
+            using (var p = new NotePanelForm(noteSettings("glass"), Themes.Get("midnight"), glassCard, true, null, null, null, null, null))
+            using (var bmp = RenderPanel(p))
+                AlphaSpread(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height), out nGlassSoft, out nGlassHard);
+            Ok("纸条面板「磨砂玻璃」背景是半透明的（实心背景整块不透明）",
+                nSolidHard > nSolidSoft * 4 && nGlassSoft > nGlassHard * 2,
+                "实心 硬/软=" + nSolidHard + "/" + nSolidSoft + "，玻璃 硬/软=" + nGlassHard + "/" + nGlassSoft);
+
+            // 3) 胶囊气泡：glass 时胶囊底色也是半透明
+            int bSolidSoft = 0, bSolidHard = 0, bGlassSoft = 0, bGlassHard = 0;
+            Func<string, Settings> bubbleSettings = delegate(string style)
+            {
+                var bset = new Settings();
+                bset.lark.enabled = false;
+                bset.calendarEnabled = false;
+                bset.ui.theme = "midnight";
+                bset.ui.alwaysOnTop = true;
+                bset.ui.bgStyle = style;
+                return bset;
+            };
+            Func<string, int[]> pillSpread = delegate(string style)
+            {
+                var bset = bubbleSettings(style);
+                int soft = 0, hard = 0;
+                using (var m = new BubbleMenuForm(bset, Themes.Get("midnight"), glassCard, true, null, null, null, null, null))
+                {
+                    Set(m, "openedAt", Environment.TickCount - 5000);
+                    var prects = (Rectangle[])Get(m, "pillRects");
+                    using (var bmp = RenderForm(m, m.Width, m.Height))
+                        AlphaSpread(bmp, prects[0], out soft, out hard);
+                    m.CloseMenu();
+                }
+                return new int[] { soft, hard };
+            };
+            var bSolid = pillSpread("solid");
+            var bGlass = pillSpread("glass");
+            bSolidSoft = bSolid[0]; bSolidHard = bSolid[1];
+            bGlassSoft = bGlass[0]; bGlassHard = bGlass[1];
+            Ok("胶囊气泡「磨砂玻璃」底色半透明（实心时不透明）",
+                bSolidHard > bSolidSoft * 4 && bGlassSoft > bGlassHard * 2,
+                "实心 硬/软=" + bSolidHard + "/" + bSolidSoft + "，玻璃 硬/软=" + bGlassHard + "/" + bGlassSoft);
+
+            // 4) 展开「检查更新」胶囊会自动查一次；已经在检查时再展开不重复触发
+            int checkCalls = 0;
+            var us = bubbleSettings("solid");
+            using (var um = new BubbleMenuForm(us, Themes.Get("midnight"), glassCard, true, null, null, null, null, null,
+                null, null, delegate { checkCalls++; }, null))
+            {
+                Call(um, "OpenItem", (int)BubbleAction.Update);
+                int afterFirst = checkCalls;
+                um.SetUpdateState(UpdatePhase.Checking, "", "正在检查", "", 0, false);
+                Call(um, "OpenItem", (int)BubbleAction.Update);     // 再点一次 = 收起
+                Call(um, "OpenItem", (int)BubbleAction.Update);     // 再展开：正在检查，不重复触发
+                Ok("展开「检查更新」胶囊自动查一次，正在检查时不重复触发",
+                    afterFirst == 1 && checkCalls == 1, "第一次 " + afterFirst + " / 共 " + checkCalls);
+                um.CloseMenu();
+            }
+
+            // 5) 「预览通知」chip → onPreview(kind)；Widget 造 id=preview 的临时日程，只放一遍
+            string previewKind = null;
+            var pvs = bubbleSettings("solid");
+            using (var pm = new BubbleMenuForm(pvs, Themes.Get("midnight"), glassCard, true, null, null, null, null, null,
+                null, delegate(string k) { previewKind = k; }, null, null))
+            {
+                Call(pm, "OpenItem", (int)BubbleAction.Preview);
+                Call(pm, "RunHit", "preview:local");
+                Ok("点预览 chip 把类型交给 Widget（onPreview）", previewKind == "local", "kind=" + previewKind);
+            }
+
+            var pv = new Settings();
+            pv.lark.enabled = false;
+            pv.calendarEnabled = false;
+            pv.ui.edge = "free";
+            pv.ui.theme = "midnight";
+            pv.ui.reminderHoldSeconds = 6;
+            pv.Normalize();
+            using (var form = new WidgetForm(new SettingsStore(), pv))
+            {
+                Set(form, "scale", 1.5f);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Call(form, "Recompute");
+                Call(form, "PreviewNotification", "off");
+                var prevEv = (ReminderEvent)Get(form, "remindEvent");
+                DateTime prevUntil = (DateTime)Get(form, "remindUntil");
+                double prevSecs = (prevUntil - DateTime.Now).TotalSeconds;
+                Ok("预览「下班提醒」造临时日程：id=preview、按最短停留退场（不常驻）",
+                    prevEv != null && prevEv.id == "preview" && prevEv.source == "alert"
+                    && (bool)Get(form, "reminding") && prevSecs > 2 && prevSecs <= 7,
+                    "id=" + (prevEv == null ? "-" : prevEv.id) + " source=" + (prevEv == null ? "-" : prevEv.source)
+                    + " 剩余 " + prevSecs.ToString("0.0") + "s");
+                Ok("预览只放一遍：不写进用户日程", pv.events.Count == 0, "events=" + pv.events.Count);
+                Call(form, "PreviewNotification", "lunch");
+                var prevEv2 = (ReminderEvent)Get(form, "remindEvent");
+                Ok("预览「午休提醒」换成休息类临时日程",
+                    prevEv2 != null && prevEv2.id == "preview" && prevEv2.source == "break",
+                    "id=" + (prevEv2 == null ? "-" : prevEv2.id) + " source=" + (prevEv2 == null ? "-" : prevEv2.source));
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+        // ---- 5j. 胶囊菜单的点击路由 ----
+        {
+            var cs = new Settings();
+            cs.lark.enabled = false;
+            cs.calendarEnabled = false;
+            cs.ui.theme = "midnight";
+            cs.ui.alwaysOnTop = true;
+            var card = new Rectangle(0, 300, 224, 68);
+
+            string pickedTheme = null, addTitle = null, addPlace = null;
+            bool? pinTo = null, clockTo = null;
+            int addMin = -1, settingsTab = -1;
+
+            Func<BubbleMenuForm> make = delegate
+            {
+                return new BubbleMenuForm(cs, Themes.Get("midnight"), card, true,
+                    delegate(string id) { pickedTheme = id; },
+                    delegate(bool on) { pinTo = on; },
+                    delegate(bool inClock) { clockTo = inClock; },
+                    delegate(string t, string p, int min) { addTitle = t; addPlace = p; addMin = min; },
+                    delegate(int tab) { settingsTab = tab; });
+            };
+            Func<Rectangle, Point> mid = delegate(Rectangle r) { return new Point(r.Left + r.Width / 2, r.Top + r.Height / 2); };
+            Func<object, float> scaleOf = delegate(object o) { return (float)Get(o, "scale"); };
+            Func<object, Rectangle, int> openAt = delegate(object form, Rectangle pill)
+            {
+                Call(form, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, mid(pill).X, mid(pill).Y, 0));
+                return 0;
+            };
+            Action<object, BubbleAction> settle = delegate(object form, BubbleAction act)
+            {
+                int extra = (int)Call(form, "S", (float)BubbleMenuForm.ExtraHDip(act));
+                Set(form, "animating", false);
+                Set(form, "openExtra", (double)extra);
+                Set(form, "openTo", (double)extra);
+            };
+
+            using (var m = make())
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                float sc = scaleOf(m);
+                Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                var rects = (Rectangle[])Get(m, "pillRects");
+                openAt(m, rects[1]);
+                Ok("点胶囊原地长开", (int)Get(m, "activeIndex") == 1, "activeIndex=" + Get(m, "activeIndex"));
+                settle(m, BubbleAction.Theme);
+                var item = (Rectangle)Call(m, "ItemRect", 1);
+                var swatches = (System.Collections.Generic.List<ThemeDef>)Get(m, "swatches");
+                int chipW = s(44);
+                int gapX = ((item.Width - s(24)) - chipW * 4) / 3;
+                var chip = new Point(item.Left + s(12) + 2 * (chipW + gapX) + chipW / 2, item.Top + s(50) + s(13));
+                Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, chip.X, chip.Y, 0));
+                Ok("点色卡立刻换主题",
+                    pickedTheme == swatches[2].id && (string)Get(m, "selectedTheme") == swatches[2].id,
+                    "点到 " + pickedTheme + " / " + swatches[2].id);
+            }
+
+            using (var m = make())
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                var rects = (Rectangle[])Get(m, "pillRects");
+                openAt(m, rects[1]);
+                settle(m, BubbleAction.Theme);
+                var head2 = (Rectangle)Call(m, "ItemRect", 2);
+                openAt(m, head2);
+                Ok("切换时旧的收、新的同时长开",
+                    (int)Get(m, "closingIndex") == 1 && (int)Get(m, "activeIndex") == 2
+                    && (double)Get(m, "closeFrom") > 0 && (double)Get(m, "openTo") > 0,
+                    "closing=" + Get(m, "closingIndex") + " active=" + Get(m, "activeIndex"));
+            }
+
+            using (var m = make())
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                var rects = (Rectangle[])Get(m, "pillRects");
+                openAt(m, rects[3]);
+                Ok("点置顶直接切换（不放大）",
+                    pinTo == false && (bool)Get(m, "pinned") == false && (int)Get(m, "activeIndex") == -1,
+                    "onPin=" + pinTo + " pinned=" + Get(m, "pinned"));
+            }
+
+            using (var m = make())
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                float sc = scaleOf(m);
+                Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                var rects = (Rectangle[])Get(m, "pillRects");
+                openAt(m, rects[2]);
+                settle(m, BubbleAction.Clock);
+                var item = (Rectangle)Call(m, "ItemRect", 2);
+                var row = new Point(item.Left + s(12) + s(60), item.Top + s(50) + s(20));
+                Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, row.X, row.Y, 0));
+                Ok("点上班打卡触发时钟动作", clockTo == true, "clockTo=" + clockTo);
+            }
+
+            using (var m = make())
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                float sc = scaleOf(m);
+                Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                var rects = (Rectangle[])Get(m, "pillRects");
+                openAt(m, rects[0]);
+                settle(m, BubbleAction.Schedule);
+                var item = (Rectangle)Call(m, "ItemRect", 0);
+                var chip = new Point(item.Left + s(12) + s(30), item.Top + s(142) + s(22));
+                Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, chip.X, chip.Y, 0));
+                Ok("点 +15 分钟用面板里的标题建日程",
+                    addMin == 15 && addTitle == "临时日程" && addPlace == "",
+                    "min=" + addMin + " title=" + addTitle + " place=" + addPlace);
+            }
+
+            using (var m = make())
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                float sc = scaleOf(m);
+                Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                var rects = (Rectangle[])Get(m, "pillRects");
+                openAt(m, rects[0]);
+                settle(m, BubbleAction.Schedule);
+                var item = (Rectangle)Call(m, "ItemRect", 0);
+                var save = new Point(item.Left + s(60), item.Top + s(196) + s(17));
+                Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, save.X, save.Y, 0));
+                Ok("点保存日程提交标题/地点", addMin == 30 && addTitle == "临时日程", "min=" + addMin);
+            }
+
+            using (var m = make())
+            {
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                float sc = scaleOf(m);
+                Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                var rects = (Rectangle[])Get(m, "pillRects");
+                openAt(m, rects[0]);
+                settle(m, BubbleAction.Schedule);
+                var item = (Rectangle)Call(m, "ItemRect", 0);
+                var detail = new Point(item.Left + s(20), item.Top + s(244));
+                Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, detail.X, detail.Y, 0));
+                Ok("「详细编辑」落到提醒页", settingsTab == 2, "tab=" + settingsTab);
+            }
+        }
+
+        // ---- 15. 多份日历订阅 + 晚同步补提醒 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.ui.edge = "free";
+            s.outlook.calendars.Add(new CalendarSource
+            {
+                id = "cal-a", name = "工作日历", source = "url",
+                url = "https://example.com/work.ics", enabled = true, leadMinutes = 5
+            });
+            s.outlook.calendars.Add(new CalendarSource
+            {
+                id = "cal-b", name = "个人日历", source = "url",
+                url = "https://example.com/me.ics", enabled = false, leadMinutes = 0
+            });
+            s.outlook.enabled = true;
+            using (var dlg = new SettingsForm(new SettingsStore(), s))
+            {
+                var list = (CheckedListBox)Get(dlg, "lstCalendars");
+                Ok("设置页能列出多份日历", list != null && list.Items.Count == 2 && list.CheckedItems.Count == 1,
+                    list == null ? "没有列表" : (list.Items.Count + " 份 / 勾选 " + list.CheckedItems.Count));
+                Ok("日历行显示名称和类型",
+                    list != null && list.Items[0].ToString().Contains("工作日历") && list.Items[0].ToString().Contains("订阅"),
+                    list == null ? "" : list.Items[0].ToString());
+                var tabs = (TabControl)Get(dlg, "tabs");
+                Ok("多日历后还是七个页签", tabs.TabPages.Count == 7, tabs.TabPages.Count + " 个");
+            }
+        }
+
+        // 晚于开始时间才同步下来的 Outlook 日程，要补一次提醒（否则整场会都没提醒）
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.ui.edge = "free";
+            s.ui.reducedMotion = true;
+            s.ui.reminderEffect = "none";
+            s.ui.reminderSpread = "card";
+            s.SetStyleOf(Reminders.KindOutlook, new ReminderStyleDef("card", "circle", "theme"));
+            s.Normalize();
+            foreach (var f in s.schedules) { f.enabled = false; f.notify = false; }
+            var ev = new ReminderEvent();
+            ev.id = "ol:late-check";
+            ev.source = "outlook";
+            ev.title = "迟到的同步";
+            ev.start = Reminders.FormatStart(DateTime.Now.AddMinutes(-5));
+            ev.end = Reminders.FormatStart(DateTime.Now.AddMinutes(30));
+            var cal = new CalendarSource
+            {
+                id = "cal-late", name = "工作日历", source = "url",
+                url = "https://example.com/late.ics", enabled = true
+            };
+            cal.cached.Add(ev);
+            s.outlook.calendars.Add(cal);
+            s.outlook.enabled = true;
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Call(form, "CheckReminders");
+                var shown = (ReminderEvent)Get(form, "remindEvent");
+                Ok("同步晚于开始的日程会补提醒",
+                    (bool)Get(form, "reminding") && shown != null && shown.title == "迟到的同步",
+                    "reminding=" + Get(form, "reminding") + " event=" + (shown == null ? "null" : shown.title));
+            }
+        }
+
+        // ---- 16. 工资页 + 工资面板：点击拉长、双击固定 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.salary.monthly = 21000m;
+            s.salary.payday = 15;
+            s.Normalize();
+            using (var dlg = new SettingsForm(new SettingsStore(), s, 5))
+            {
+                var tabs = (TabControl)Get(dlg, "tabs");
+                Ok("工资页就位、纸条是第 7 页", tabs.TabPages.Count == 7 && tabs.TabPages[5].Text == "工资" && tabs.TabPages[6].Text == "纸条",
+                    tabs.TabPages.Count + " 页 / 第 6 页=" + tabs.TabPages[5].Text + " / 第 7 页=" + tabs.TabPages[6].Text);
+                Ok("工资页能读写月薪和发薪日",
+                    ((NumericUpDown)Get(dlg, "numSalary")).Value == 21000m
+                    && ((NumericUpDown)Get(dlg, "numPayday")).Value == 15m,
+                    Get(dlg, "numSalary") + " / " + Get(dlg, "numPayday"));
+                Ok("工资页给出本月应出勤预览",
+                    ((Label)Get(dlg, "lblSalaryPreview")).Text.Contains("本月应出勤")
+                    && ((Label)Get(dlg, "lblSalaryPreview")).Text.Contains("日薪约"),
+                    ((Label)Get(dlg, "lblSalaryPreview")).Text);
+            }
+
+            var seed = new CalendarSource
+            {
+                id = "cal-new", name = "新日历", source = "url", url = "https://example.com/a.ics",
+                enabled = true, leadMinutes = 0
+            };
+            using (var dlg = new CalendarEditForm(seed, false, false))
+            {
+                ((TextBox)Get(dlg, "tbName")).Text = "项目日历";
+                ((TextBox)Get(dlg, "tbAddress")).Text = "https://example.com/project.ics";
+                ((NumericUpDown)Get(dlg, "numLead")).Value = 7m;
+                Call(dlg, "Confirm");
+                var result = dlg.Result;
+                Ok("日历编辑弹窗能保存名称/地址/提前量",
+                    result != null && result.id == "cal-new" && result.name == "项目日历"
+                    && result.url == "https://example.com/project.ics" && result.leadMinutes == 7,
+                    result == null ? "null" : result.name + " " + result.url + " " + result.leadMinutes);
+            }
+
+            var w = new Settings();
+            w.lark.enabled = false;
+            w.calendarEnabled = false;
+            w.ui.edge = "free";
+            w.ui.reducedMotion = true;
+            w.ui.reminderEffect = "none";
+            w.ui.autoCollapseSeconds = 0;
+            w.salary.monthly = 21000m;
+            w.salary.payday = 15;
+            w.Normalize();
+            foreach (var f in w.schedules) { f.enabled = false; f.notify = false; }
+            using (var form = new WidgetForm(new SettingsStore(), w))
+            {
+                Set(form, "scale", 1.5f);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Call(form, "Recompute");
+                using (var bmp = new Bitmap(form.Width, form.Height))
+                {
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, form.Width, form.Height)));
+                }
+                var r = (Rectangle)Get(form, "rectSalary");
+                Ok("右上角有工资按钮", r.Width > 0 && r.Right <= form.Width,
+                    r.ToString());
+
+                int baseH = form.Height;
+                int closedH = (int)Call(form, "get_ExpandedH");
+                Call(form, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1,
+                    r.X + r.Width / 2, r.Y + r.Height / 2, 0));
+                Ok("点工资按钮开始拉长动画",
+                    (bool)Get(form, "salaryOpen") && (bool)Get(form, "salaryAnimating"),
+                    "open=" + Get(form, "salaryOpen") + " anim=" + Get(form, "salaryAnimating"));
+                Call(form, "FinishSalaryAnimNow");
+                Ok("动画结束后卡片变高",
+                    (bool)Get(form, "salaryOpen") && form.Height > baseH + 100,
+                    "高度 " + baseH + " -> " + form.Height);
+                using (var bmp = new Bitmap(form.Width, form.Height))
+                {
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, form.Width, form.Height)));
+                }
+                Ok("工资面板能画出来且不再报错", form.Height > baseH, "高度 " + form.Height);
+
+                Ok("工资按钮不再支持双击固定",
+                    typeof(WidgetForm).GetField("salaryPinned", F | BindingFlags.DeclaredOnly) == null
+                    && typeof(WidgetForm).GetMethod("ToggleSalaryPin", F | BindingFlags.DeclaredOnly) == null
+                    && typeof(WidgetForm).GetMethod("SetSalaryPinned", F | BindingFlags.DeclaredOnly) == null
+                    && typeof(WidgetForm).GetMethod("OnDoubleClick", F | BindingFlags.DeclaredOnly) == null
+                    && typeof(UiSettings).GetProperty("salaryPinned") == null,
+                    "固定字段 / 双击处理 / ui.salaryPinned 都应已移除");
+
+                Call(form, "ToggleSalary");
+                Ok("点一下开始收起动画",
+                    (bool)Get(form, "salaryAnimating") && (bool)Get(form, "salaryOpen"),
+                    "anim=" + Get(form, "salaryAnimating") + " open=" + Get(form, "salaryOpen"));
+                Call(form, "FinishSalaryAnimNow");
+                Ok("收起后高度回到关闭状态",
+                    !(bool)Get(form, "salaryOpen") && form.Height == closedH,
+                    "open=" + Get(form, "salaryOpen") + " 高度 " + form.Height + "/" + closedH);
+            }
+        }
+
+        // ---- 17. 字体切换 + 主题预览不压字 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.ui.edge = "free";
+            s.ui.numberFont = "Courier New";
+            s.ui.textFont = "Microsoft YaHei UI";
+            s.Normalize();
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                var big = (Font)Get(form, "fontBig");
+                var status = (Font)Get(form, "fontStatus");
+                Ok("卡片数字字体跟着设置走", big.FontFamily.Name == "Courier New", big.FontFamily.Name);
+                Ok("卡片中文字体跟着设置走", status.FontFamily.Name == "Microsoft YaHei UI", status.FontFamily.Name);
+                s.ui.numberFont = "Consolas";
+                Call(form, "ApplySettings");
+                var big2 = (Font)Get(form, "fontBig");
+                Ok("改字体后卡片即时重建", big2.FontFamily.Name == "Consolas", big2.FontFamily.Name);
+            }
+            UiFont.Configure("", "Consolas");
+
+            using (var sw = new ColorWheelForm.PreviewSwatch())
+            {
+                sw.Size = new Size(234, 138);
+                using (var bmp = new Bitmap(234, 138))
+                {
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                    {
+                        var mi = typeof(ColorWheelForm.PreviewSwatch).GetMethod("OnPaint", F);
+                        mi.Invoke(sw, new object[] { new PaintEventArgs(g, new Rectangle(0, 0, 234, 138)) });
+                    }
+                    int clipped = 0;
+                    for (int y = 132; y <= 135; y++)
+                        for (int x = 10; x < 224; x++)
+                        {
+                            Color c = bmp.GetPixel(x, y);
+                            if (c.R + c.G + c.B > 320) clipped++;
+                        }
+                    Ok("主题预览底部没有压字", clipped == 0, clipped + " 个亮像素");
+                }
+            }
+        }
+
+        // ---- 18. 小纸条：卡片入口、A/C 面板、设置页 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.ui.edge = "free";
+            s.Normalize();
+            s.note.AddContact("62015", "阿哲");
+            s.note.Append(new NoteMessage("62015", s.note.id, "晚上的评审推迟到 8 点", NoteRelay.Now() - 60), true);
+            s.note.Append(new NoteMessage(s.note.id, "62015", "收到，我改完就过去", NoteRelay.Now() - 50), false);
+
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Set(form, "scale", 1.5f);
+                form.MinimumSize = Size.Empty;
+                form.Size = new Size(420, 282);
+                Call(form, "Recompute");
+                using (var bmp = new Bitmap(form.Width, form.Height))
+                {
+                    bmp.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, form.Width, form.Height)));
+                }
+                var noteRect = (Rectangle)Get(form, "rectNote");
+                var salaryRect = (Rectangle)Get(form, "rectSalary");
+                Ok("卡片右上角有小飞机入口（¥ 左边）",
+                    noteRect.Width > 0 && noteRect.Right <= salaryRect.Left && noteRect.Right <= form.Width,
+                    "note=" + noteRect + " salary=" + salaryRect);
+                Ok("有未读时会记着未读数",
+                    s.note.TotalUnread() > 0, "unread=" + s.note.TotalUnread());
+                Set(form, "noteFlashAt", Environment.TickCount - 40);
+                double rim = (double)Call(form, "NoteRimAlpha");
+                Set(form, "noteFlashAt", 0);
+                Ok("收到未读后边框闪光会被触发", rim > 0.3, "alpha=" + rim.ToString("0.00"));
+            }
+
+            var drawer = new Settings();
+            drawer.lark.enabled = false;
+            drawer.calendarEnabled = false;
+            drawer.note.style = "drawer";
+            var card = new Rectangle(600, 200, 420, 282);
+            using (var p = new NotePanelForm(drawer, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                float dpiScale = (float)Get(p, "scale");
+                int expDrawerW = (int)Math.Round(392f * dpiScale);
+                int expCompactH = (int)Math.Round(124f * dpiScale);
+                Ok("抽屉式未选对话时收成 392×124 DIP（不再空一大片）", p.Width == expDrawerW && p.Height == expCompactH,
+                    p.Width + "x" + p.Height + "（期望 " + expDrawerW + "x" + expCompactH + "，dpi=" + dpiScale + "）");
+                Call(p, "SelectContact", "62015", false);
+                Ok("点开对话后长回 392×282 DIP",
+                    Math.Abs((float)Get(p, "heightTo") - (float)Math.Round(282f * dpiScale)) <= 1,
+                    "heightTo=" + Get(p, "heightTo") + " 期望 " + Math.Round(282f * dpiScale));
+                Ok("面板贴着卡片一侧显示（左边没空间就开右边）",
+                    (p.Right <= card.Left || p.Left >= card.Right) && p.Left >= 0,
+                    "panel=" + p.Bounds + " card=" + card);
+                Ok("默认在联系人列表状态", Get(p, "state").ToString() == "Chat", "state=" + Get(p, "state"));
+                var msgFont = (Font)Get(p, "fMsg");
+                var tinyFont = (Font)Get(p, "fTiny");
+                Ok("聊天正文字号 ≥ 9pt、次要字 ≥ 7.5pt（150% 下可读）",
+                    msgFont.Size >= 9f && tinyFont.Size >= 7.5f,
+                    "msg=" + msgFont.Size + "pt tiny=" + tinyFont.Size + "pt");
+            }
+
+            // 面板尺寸只跟 DPI 走：卡片再窄（280 DIP）也不该把面板缩回去
+            using (var p = new NotePanelForm(drawer, Themes.Get("midnight"), new Rectangle(600, 200, 280, 282), true,
+                null, null, null, null, null))
+            {
+                float dpiScale = (float)Get(p, "scale");
+                Ok("面板尺寸和卡片宽度无关（DIP 设计稿：宽 392、未选对话高 124）",
+                    p.Width == (int)Math.Round(392f * dpiScale) && p.Height == (int)Math.Round(124f * dpiScale),
+                    p.Width + "x" + p.Height);
+            }
+
+            // 面板里发送：选中联系人 → 写一句 → 回调拿到 id/文字，之后进历史态
+            string sentTo = null, sentText = null;
+            drawer.note.AddContact("62015", "阿哲");
+            using (var p = new NotePanelForm(drawer, Themes.Get("midnight"), card, true,
+                delegate(string to, string text) { sentTo = to; sentText = text; return true; },
+                null, null, null, null))
+            {
+                Call(p, "SelectContact", "62015", false);
+                Set(p, "composeText", "收到，我改完就过去");
+                int stateAtBefore = (int)Get(p, "stateAt");
+                Call(p, "SendCompose");
+                Ok("面板发送把 id 和文字交给回调",
+                    sentTo == "62015" && sentText == "收到，我改完就过去",
+                    sentTo + " / " + sentText);
+                Ok("发送后不再整块刷新：停在原来的聊天态、不重置逐行动画",
+                    Get(p, "state").ToString() == "Chat" && (int)Get(p, "stateAt") == stateAtBefore,
+                    "state=" + Get(p, "state") + " stateAt=" + Get(p, "stateAt") + "（发送前 " + stateAtBefore + "）");
+                Ok("发送成功不再显示「已发出」",
+                    string.IsNullOrEmpty((string)Get(p, "status")), "status=" + Get(p, "status"));
+                Ok("发送后记下进入动画（旧消息上移 / 新消息进入）",
+                    (int)Get(p, "sentAt") != 0, "sentAt=" + Get(p, "sentAt"));
+            }
+
+            // 编辑窗样式：圆角；改备注编辑窗保持普通输入框样式（用户澄清：要放大/居中的是联系人名字，不是编辑窗）
+            var edit = new Settings();
+            edit.lark.enabled = false;
+            edit.calendarEnabled = false;
+            edit.note.style = "columns";
+            edit.note.id = "48372";
+            edit.note.AddContact("62015", "阿哲");
+            edit.note.AddContact("11788", "小满");
+            using (var p = new NotePanelForm(edit, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                Call(p, "EditCompose");
+                var ed = Get(p, "fieldEditor") as Form;
+                Ok("聊天输入编辑窗是圆角（Region 已设，不再是直角矩形）",
+                    ed != null && ed.Region != null, ed == null ? "没开" : "region=" + (ed.Region != null));
+                bool shapeFits = false;
+                if (ed != null && ed.Region != null)
+                {
+                    using (var gg = Graphics.FromHwnd(IntPtr.Zero))
+                    {
+                        var rb = ed.Region.GetBounds(gg);
+                        shapeFits = Math.Abs(rb.Width - ed.ClientSize.Width) <= 1
+                            && Math.Abs(rb.Height - ed.ClientSize.Height) <= 1;
+                    }
+                }
+                Ok("编辑窗圆角 Region 和实际窗口一样大（底边描边不会被裁）", shapeFits,
+                    ed == null ? "没开编辑窗" : "region/shapeFits=" + shapeFits + " client=" + ed.ClientSize);
+                TextBox tb = FindTextBox(ed);
+                Ok("聊天输入编辑窗字体跟面板正文同级（≥9pt）",
+                    tb != null && tb.Font.Size >= 9f, tb == null ? "没找到 TextBox" : tb.Font.Size + "pt");
+                Call(p, "CloseFieldEditor");
+
+                Call(p, "EditRemark", "11788");
+                var ed2 = Get(p, "fieldEditor") as Form;
+                TextBox tb2 = FindTextBox(ed2);
+                var fieldFont = (Font)Get(p, "fField");
+                Ok("双击改备注：编辑窗是普通输入框样式（不放大、不居中）",
+                    tb2 != null && tb2.TextAlign != HorizontalAlignment.Center
+                    && Math.Abs(tb2.Font.Size - fieldFont.Size) <= 0.2f,
+                    tb2 == null ? "没开编辑窗" : "align=" + tb2.TextAlign + " font=" + tb2.Font.Size + "pt / 普通输入 " + fieldFont.Size + "pt");
+                var firstCapsule = (Rectangle)Call(p, "ContactRectAt", 0);
+                Ok("改备注编辑窗和联系人名字一样大（没有变大）",
+                    ed2 != null && Math.Abs(ed2.Width - firstCapsule.Width) <= 2 && Math.Abs(ed2.Height - firstCapsule.Height) <= 2,
+                    ed2 == null ? "没开编辑窗" : "editor=" + ed2.Width + "x" + ed2.Height + " capsule=" + firstCapsule.Width + "x" + firstCapsule.Height);
+                Call(p, "CloseFieldEditor");
+            }
+
+            // 改备注落盘：面板立刻改 + 回调交给 Widget；空备注 = 恢复显示 ID
+            string renamedId = null, renamedText = null;
+            using (var p = new NotePanelForm(edit, Themes.Get("midnight"), card, true, null, null, null, null, null,
+                delegate(string id, string remark) { renamedId = id; renamedText = remark; }))
+            {
+                Call(p, "ApplyRemark", "11788", "  满哥  ");
+                Ok("改备注：去掉首尾空格、面板立刻生效、回调交给 Widget",
+                    edit.note.Contact("11788").remark == "满哥" && renamedId == "11788" && renamedText == "满哥",
+                    "remark=" + edit.note.Contact("11788").remark + " cb=" + renamedId + "/" + renamedText);
+                Call(p, "ApplyRemark", "11788", "一二三四五六七八九十");
+                Ok("备注最多 8 个字（超了截断）",
+                    edit.note.Contact("11788").remark.Length == NoteSettings.MaxRemark,
+                    "len=" + edit.note.Contact("11788").remark.Length);
+                Call(p, "ApplyRemark", "11788", "");
+                Ok("备注清空后显示回 ID", edit.note.Contact("11788").Display() == "ID 11788",
+                    "display=" + edit.note.Contact("11788").Display());
+            }
+
+            // 用户澄清的需求 4：联系人**名字本身**居中、字号大一号（不是双击后的编辑窗变大）
+            var nameSet = new Settings();
+            nameSet.lark.enabled = false;
+            nameSet.calendarEnabled = false;
+            nameSet.note.style = "drawer";
+            nameSet.note.id = "48372";
+            nameSet.note.AddContact("62015", "阿哲");
+            nameSet.note.AddContact("11788", "小满");
+            using (var p = new NotePanelForm(nameSet, Themes.Get("huang-liuli"), card, true, null, null, null, null, null))
+            {
+                float sc = (float)Get(p, "scale");
+                var capsule = (Rectangle)Call(p, "ContactRectAt", 0);
+                int left = -1, right = -1;
+                using (var bmp = RenderPanel(p))
+                {
+                    int x0 = capsule.X + (int)Math.Round(4 * sc), x1 = Math.Min(bmp.Width, capsule.Right - (int)Math.Round(4 * sc));
+                    int y0 = capsule.Y + (int)Math.Round(6 * sc), y1 = Math.Min(bmp.Height, capsule.Bottom - (int)Math.Round(6 * sc));
+                    for (int x = Math.Max(0, x0); x < x1; x++)
+                    {
+                        int best = 0;
+                        for (int y = Math.Max(0, y0); y < y1; y++) best = Math.Max(best, Brightness(bmp.GetPixel(x, y)));
+                        if (best >= 120) { if (left < 0) left = x; right = x; }
+                    }
+                }
+                Ok("联系人名字在胶囊里水平居中",
+                    left >= 0 && Math.Abs((left + right) / 2.0 - (capsule.X + capsule.Width / 2.0)) <= Math.Max(4, (int)Math.Round(4 * sc)),
+                    "text=" + left + ".." + right + " center=" + ((left + right) / 2.0) + " capsuleCenter=" + (capsule.X + capsule.Width / 2.0));
+                var nameFont = (Font)Get(p, "fName");
+                Ok("联系人名字字号比原来大一号（≥9.3pt）", nameFont.Size >= 9.3f, "name=" + nameFont.Size + "pt");
+            }
+
+            // 需求 5 / 6 的像素断言：聊天气泡文字垂直居中、整卡细边框（聊天页 + 添加页都要有）
+            var pixSet = new Settings();
+            pixSet.lark.enabled = false;
+            pixSet.calendarEnabled = false;
+            pixSet.note.style = "columns";
+            pixSet.note.id = "48372";
+            pixSet.note.AddContact("62015", "阿哲");
+            pixSet.note.Append(new NoteMessage("62015", "48372", "测试", NoteRelay.Now()), true);
+            using (var p = new NotePanelForm(pixSet, Themes.Get("huang-liuli"), card, true, null, null, null, null, null))
+            {
+                float sc = (float)Get(p, "scale");
+                Call(p, "SelectContact", "62015", false);
+                // 刚点开对话就要立刻不透明：以前有 180ms 整体淡入，浅色主题下像盖了一层白雾
+                using (var bmp = RenderPanel(p))
+                {
+                    var b = (Rectangle)Call(p, "BodyRect");
+                    int maxB = 0;
+                    for (int y = Math.Max(0, b.Y); y < Math.Min(bmp.Height, b.Bottom); y++)
+                        for (int x = Math.Max(0, b.X); x < Math.Min(bmp.Width, b.Right); x++)
+                            maxB = Math.Max(maxB, Brightness(bmp.GetPixel(x, y)));
+                    Ok("刚点开对话时内容立刻不透明（没有整体淡入的白雾）", maxB >= 150, "maxBrightness=" + maxB);
+                }
+                Set(p, "stateAt", Environment.TickCount - 800);   // 跳过状态切换的 180ms 淡入，离屏渲染时才不透明
+                // 双栏聊天头部的名字也要能双击改备注（和左栏联系人名字一致）
+                bool headerHit = false;
+                var bodyHead = (Rectangle)Call(p, "BodyRect");
+                foreach (var h in (System.Collections.IEnumerable)Get(p, "hits"))
+                {
+                    var ht = h.GetType();
+                    if (ht.GetField("kind").GetValue(h).ToString() != "Contact") continue;
+                    var hr = (Rectangle)ht.GetField("rect").GetValue(h);
+                    var hk = (string)ht.GetField("key").GetValue(h);
+                    if (hk == "62015" && hr.Y < bodyHead.Y + (int)Call(p, "S", 22f) && hr.Bottom <= bodyHead.Y + (int)Call(p, "S", 22f))
+                        headerHit = true;
+                }
+                Ok("双栏聊天头部的名字也能双击改备注（有命中区）", headerHit, "headerHit=" + headerHit);
+                using (var bmp = RenderPanel(p))
+                {
+                    var edge = bmp.GetPixel(bmp.Width / 2, 1);
+                    var inside = bmp.GetPixel(bmp.Width / 2, Math.Min(bmp.Height - 2, (int)Math.Round(6 * sc)));
+                    Ok("整卡细边框在聊天页画出来了", Brightness(edge) - Brightness(inside) >= 25,
+                        "edge=" + fmt(edge) + " inside=" + fmt(inside));
+
+                    // 双栏聊天第一条（收到的）气泡：x=body.X，y=body.Y+S(22)，高 S(34)
+                    var body = (Rectangle)Call(p, "BodyRect");
+                    int bubbleTop = body.Y + (int)Call(p, "S", 22f);
+                    int bubbleH = (int)Call(p, "S", 34f);
+                    int scanR = Math.Min(bmp.Width - 1, body.X + (int)Call(p, "S", 260f));
+                    int top = -1, bottom = -1;
+                    for (int y = Math.Max(1, bubbleTop); y < Math.Min(bmp.Height - 1, bubbleTop + bubbleH); y++)
+                    {
+                        int best = 0;
+                        for (int x = body.X; x < scanR; x++) best = Math.Max(best, Brightness(bmp.GetPixel(x, y)));
+                        if (best >= 120) { if (top < 0) top = y; bottom = y; }
+                    }
+                    bool centered = top >= 0 && Math.Abs((top + bottom) / 2.0 - (bubbleTop + bubbleH / 2.0)) <= Math.Max(3, (int)Math.Round(3 * sc));
+                    Ok("双栏气泡里的文字垂直居中（不是贴在气泡上沿）", centered,
+                        "text=" + top + ".." + bottom + " center=" + ((top + bottom) / 2.0) + " bubbleCenter=" + (bubbleTop + bubbleH / 2.0));
+                }
+
+                var stateType = typeof(NotePanelForm).GetNestedType("PanelState", BindingFlags.NonPublic);
+                Call(p, "SetState", Enum.Parse(stateType, "Add"), false);
+                Set(p, "heightNow", (float)Get(p, "heightTo"));
+                using (var bmp = RenderPanel(p))
+                {
+                    var edge = bmp.GetPixel(bmp.Width / 2, 1);
+                    var inside = bmp.GetPixel(bmp.Width / 2, Math.Min(bmp.Height - 2, (int)Math.Round(6 * sc)));
+                    Ok("整卡细边框在「添加联系人」页也在（以前被整卡重填盖掉）",
+                        Brightness(edge) - Brightness(inside) >= 25, "edge=" + fmt(edge) + " inside=" + fmt(inside));
+                }
+            }
+
+            // 添加联系人：空 ID 点「查在线」/「添加为联系人」要给明确提示（3.3.0 之前点了完全没反应，
+            // 而且编辑框是 ShowDialog 模态，打开后别的按钮全都点不动）
+            using (var p = new NotePanelForm(drawer, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                Call(p, "ProbeAdd");
+                string st = (string)Get(p, "status");
+                Ok("空对话码点「查在线」会提示填 5 位字符", st != null && st.Contains("5 位字符"), "status=" + st);
+                Call(p, "ConfirmAdd");
+                st = (string)Get(p, "status");
+                bool opened = (bool)Get(p, "editingField");
+                Call(p, "CloseFieldEditor");
+                Ok("空对话码点「创建对话」会提示并直接打开输入框",
+                    st != null && st.Contains("5 位字符") && opened, "status=" + st + " editor=" + opened);
+            }
+
+            // 空输入发消息也要有提示，不要报「没发出去：检查中继连接」
+            using (var p = new NotePanelForm(drawer, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                Set(p, "composeText", "");
+                Call(p, "SendCompose");
+                string st = (string)Get(p, "status");
+                Ok("空输入点发送提示「写一句再发」", st != null && st.Contains("写一句"), "status=" + st);
+            }
+
+            drawer.note.AddContact("62015", "阿哲");
+            drawer.note.AddConversation("项目组#1", "项目群");
+            drawer.note.style = "columns";
+            using (var p = new NotePanelForm(drawer, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                float sc = (float)Get(p, "scale");
+                Ok("双栏式面板 470×298 DIP（按 DPI 缩放）",
+                    p.Width == (int)Math.Round(470f * sc) && p.Height == (int)Math.Round(298f * sc),
+                    p.Width + "x" + p.Height + "（期望 " + (int)Math.Round(470f * sc) + "x" + (int)Math.Round(298f * sc) + "）");
+            }
+
+            using (var dlg = new SettingsForm(new SettingsStore(), drawer, 6))
+            {
+                var tabs = (TabControl)Get(dlg, "tabs");
+                Ok("设置第 7 页是「纸条」", tabs.TabPages.Count == 7 && tabs.TabPages[6].Text == "纸条",
+                    tabs.TabPages.Count + " 页 / 第 7 页=" + tabs.TabPages[6].Text);
+                Ok("纸条页有样式 / ID / 中继 / 对话控件",
+                    Get(dlg, "rbNoteDrawer") != null && Get(dlg, "rbNoteColumns") != null
+                    && Get(dlg, "lblNoteId") != null && Get(dlg, "tbNoteRelay") != null
+                    && Get(dlg, "lstNoteContacts") != null,
+                    "drawer/columns/id/relay/contacts");
+                Ok("默认公共中继是 broker.hivemq.com:1883",
+                    ((TextBox)Get(dlg, "tbNoteRelay")).Text == "broker.hivemq.com"
+                    && ((NumericUpDown)Get(dlg, "numNotePort")).Value == 1883,
+                    ((TextBox)Get(dlg, "tbNoteRelay")).Text + ":" + ((NumericUpDown)Get(dlg, "numNotePort")).Value);
+                var noteList = (ListBox)Get(dlg, "lstNoteContacts");
+                Ok("纸条页能列出对话（个人 ID + 对话码都在）", noteList.Items.Count == 2,
+                    noteList.Items.Count + " 条");
+                bool roomRow = false;
+                foreach (var item in noteList.Items)
+                    if (item.ToString().Contains("对话码 " + "项目组#1")) roomRow = true;
+                Ok("对话码对话在设置页显示成「对话码 xxxxx」", roomRow, roomRow ? "ok" : "没找到对话码行");
+            }
+
+            // ---- 用户反馈 v3.5：① 固定班次工作日显示错（周五上班却显示休息）② 个人昵称 ----
+            Ok("工作日界面顺序映射正确（周一→下标1 … 周日→下标0）",
+                SettingsForm.WorkdayArrayIndex(0) == 1 && SettingsForm.WorkdayArrayIndex(4) == 5
+                && SettingsForm.WorkdayArrayIndex(5) == 6 && SettingsForm.WorkdayArrayIndex(6) == 0,
+                "周一=" + SettingsForm.WorkdayArrayIndex(0) + " 周五=" + SettingsForm.WorkdayArrayIndex(4)
+                + " 周日=" + SettingsForm.WorkdayArrayIndex(6));
+
+            var wd = new Settings();
+            wd.lark.enabled = false;
+            wd.calendarEnabled = false;
+            wd.mode = "fixed";
+            // 周日..周六：只有周一到周五上班（正确写法）
+            wd.workdays = new bool[] { false, true, true, true, true, true, false };
+            using (var dlg = new SettingsForm(new SettingsStore(), wd, 0))
+            {
+                var cbs = (CheckBox[])Get(dlg, "cbDays");
+                bool uiOk = cbs[0].Checked && cbs[1].Checked && cbs[2].Checked && cbs[3].Checked && cbs[4].Checked
+                    && !cbs[5].Checked && !cbs[6].Checked;
+                Ok("设置页「工作日」按周一到周五正确勾选（修复前周五不勾、周六勾）", uiOk,
+                    "周一..周日=" + cbs[0].Checked + cbs[1].Checked + cbs[2].Checked + cbs[3].Checked
+                    + cbs[4].Checked + cbs[5].Checked + cbs[6].Checked);
+                Call(dlg, "SetWorkdayPreset", 5);
+                Ok("「周一~周五」快捷按钮能用",
+                    cbs[0].Checked && cbs[4].Checked && !cbs[5].Checked && !cbs[6].Checked, "ok");
+                for (int i = 0; i < 7; i++) cbs[i].Checked = i < 5;
+                Call(dlg, "Save", false);
+                DateTime fri = DateTime.Today;
+                while (fri.DayOfWeek != DayOfWeek.Friday) fri = fri.AddDays(1);
+                Ok("勾周一到周五保存后周五是工作日（修复前周五会变成休息日）",
+                    wd.workdays[1] && wd.workdays[5] && !wd.workdays[6] && !wd.workdays[0]
+                    && Policy.Build(wd, fri).isWorkday,
+                    "数组=" + wd.workdays[0] + wd.workdays[1] + wd.workdays[2] + wd.workdays[3]
+                    + wd.workdays[4] + wd.workdays[5] + wd.workdays[6] + " / 周五isWorkday=" + Policy.Build(wd, fri).isWorkday);
+                var stFri = StatusBuilder.Build(wd, null, fri.Date.AddHours(10), Themes.Get("midnight"));
+                Ok("固定班次下周五 10:00 显示「工作中」、预计下班 18:00（不再显示休息日）",
+                    stFri.headline != "休息日" && stFri.sub != null && stFri.sub.Contains("18:00"),
+                    "headline=" + stFri.headline + " sub=" + stFri.sub);
+            }
+
+            // 个人昵称：设置页能填；对话显示「备注 > 对方昵称 > ID」；群聊气泡带昵称
+            var nk = new Settings();
+            nk.lark.enabled = false;
+            nk.calendarEnabled = false;
+            nk.note.nickname = "小明";
+            nk.note.AddContact("93183", "");
+            nk.note.Contact("93183").nick = "阿哲";
+            using (var dlg = new SettingsForm(new SettingsStore(), nk, 6))
+            {
+                var tbNick = Get(dlg, "tbNoteNick") as TextBox;
+                Ok("纸条设置页有「昵称」输入框并带出已有昵称", tbNick != null && tbNick.Text == "小明",
+                    tbNick == null ? "没有 tbNoteNick" : "text=" + tbNick.Text);
+                if (tbNick != null) tbNick.Text = "  老王  ";
+                Call(dlg, "Save", false);
+                Ok("昵称保存时去首尾空白、最多 12 字",
+                    nk.note.nickname == "老王" && NoteSettings.MaxNick == 12, "nickname=" + nk.note.nickname);
+            }
+            Ok("个人对话没备注时显示对方昵称（自动拿到的）",
+                nk.note.Contact("93183").Display() == "阿哲", "display=" + nk.note.Contact("93183").Display());
+            nk.note.Contact("93183").remark = "老哲";
+            Ok("有本机备注时优先级更高（备注 > 昵称）",
+                nk.note.Contact("93183").Display() == "老哲", "display=" + nk.note.Contact("93183").Display());
+
+            // ---- 用户反馈 2026-11-13 ①添加对话 ②边框加粗 ③滚动 + 右键删除 ----
+
+            // 需求 2：卡片边框稍微粗一点
+            Ok("小纸条卡片边框加粗到 1.8 DIP（原来 1 DIP）", NotePanelForm.CardBorderDip >= 1.6f,
+                NotePanelForm.CardBorderDip + " DIP");
+
+            var bord = new Settings();
+            bord.lark.enabled = false;
+            bord.calendarEnabled = false;
+            bord.note.style = "columns";
+            bord.note.id = "48372";
+            bord.note.AddContact("62015", "阿哲");
+            using (var p = new NotePanelForm(bord, Themes.Get("huang-liuli"), card, true, null, null, null, null, null))
+            {
+                Call(p, "SelectContact", "62015", false);
+                Set(p, "stateAt", Environment.TickCount - 800);
+                float sc = (float)Get(p, "scale");
+                using (var bmp = RenderPanel(p))
+                {
+                    int inside = Brightness(bmp.GetPixel(bmp.Width / 2, Math.Min(bmp.Height - 1, (int)Math.Round(18 * sc))));
+                    int thick = 0;
+                    for (int y = 0; y < Math.Min(10, bmp.Height); y++)
+                    {
+                        if (Math.Abs(Brightness(bmp.GetPixel(bmp.Width / 2, y)) - inside) >= 18) thick++;
+                        else break;
+                    }
+                    Ok("边框像素厚度 ≥ 3 行（150% 下；原来 2 行）", thick >= 3, "thick=" + thick + "px inside=" + inside);
+                }
+            }
+
+            // 需求 1：添加对话 —— 任意 5 位字符建「对话码」对话；5 位数字还是个人 1:1
+            var conv = new Settings();
+            conv.lark.enabled = false;
+            conv.calendarEnabled = false;
+            conv.note.style = "drawer";
+            conv.note.id = "48372";
+            string addedCode = null;
+            string addedRemark = null;
+            using (var p = new NotePanelForm(conv, Themes.Get("midnight"), card, true, null, null, null,
+                delegate(string id, string remark) { addedCode = id; addedRemark = remark; return conv.note.AddConversation(id, remark); },
+                null, null, null))
+            {
+                Call(p, "ConfirmAdd");
+                string st = (string)Get(p, "status");
+                bool opened = (bool)Get(p, "editingField");
+                Call(p, "CloseFieldEditor");
+                Ok("空对话码点「创建对话」会提示 5 位字符并打开输入框",
+                    st != null && st.Contains("5 位字符") && opened, "status=" + st + " editor=" + opened);
+
+                Set(p, "addId", "1234");
+                Call(p, "ConfirmAdd");
+                st = (string)Get(p, "status");
+                Ok("4 位对话码建不了对话", st != null && st.Contains("5 位字符") && conv.note.contacts.Count == 0,
+                    "status=" + st + " contacts=" + conv.note.contacts.Count);
+
+                Set(p, "addId", "项目组#1");
+                Set(p, "addRemark", "项目群");
+                Call(p, "ConfirmAdd");
+                Ok("输入任意 5 位字符就建出一个对话码对话",
+                    addedCode == "项目组#1" && addedRemark == "项目群"
+                    && conv.note.Contact("项目组#1") != null && conv.note.Contact("项目组#1").IsRoom,
+                    "code=" + addedCode + " remark=" + addedRemark + " / "
+                    + (conv.note.Contact("项目组#1") == null ? "没建成" : "isRoom=" + conv.note.Contact("项目组#1").IsRoom));
+                Ok("建完直接进这个对话", Get(p, "state").ToString() == "Chat" && p.SelectedId == "项目组#1",
+                    "state=" + Get(p, "state") + " selected=" + p.SelectedId);
+
+                Set(p, "addId", "93183");
+                Set(p, "addRemark", "");
+                Call(p, "ConfirmAdd");
+                Ok("5 位数字还是按个人 ID 建 1:1 对话",
+                    conv.note.Contact("93183") != null && !conv.note.Contact("93183").IsRoom,
+                    conv.note.Contact("93183") == null ? "没建成" : "isRoom=" + conv.note.Contact("93183").IsRoom);
+            }
+
+            // 对话码对话里保留每个人的 ID：气泡带发送者 ID、历史行左边显示 ID
+            var roomSet = new Settings();
+            roomSet.lark.enabled = false;
+            roomSet.calendarEnabled = false;
+            roomSet.note.style = "drawer";
+            roomSet.note.id = "48372";
+            roomSet.note.AddConversation("项目组#1", "项目群");
+            roomSet.note.Append(new NoteMessage("93183", "项目组#1", "大家好", NoteRelay.Now()), true);
+            using (var p = new NotePanelForm(roomSet, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                Call(p, "SelectContact", "项目组#1", false);
+                var inc3 = new NoteMessage("93183", "项目组#1", "大家好", NoteRelay.Now());
+                string bubble = (string)Call(p, "BubbleText", inc3, true);
+                Ok("对话码对话的气泡带发送者 ID（方便直接按 ID 建 1:1）",
+                    bubble == "ID 93183：大家好", "bubble=" + bubble);
+                Ok("对话码对话的历史行左边显示发送者 ID", (string)Call(p, "WhoLabel", inc3) == "ID 93183",
+                    "who=" + Call(p, "WhoLabel", inc3));
+                Ok("自己发的在对话码对话里还是显示「你」",
+                    (string)Call(p, "WhoLabel", new NoteMessage("48372", "项目组#1", "收到", NoteRelay.Now())) == "你",
+                    "ok");
+            }
+
+            // v3.5：群聊里发送者昵称直接展示（消息带昵称 → 昵称；没有 → 退回 ID）
+            var nickSet = new Settings();
+            nickSet.lark.enabled = false;
+            nickSet.calendarEnabled = false;
+            nickSet.note.style = "drawer";
+            nickSet.note.id = "48372";
+            nickSet.note.nickname = "我";
+            nickSet.note.AddConversation("项目组#1", "项目群");
+            var nickMsg = new NoteMessage("93183", "项目组#1", "大家好", NoteRelay.Now(), "阿哲");
+            nickSet.note.Append(nickMsg, true);
+            using (var p = new NotePanelForm(nickSet, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                Call(p, "SelectContact", "项目组#1", false);
+                Ok("群聊气泡直接显示发送者昵称（不用看 ID）",
+                    (string)Call(p, "BubbleText", nickMsg, true) == "阿哲：大家好",
+                    "bubble=" + Call(p, "BubbleText", nickMsg, true));
+                Ok("群聊历史行左边显示发送者昵称", (string)Call(p, "WhoLabel", nickMsg) == "阿哲",
+                    "who=" + Call(p, "WhoLabel", nickMsg));
+                var noNick = new NoteMessage("11999", "项目组#1", "hi", NoteRelay.Now());
+                Ok("没有昵称的消息退回显示发送者 ID",
+                    (string)Call(p, "BubbleText", noNick, true) == "ID 11999：hi",
+                    "bubble=" + Call(p, "BubbleText", noNick, true));
+            }
+
+            // 需求 3 + v3.6.0：对话多了能滚（抽屉式联系人 > 4 个时铺两排、一屏 8 个）；右键出现删除按钮
+
+            // 3 个联系人：只铺一排，一屏 4 个、面板高还是 124 DIP
+            var few = new Settings();
+            few.lark.enabled = false;
+            few.calendarEnabled = false;
+            few.note.style = "drawer";
+            few.note.id = "48372";
+            for (int i = 0; i < 3; i++) few.note.AddConversation((10000 + i * 1111).ToString(), "对话" + i);
+            using (var p = new NotePanelForm(few, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                float sc = (float)Get(p, "scale");
+                var drawn3 = (System.Collections.IList)Get(p, "drawnContacts");
+                var strip3 = (Rectangle)Call(p, "ContactsRect");
+                Ok("抽屉式联系人 ≤ 4 个时只铺一排：一屏 4 个、面板高 124 DIP、对话条带 36 DIP",
+                    p.VisibleContactCount == 4 && drawn3.Count == 3
+                    && p.Height == (int)Math.Round(124f * sc)
+                    && strip3.Height == (int)Math.Round(36f * sc),
+                    "visible=" + p.VisibleContactCount + " drawn=" + drawn3.Count + " h=" + p.Height
+                    + " strip=" + strip3.Height + "（期望 " + (int)Math.Round(124f * sc) + " / " + (int)Math.Round(36f * sc) + "）");
+            }
+
+            // 10 个联系人：铺两排、一屏 8 个；滚一格 / 滚到底 / 进聊天页缩回一排
+            var many = new Settings();
+            many.lark.enabled = false;
+            many.calendarEnabled = false;
+            many.note.style = "drawer";
+            many.note.id = "48372";
+            for (int i = 0; i < 10; i++) many.note.AddConversation((10000 + i * 1111).ToString(), "对话" + i);
+            string deletedCb = null;
+            using (var p = new NotePanelForm(many, Themes.Get("midnight"), card, true, null, null, null, null, null, null,
+                delegate(string id) { deletedCb = id; }))
+            {
+                float sc = (float)Get(p, "scale");
+                Func<int, int> sPx = delegate(int d) { return (int)Math.Round(d * sc); };
+                var drawn = (System.Collections.IList)Get(p, "drawnContacts");
+                var strip10 = (Rectangle)Call(p, "ContactsRect");
+                Ok("抽屉式联系人 > 4 个时铺两排：一屏 8 个、面板高 158 DIP、对话条带 70 DIP",
+                    p.VisibleContactCount == 8 && drawn.Count == 8 && p.Height == sPx(158)
+                    && strip10.Height == sPx(70),
+                    "visible=" + p.VisibleContactCount + " drawn=" + drawn.Count + " h=" + p.Height
+                    + " strip=" + strip10.Height + "（期望 " + sPx(158) + " / " + sPx(70) + "）");
+
+                var c0 = (Rectangle)Call(p, "ContactRectAt", 0);
+                var c1 = (Rectangle)Call(p, "ContactRectAt", 1);
+                var c4 = (Rectangle)Call(p, "ContactRectAt", 4);
+                var c7 = (Rectangle)Call(p, "ContactRectAt", 7);
+                Ok("两排按 4 列排：第 5 个回到第一列、纵向步进 34 DIP",
+                    c4.Left == c0.Left && c4.Top - c0.Top == sPx(34)
+                    && c1.Top == c0.Top && c1.Left > c0.Right
+                    && c7.Left == c0.Left + 3 * (c1.Left - c0.Left) && c7.Top == c4.Top,
+                    "c0=" + c0 + " c4=" + c4 + " c7=" + c7);
+
+                Call(p, "ScrollContacts", 1);
+                Ok("滚一格：从第 2 个对话开始显示",
+                    p.ContactScroll == 1 && drawn.Count == 8 && ((NoteContact)drawn[0]).id == many.note.contacts[1].id,
+                    "scroll=" + p.ContactScroll + " first=" + (drawn.Count > 0 ? ((NoteContact)drawn[0]).id : "-"));
+                Call(p, "ScrollContacts", 99);
+                Ok("滚到底 clamp 到「最后 8 个」",
+                    p.ContactScroll == 2 && drawn.Count == 8
+                    && ((NoteContact)drawn[0]).id == many.note.contacts[2].id
+                    && ((NoteContact)drawn[7]).id == many.note.contacts[9].id,
+                    "scroll=" + p.ContactScroll + " first=" + (drawn.Count > 0 ? ((NoteContact)drawn[0]).id : "-"));
+                Call(p, "ScrollContacts", -99);
+                Ok("滚回顶部", p.ContactScroll == 0 && ((NoteContact)drawn[0]).id == many.note.contacts[0].id,
+                    "scroll=" + p.ContactScroll);
+
+                // 只在对列表页铺两排：进了聊天页缩回一排，别挤掉聊天区
+                Call(p, "SelectContact", many.note.contacts[1].id, false);
+                Ok("进了聊天页联系人缩回一排（visible 8 → 4）",
+                    Get(p, "state").ToString() == "Chat" && p.VisibleContactCount == 4,
+                    "state=" + Get(p, "state") + " visible=" + p.VisibleContactCount);
+
+                string victim = many.note.contacts[0].id;
+                Call(p, "SelectContact", victim, true);
+                var capsule = (Rectangle)Call(p, "ContactRectAt", 0);
+                Call(p, "OnMouseDown", new MouseEventArgs(MouseButtons.Right, 1,
+                    capsule.X + capsule.Width / 2, capsule.Y + capsule.Height / 2, 0));
+                bool hasDelete = false, hasContact = false;
+                foreach (var h in (System.Collections.IEnumerable)Get(p, "hits"))
+                {
+                    var ht = h.GetType();
+                    string kind = ht.GetField("kind").GetValue(h).ToString();
+                    if (kind == "Delete") hasDelete = true;
+                    if (kind == "Contact") hasContact = true;
+                }
+                Ok("右键对话后出现「删除」按钮命中区", hasDelete && p.DeleteId == victim && hasContact,
+                    "delete=" + hasDelete + " contact=" + hasContact + " deleteId=" + p.DeleteId);
+                var delRect = (Rectangle)Call(p, "DeleteButtonRect", capsule);
+                Call(p, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1,
+                    delRect.X + delRect.Width / 2, delRect.Y + delRect.Height / 2, 0));
+                bool threadGone = true;
+                foreach (var t in many.note.threads) if (t.contact == victim) threadGone = false;
+                Ok("点「删除」真的删掉这个对话（联系人 + 本机线程一起去，并通知 Widget 落盘）",
+                    many.note.Contact(victim) == null && threadGone && deletedCb == victim
+                    && p.DeleteId == "" && many.note.contacts.Count == 9,
+                    "contact=" + (many.note.Contact(victim) == null) + " threadGone=" + threadGone
+                    + " cb=" + deletedCb + " contacts=" + many.note.contacts.Count + " deleteId=" + p.DeleteId);
+            }
+
+            var manyCols = new Settings();
+            manyCols.lark.enabled = false;
+            manyCols.calendarEnabled = false;
+            manyCols.note.style = "columns";
+            manyCols.note.id = "48372";
+            for (int i = 0; i < 8; i++) manyCols.note.AddConversation((20000 + i * 1111).ToString(), "对话" + i);
+            using (var p = new NotePanelForm(manyCols, Themes.Get("midnight"), card, true, null, null, null, null, null))
+            {
+                var drawn = (System.Collections.IList)Get(p, "drawnContacts");
+                int vis = p.VisibleContactCount;
+                Ok("双栏一屏放 5 行对话（给底部「＋ 新建对话」留位），多了能滚",
+                    vis == 5 && vis < manyCols.note.contacts.Count,
+                    "visible=" + vis + " total=" + manyCols.note.contacts.Count);
+                Call(p, "ScrollContacts", 1);
+                Ok("双栏也能滚（滚动窗口起点跟着动）", p.ContactScroll == 1, "scroll=" + p.ContactScroll);
+                Call(p, "ScrollContacts", 99);
+                Ok("双栏滚到底 clamp 到「最后一屏能看到第 8 个对话」",
+                    p.ContactScroll == 3 && drawn.Count == 5 && ((NoteContact)drawn[4]).id == manyCols.note.contacts[7].id,
+                    "scroll=" + p.ContactScroll + " last=" + (drawn.Count > 0 ? ((NoteContact)drawn[drawn.Count - 1]).id : "-"));
+                Call(p, "ScrollContacts", -99);
+                bool addHit = false;
+                var pill = (Rectangle)Call(p, "ColumnsAddRect");
+                foreach (var h in (System.Collections.IEnumerable)Get(p, "hits"))
+                {
+                    var ht = h.GetType();
+                    if (ht.GetField("kind").GetValue(h).ToString() != "AddContact") continue;
+                    if ((Rectangle)ht.GetField("rect").GetValue(h) == pill) addHit = true;
+                }
+                Ok("双栏左栏底部「＋ 新建对话」胶囊能点（命中区和绘制位置一致）", addHit,
+                    addHit ? "ok" : "没命中区 pill=" + pill);
+            }
+
+            // v3.6.0：卡片页「＋ 新建对话」左边多一颗「昵称」胶囊，双击改本机昵称
+            var nick = new Settings();
+            nick.lark.enabled = false;
+            nick.calendarEnabled = false;
+            nick.note.style = "drawer";
+            nick.note.id = "48372";
+            nick.note.nickname = "阿哲";
+            nick.note.AddContact("62015", "小满");
+            string nickCb = null;
+            using (var p = new NotePanelForm(nick, Themes.Get("midnight"), card, true, null, null, null, null, null, null, null,
+                delegate(string n) { nickCb = n; }))
+            {
+                float sc = (float)Get(p, "scale");
+                Func<int, int> s2 = delegate(int d) { return (int)Math.Round(d * sc); };
+                var nickRect = (Rectangle)Call(p, "NickRect");
+                var header = (Rectangle)Call(p, "HeaderRect");
+                var addRect = new Rectangle(header.Right - s2(96), header.Y + s2(2), s2(96), s2(28));
+                Ok("昵称胶囊 96×28 DIP，在「＋ 新建对话」左边 8 DIP（不压住按钮）",
+                    nickRect.Width == s2(96) && nickRect.Height == s2(28)
+                    && nickRect.Right == addRect.Left - s2(8)
+                    && Rectangle.Intersect(nickRect, addRect).IsEmpty,
+                    "nick=" + nickRect + " add=" + addRect);
+                bool nickHit = false;
+                foreach (var h in (System.Collections.IEnumerable)Get(p, "hits"))
+                {
+                    var ht = h.GetType();
+                    if (ht.GetField("kind").GetValue(h).ToString() != "Nickname") continue;
+                    if ((Rectangle)ht.GetField("rect").GetValue(h) == nickRect) nickHit = true;
+                }
+                Ok("昵称胶囊有命中区（HitKind.Nickname）", nickHit, nickHit ? "ok" : "没命中区");
+                int nx = nickRect.X + nickRect.Width / 2, ny = nickRect.Y + nickRect.Height / 2;
+                Call(p, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, nx, ny, 0));
+                string nickStatus = (string)Get(p, "status");
+                Ok("单击昵称胶囊只提示「双击可以改」",
+                    nickStatus != null && nickStatus.Contains("双击"), "status=" + nickStatus);
+                Call(p, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, nx, ny, 0));
+                bool nickEditing = (bool)Get(p, "editingField");
+                var nickEditor = Get(p, "fieldEditor") as Form;
+                TextBox nickTb = FindTextBox(nickEditor);
+                Ok("双击昵称胶囊打开编辑窗（带出当前昵称，最多 12 字）",
+                    nickEditing && nickEditor != null && nickTb != null && nickTb.Text == "阿哲"
+                    && nickTb.MaxLength == NoteSettings.MaxNick,
+                    nickEditor == null ? "没开编辑窗" : "editing=" + nickEditing + " text=" + (nickTb == null ? "-" : nickTb.Text));
+                Call(p, "CloseFieldEditor");
+                Call(p, "ApplyNickname", "  老王  ");
+                Ok("改昵称去掉首尾空白、面板立刻生效、回调交给 Widget",
+                    nick.note.nickname == "老王" && nickCb == "老王",
+                    "nickname=" + nick.note.nickname + " cb=" + nickCb);
+                Call(p, "ApplyNickname", "一二三四五六七八九十十一十二十三");
+                Ok("改昵称最多 12 个字",
+                    nick.note.nickname.Length == 12 && nick.note.nickname == "一二三四五六七八九十十一",
+                    nick.note.nickname.Length + "/" + nick.note.nickname);
+            }
+        }
 
         Console.WriteLine(fail == 0 ? ("ALL PASS  (" + pass + " checks)") : ("FAILED  " + fail + " of " + (pass + fail)));
         return fail == 0 ? 0 : 1;

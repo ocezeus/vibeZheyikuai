@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
+using System.Diagnostics;
 using System.Globalization;
+using System.Threading;
 using System.IO;
 using System.Windows.Forms;
 
@@ -20,6 +22,7 @@ namespace WorkCountdown
 
         private readonly SettingsStore store;
         private Settings s;
+        private readonly int initialTab;
 
         private TabControl tabs;
 
@@ -70,6 +73,41 @@ namespace WorkCountdown
         private ComboBox cmbEventDur;
         private Label lblEventEnd;
 
+        // ---- 日程（多份日历订阅 + 四类通知样式） ----
+        private CheckedListBox lstCalendars;
+        private Label lblCalCount;
+        private Label lblCalendarState;
+        private NumericUpDown numOutlookLead;
+        private Button btnCalLogin;
+        private List<CalendarSource> editCals = new List<CalendarSource>();
+        private bool loadingCals;
+        private ComboBox[] cmbSpread;      // 四类日程的「提醒范围」
+        private ComboBox[] cmbShape;       // 「扩散样式」
+        private ComboBox[] cmbColor;       // 「配色」
+        private static readonly string[] StyleKinds = new string[]
+            { Reminders.KindFixed, Reminders.KindLark, Reminders.KindLocal, Reminders.KindOutlook };
+
+        // ---- 工资 ----
+        private NumericUpDown numSalary;
+        private NumericUpDown numPayday;
+        private Label lblSalaryPreview;
+
+        // ---- 小纸条 ----
+        private RadioButton rbNoteDrawer;
+        private RadioButton rbNoteColumns;
+        private TextBox tbNoteRelay;
+        private NumericUpDown numNotePort;
+        private Label lblNoteRelayState;
+        private Label lblNoteId;
+        private TextBox tbNoteNick;
+        private ListBox lstNoteContacts;
+        private string editNoteId = "";
+        private List<NoteContact> editNoteContacts = new List<NoteContact>();
+
+        // ---- 字体 ----
+        private string editTextFont = "";
+        private string editNumberFont = "Consolas";
+
         // ---- 外观 ----
         private ThemePicker picker;
         private Label lblThemeName;
@@ -80,21 +118,27 @@ namespace WorkCountdown
         private CheckBox cbAutoStart;
         private CheckBox cbShowLunch;
         private CheckBox cbReducedMotion;
-        private RadioButton rbSpreadCard;
-        private RadioButton rbSpreadScreen;
-        private RadioButton rbStyleCircle;
-        private RadioButton rbStyleBar;
         private ComboBox cmbGlow;
         private Button btnEditTheme;
+        private RadioButton rbBgSolid;
+        private RadioButton rbBgGlass;
 
         public SettingsForm(SettingsStore store, Settings settings)
+            : this(store, settings, 0)
+        {
+        }
+
+        /// <summary>initialTab：0 考勤 / 1 固定日程 / 2 提醒 / 3 外观 / 4 日程 / 5 工资；胶囊菜单的「详细编辑」直接落到对应页。</summary>
+        public SettingsForm(SettingsStore store, Settings settings, int initialTab)
         {
             this.store = store;
             this.s = settings;
+            this.initialTab = initialTab;
+            UiFont.Configure(settings.ui.textFont, settings.ui.numberFont);
             settings.NormalizeSchedules();          // 直接 new 出来的 Settings 也要有固定日程
             settings.NormalizeCustomThemes();
 
-            Text = "下班倒计时 · 设置";
+            Text = "上班工具箱 " + AppInfo.Version + " · 设置";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -109,6 +153,7 @@ namespace WorkCountdown
             BuildTabs();
             BuildFooter();
             LoadValues();
+            if (initialTab > 0 && initialTab < tabs.TabPages.Count) tabs.SelectedIndex = initialTab;
             ApplyDpi();
         }
 
@@ -129,7 +174,7 @@ namespace WorkCountdown
         {
             tabs = new TabControl();
             tabs.SetBounds(8, 8, 508, 578);
-            tabs.ItemSize = new Size(112, 34);
+            tabs.ItemSize = new Size(64, 34);
             tabs.SizeMode = TabSizeMode.Fixed;
             tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
             tabs.DrawItem += delegate(object sender, DrawItemEventArgs e)
@@ -144,7 +189,7 @@ namespace WorkCountdown
                     using (var b = new SolidBrush(AccentColor))
                         e.Graphics.FillRectangle(b, r.X + 16, r.Bottom - 3, r.Width - 32, 3);
                 }
-                using (var f = UiFont.Make(9.5f, sel ? FontStyle.Bold : FontStyle.Regular))
+                using (var f = UiFont.Make(9f, sel ? FontStyle.Bold : FontStyle.Regular))
                 using (var b = new SolidBrush(sel ? Ink : Muted))
                 {
                     var sf = new StringFormat();
@@ -155,10 +200,13 @@ namespace WorkCountdown
             };
 
             var p1 = new TabPage("考勤");
-            var p2 = new TabPage("固定日程");
+            var p2 = new TabPage("固定");
             var p3 = new TabPage("提醒");
             var p4 = new TabPage("外观");
-            foreach (var p in new TabPage[] { p1, p2, p3, p4 })
+            var p5 = new TabPage("日程");
+            var p6 = new TabPage("工资");
+            var p7 = new TabPage("纸条");
+            foreach (var p in new TabPage[] { p1, p2, p3, p4, p5, p6, p7 })
             {
                 p.BackColor = Color.FromArgb(246, 248, 251);
                 p.Padding = new Padding(0);
@@ -167,6 +215,9 @@ namespace WorkCountdown
             tabs.TabPages.Add(p2);
             tabs.TabPages.Add(p3);
             tabs.TabPages.Add(p4);
+            tabs.TabPages.Add(p5);
+            tabs.TabPages.Add(p6);
+            tabs.TabPages.Add(p7);
             Controls.Add(tabs);
 
             BuildPolicy(p1);
@@ -176,6 +227,12 @@ namespace WorkCountdown
             BuildSchedules(p2);
 
             BuildReminders(p3);
+
+            BuildAgenda(p5);
+
+            BuildSalary(p6);
+
+            BuildNotes(p7);
 
             BuildThemes(p4);
             BuildLook(p4);
@@ -187,7 +244,7 @@ namespace WorkCountdown
             var footer = new Label();
             footer.Text = "配置存在 " + store.Dir;
 footer.SetBounds(16, 600, 258, 20);
-            footer.ForeColor = Muted;
+            footer.ForeColor = Ui.Muted;
             footer.AutoEllipsis = true;
             Controls.Add(footer);
 
@@ -262,8 +319,10 @@ g.Controls.Add(Lbl("分", 462, 58, 22, 24));
 
         private void BuildDays(TabPage page)
         {
-var g = CardBox(page, "工作日", 8, 186, 492, 84);
+            var g = CardBox(page, "工作日", 8, 186, 492, 116);
             cbDays = new CheckBox[7];
+            // 界面顺序是「周一到周日」，而 Settings.workdays 的下标是 0=周日 .. 6=周六（DayOfWeek），
+            // 两边差一天。以前直接按下标读写，勾了周一到周五保存后周五变成休息日（v3.5 修）。
             string[] names = new string[] { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };
             for (int i = 0; i < 7; i++)
             {
@@ -273,11 +332,34 @@ var g = CardBox(page, "工作日", 8, 186, 492, 84);
                 g.Controls.Add(cb);
                 cbDays[i] = cb;
             }
+            g.Controls.Add(Hint("勾的是「固定班次」里要上班的日子；节假日 / 调休在下一条单独设。", 14, 66, 466, 18));
+            var btnMonFri = FlatButton("周一~周五", 14, 88, 96, 24);
+            btnMonFri.Click += delegate { SetWorkdayPreset(5); };
+            g.Controls.Add(btnMonFri);
+            var btnMonSat = FlatButton("周一~周六", 116, 88, 96, 24);
+            btnMonSat.Click += delegate { SetWorkdayPreset(6); };
+            g.Controls.Add(btnMonSat);
+            var btnEvery = FlatButton("每天", 218, 88, 72, 24);
+            btnEvery.Click += delegate { SetWorkdayPreset(7); };
+            g.Controls.Add(btnEvery);
+        }
+
+        /// <summary>界面第 i 个复选框（0=周一 .. 6=周日）对应的 workdays 下标（0=周日 .. 6=周六）。</summary>
+        internal static int WorkdayArrayIndex(int uiIndex)
+        {
+            return (uiIndex + 1) % 7;
+        }
+
+        /// <summary>快捷设置工作日：前 count 天（周一开头）上班，其余休息。</summary>
+        private void SetWorkdayPreset(int count)
+        {
+            if (cbDays == null) return;
+            for (int i = 0; i < 7; i++) cbDays[i].Checked = i < count;
         }
 
         private void BuildExceptions(TabPage page)
         {
-var g = CardBox(page, "节假日与调休", 8, 282, 492, 224);
+            var g = CardBox(page, "节假日与调休", 8, 314, 492, 224);
 
             dpException = new DateTimePicker();
             dpException.Format = DateTimePickerFormat.Custom;
@@ -859,17 +941,652 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             RefreshEvents();
         }
 
+        // ---------------- 工资 ----------------
+
+        /// <summary>
+        /// 「工资」页：月工资 + 发薪日。应出勤天数按「考勤」页的工作日 / 节假日 / 调休自动算，
+        /// 不再单独填；今日收入按打卡时间实时累计，保留 3 位小数。
+        /// </summary>
+        private void BuildSalary(TabPage page)
+        {
+            var g = CardBox(page, "工资设置", 8, 8, 492, 170);
+
+            g.Controls.Add(Lbl("月工资", 14, 30, 54, 24));
+            numSalary = new NumericUpDown();
+            numSalary.DecimalPlaces = 2;
+            numSalary.Minimum = 0m;
+            numSalary.Maximum = 10000000m;
+            numSalary.Increment = 500m;
+            numSalary.SetBounds(72, 28, 140, 24);
+            numSalary.TextAlign = HorizontalAlignment.Right;
+            numSalary.ValueChanged += delegate { UpdateSalaryPreview(); };
+            g.Controls.Add(numSalary);
+            g.Controls.Add(Lbl("元 / 月", 220, 30, 54, 24));
+
+            g.Controls.Add(Lbl("发薪日", 292, 30, 50, 24));
+            numPayday = Num(15, 344, 28, 56, 1, 31);
+            numPayday.ValueChanged += delegate { UpdateSalaryPreview(); };
+            g.Controls.Add(numPayday);
+            g.Controls.Add(Lbl("号", 406, 30, 20, 24));
+
+            g.Controls.Add(Hint("发薪日填 1–31；当月没有这一天（比如 31 号）时按当月最后一天算。", 14, 64, 466, 20));
+
+            lblSalaryPreview = Hint("", 14, 92, 466, 62);
+            g.Controls.Add(lblSalaryPreview);
+
+            var n = CardBox(page, "怎么算", 8, 186, 492, 306);
+            string[] lines = new string[]
+            {
+                "日薪 = 月工资 ÷ 本月应出勤天数（按「考勤」页的工作日、节假日、调休自动算）",
+                "时薪 = 日薪 ÷ 当日应勤时长（固定班次扣掉午休 / 晚休，弹性班次用填的应勤时长）",
+                "今日收入 = 时薪 × 今天已工作秒数，实时累计，最多到日薪；保留 3 位小数",
+                "本月收入 = 日薪 × 本月已完成的工作日 + 今日收入",
+                "只按「日期 + 今天这一次打卡」推算：没有历史打卡记录，默认之前的工作日都正常出勤",
+                "卡片右上角 ¥：单击展开 / 收起工资面板，双击固定在展开状态"
+            };
+            for (int i = 0; i < lines.Length; i++)
+                n.Controls.Add(Hint("· " + lines[i], 14, 28 + i * 42, 466, 38));
+
+            n.Controls.Add(Hint("改完点下面的「保存」，卡片右上角就会出现工资按钮。", 14, 278, 466, 20));
+        }
+
+        private void UpdateSalaryPreview()
+        {
+            if (lblSalaryPreview == null || numSalary == null) return;
+            decimal monthly = numSalary.Value;
+            if (monthly <= 0m)
+            {
+                lblSalaryPreview.Text = "填上月工资后，卡片右上角会出现 ¥ 按钮；没填时点它会直接打开这一页。";
+                return;
+            }
+            int days = SalaryCalc.RequiredWorkdays(s, DateTime.Now);
+            decimal daily = monthly / Math.Max(1, days);
+            lblSalaryPreview.Text = "本月应出勤 " + days + " 个工作日 · 日薪约 ¥" +
+                daily.ToString("N2", CultureInfo.InvariantCulture) +
+                " · 按今天 " + DateTime.Now.ToString("M月d日", CultureInfo.InvariantCulture) + " 实时累计";
+        }
+
+        // ---------------- 小纸条（第 7 页） ----------------
+
+        private void BuildNotes(TabPage page)
+        {
+            var styleCard = CardBox(page, "会话面板样式", 8, 8, 492, 122);
+            rbNoteDrawer = new RadioButton();
+            rbNoteDrawer.Text = "抽屉式（A）";
+            rbNoteDrawer.SetBounds(16, 30, 180, 24);
+            rbNoteDrawer.ForeColor = Ui.Ink;
+            rbNoteDrawer.BackColor = Color.Transparent;
+            styleCard.Controls.Add(rbNoteDrawer);
+            rbNoteColumns = new RadioButton();
+            rbNoteColumns.Text = "极简双栏（C）";
+            rbNoteColumns.SetBounds(16, 78, 180, 24);
+            rbNoteColumns.ForeColor = Ui.Ink;
+            rbNoteColumns.BackColor = Color.Transparent;
+            styleCard.Controls.Add(rbNoteColumns);
+            styleCard.Controls.Add(Hint("392 宽抽屉 + 横排胶囊 + 8 条紧凑列表", 200, 32, 280, 20));
+            styleCard.Controls.Add(Hint("470 宽双栏：左栏联系人 + 右栏对话", 200, 80, 280, 20));
+
+            var idCard = CardBox(page, "本机 ID 与昵称", 8, 138, 492, 132);
+            lblNoteId = new Label();
+            lblNoteId.Text = "00000";
+            lblNoteId.SetBounds(14, 26, 150, 34);
+            lblNoteId.Font = UiFont.MakeNumber(18f, FontStyle.Bold);
+            lblNoteId.ForeColor = Ui.Ink;
+            idCard.Controls.Add(lblNoteId);
+            idCard.Controls.Add(Hint("别人加你 / 群里发消息会显示这个昵称", 190, 30, 290, 18));
+            idCard.Controls.Add(Lbl("昵称", 14, 66, 40, 22));
+            tbNoteNick = Tb("", 58, 64, 200);
+            tbNoteNick.MaxLength = NoteSettings.MaxNick;
+            idCard.Controls.Add(tbNoteNick);
+            var btnCopy = FlatButton("复制 ID", 14, 96, 84, 28);
+            btnCopy.Click += delegate { try { Clipboard.SetText(editNoteId); } catch { } };
+            idCard.Controls.Add(btnCopy);
+            var btnNewId = FlatButton("重新生成…", 106, 96, 116, 28);
+            btnNewId.Click += delegate
+            {
+                if (MessageBox.Show(this, "重新生成后这台电脑的 ID 会变，旧联系人需要重新加。继续？",
+                    "重新生成 ID", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                editNoteId = NoteSettings.GenerateId();
+                lblNoteId.Text = editNoteId;
+            };
+            idCard.Controls.Add(btnNewId);
+            idCard.Controls.Add(Hint("每台电脑一个 5 位数，别人用它直接和你对话", 236, 100, 250, 18));
+
+            var relayCard = CardBox(page, "公共中继", 8, 278, 492, 110);
+            relayCard.Controls.Add(Lbl("中继地址", 14, 28, 66, 24));
+            tbNoteRelay = Tb("", 84, 28, 246);
+            relayCard.Controls.Add(tbNoteRelay);
+            relayCard.Controls.Add(Lbl("端口", 340, 28, 40, 24));
+            numNotePort = Num(1883, 382, 28, 66, 1, 65535);
+            relayCard.Controls.Add(numNotePort);
+            var btnRelay = FlatButton("测试连接", 14, 66, 96, 28);
+            btnRelay.Click += delegate { TestNoteRelay(); };
+            relayCard.Controls.Add(btnRelay);
+            lblNoteRelayState = Hint("", 118, 68, 360, 24);
+            relayCard.Controls.Add(lblNoteRelayState);
+            relayCard.Controls.Add(Hint("公共 MQTT：只按 ID 转发、不保存，别发敏感内容", 14, 88, 466, 18));
+
+            var ctCard = CardBox(page, "对话", 8, 396, 492, 174);
+            lstNoteContacts = new ListBox();
+            lstNoteContacts.SetBounds(14, 26, 464, 70);
+            lstNoteContacts.BorderStyle = BorderStyle.FixedSingle;
+            lstNoteContacts.Font = UiFont.Make(9f, FontStyle.Regular);
+            ctCard.Controls.Add(lstNoteContacts);
+            var btnAddNote = FlatButton("＋ 新建对话", 14, 104, 96, 28);
+            btnAddNote.FlatAppearance.BorderColor = AccentColor;
+            btnAddNote.ForeColor = AccentColor;
+            btnAddNote.Click += delegate { AddNoteContactDialog(); };
+            ctCard.Controls.Add(btnAddNote);
+            var btnRemark = FlatButton("改名字", 118, 104, 84, 28);
+            btnRemark.Click += delegate { EditNoteRemarkDialog(); };
+            ctCard.Controls.Add(btnRemark);
+            var btnDel = FlatButton("删除", 210, 104, 84, 28);
+            btnDel.Click += delegate { DeleteNoteContact(); };
+            ctCard.Controls.Add(btnDel);
+            ctCard.Controls.Add(Hint("5 位数字 = 单独对话；其它 5 位字符 = 对话码，同码的人进同一个对话", 300, 96, 186, 36));
+        }
+
+        private void FillNoteContacts()
+        {
+            if (lstNoteContacts == null) return;
+            int keep = lstNoteContacts.SelectedIndex;
+            lstNoteContacts.BeginUpdate();
+            lstNoteContacts.Items.Clear();
+            foreach (var c in editNoteContacts)
+            {
+                var th = s.note.Thread(c.id);
+                string last = "";
+                if (th.messages.Count > 0)
+                {
+                    var m = th.messages[th.messages.Count - 1];
+                    last = " · " + (m.text.Length > 12 ? m.text.Substring(0, 12) + "…" : m.text);
+                }
+                string tag = c.IsRoom ? "对话码 " + c.id : "ID " + c.id;
+                string name = string.IsNullOrWhiteSpace(c.remark) ? (c.nick ?? "") : c.remark;
+                string line = string.IsNullOrWhiteSpace(name) ? tag : name + " · " + tag;
+                lstNoteContacts.Items.Add(line + last);
+            }
+            lstNoteContacts.EndUpdate();
+            if (keep >= 0 && keep < lstNoteContacts.Items.Count) lstNoteContacts.SelectedIndex = keep;
+        }
+
+        private void AddNoteContactDialog()
+        {
+            using (var dlg = new NoteContactDialog("新建对话", "", "", true))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                string code = NoteSettings.NormalizeCode(dlg.ContactId);
+                if (!NoteSettings.ValidCode(code))
+                {
+                    MessageBox.Show(this, "要 5 位字符：5 位数字 = 和这个人单独对话；其它 5 位字符 = 对话码，别人输入同一个码就进同一个对话。",
+                        "对话码格式不对", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                bool dup = false;
+                foreach (var c in editNoteContacts) if (c.id == code) { c.remark = dlg.Remark; dup = true; break; }
+                if (!dup)
+                {
+                    var c = new NoteContact();
+                    c.id = code;
+                    c.remark = dlg.Remark;
+                    editNoteContacts.Add(c);
+                }
+                FillNoteContacts();
+            }
+        }
+
+        private void EditNoteRemarkDialog()
+        {
+            if (lstNoteContacts.SelectedIndex < 0 || lstNoteContacts.SelectedIndex >= editNoteContacts.Count) return;
+            var c = editNoteContacts[lstNoteContacts.SelectedIndex];
+            using (var dlg = new NoteContactDialog("改名字", c.id, c.remark, false))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                c.remark = dlg.Remark;
+                FillNoteContacts();
+            }
+        }
+
+        private void DeleteNoteContact()
+        {
+            if (lstNoteContacts.SelectedIndex < 0 || lstNoteContacts.SelectedIndex >= editNoteContacts.Count) return;
+            var c = editNoteContacts[lstNoteContacts.SelectedIndex];
+            if (MessageBox.Show(this, "删除对话「" + c.Display() + "」？本机这段对话（最多 8 条消息）也一起删掉。",
+                "删除对话", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            editNoteContacts.RemoveAt(lstNoteContacts.SelectedIndex);
+            s.note.RemoveContact(c.id);
+            FillNoteContacts();
+        }
+
+        private void TestNoteRelay()
+        {
+            string host = tbNoteRelay.Text.Trim();
+            int port = (int)numNotePort.Value;
+            lblNoteRelayState.Text = "连接中…";
+            lblNoteRelayState.ForeColor = Ui.Muted;
+            Application.DoEvents();
+            try
+            {
+                using (var c = new System.Net.Sockets.TcpClient())
+                {
+                    var ar = c.BeginConnect(host, port, null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(5000)) throw new Exception("连接超时");
+                    c.EndConnect(ar);
+                    var st = c.GetStream();
+                    var pkt = NoteRelay.ConnectPacket();
+                    st.Write(pkt, 0, pkt.Length);
+                    st.ReadTimeout = 5000;
+                    var buf = new byte[4];
+                    int n = st.Read(buf, 0, 4);
+                    if (n < 4 || buf[0] != 0x20 || buf[3] != 0) throw new Exception("MQTT 拒绝");
+                    lblNoteRelayState.Text = "● 已连接";
+                    lblNoteRelayState.ForeColor = Color.FromArgb(44, 139, 90);
+                }
+            }
+            catch (Exception ex)
+            {
+                lblNoteRelayState.Text = "连接失败：" + ex.Message;
+                lblNoteRelayState.ForeColor = Color.FromArgb(205, 90, 70);
+            }
+        }
+
+        private static List<NoteContact> CloneNoteContacts(List<NoteContact> src)
+        {
+            var list = new List<NoteContact>();
+            if (src == null) return list;
+            foreach (var c in src)
+            {
+                if (c == null) continue;
+                var n = new NoteContact();
+                n.id = c.id;
+                n.remark = c.remark;
+                n.nick = c.nick;      // 对方自己设的昵称：保存时别丢（否则列表会退回显示 ID）
+                list.Add(n);
+            }
+            return list;
+        }
+
+        private class NoteContactDialog : Form
+        {
+            private readonly TextBox tbId;
+            private readonly TextBox tbRemark;
+            public string ContactId { get { return tbId.Text.Trim(); } }
+            public string Remark { get { return tbRemark.Text.Trim(); } }
+
+            public NoteContactDialog(string title, string id, string remark, bool idEditable)
+            {
+                Text = title;
+                FormBorderStyle = FormBorderStyle.FixedDialog;
+                MaximizeBox = false;
+                MinimizeBox = false;
+                ShowInTaskbar = false;
+                StartPosition = FormStartPosition.CenterParent;
+                ClientSize = new Size(380, 196);
+                BackColor = Color.White;
+                Font = UiFont.Make(9f, FontStyle.Regular);
+                AutoScaleMode = AutoScaleMode.None;
+
+                var l1 = new Label(); l1.Text = "5 位 ID / 对话码"; l1.SetBounds(14, 18, 110, 22);
+                l1.ForeColor = Ui.Ink; Controls.Add(l1);
+                tbId = new TextBox(); tbId.SetBounds(126, 16, 240, 24);
+                tbId.Text = id; tbId.MaxLength = 5; tbId.Enabled = idEditable;
+                Controls.Add(tbId);
+
+                var l2 = new Label(); l2.Text = "名字（≤8 字）"; l2.SetBounds(14, 56, 110, 22);
+                l2.ForeColor = Ui.Ink; Controls.Add(l2);
+                tbRemark = new TextBox(); tbRemark.SetBounds(126, 54, 240, 24);
+                tbRemark.Text = remark; tbRemark.MaxLength = NoteSettings.MaxRemark;
+                Controls.Add(tbRemark);
+
+                var hint = new Label();
+                hint.SetBounds(14, 90, 352, 48);
+                hint.ForeColor = Ui.Muted;
+                hint.Text = "5 位数字 = 和这个 ID 的人单独对话；其它任意 5 位字符 = 对话码，别人输入同一个码就进同一个对话。";
+                Controls.Add(hint);
+
+                var ok = new Button();
+                ok.Text = "确定";
+                ok.SetBounds(170, 142, 96, 34);
+                ok.FlatStyle = FlatStyle.Flat;
+                ok.FlatAppearance.BorderSize = 0;
+                ok.BackColor = Ui.Accent;
+                ok.ForeColor = Color.White;
+                ok.DialogResult = DialogResult.OK;
+                Controls.Add(ok);
+                AcceptButton = ok;
+
+                var cancel = new Button();
+                cancel.Text = "取消";
+                cancel.SetBounds(272, 142, 96, 34);
+                cancel.FlatStyle = FlatStyle.Flat;
+                cancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
+                cancel.BackColor = Color.White;
+                cancel.DialogResult = DialogResult.Cancel;
+                Controls.Add(cancel);
+                CancelButton = cancel;
+
+                float k;
+                using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
+                if (Math.Abs(k - 1f) > 0.01f) { SuspendLayout(); Scale(new SizeF(k, k)); ResumeLayout(true); }
+            }
+        }
+
+        // ---------------- 日程（四类 + Outlook） ----------------
+
+        /// <summary>
+        /// 「日程」页：多份 Outlook/Exchange 日历订阅 + 四类日程各自的通知样式。
+        /// 四类 = 固定日程 / 飞书会议 / 普通日程 / Outlook 日程，每类一套「范围 + 扩散样式 + 配色」。
+        /// </summary>
+        private void BuildAgenda(TabPage page)
+        {
+            var ol = CardBox(page, "Outlook / Exchange 日历", 8, 8, 492, 264);
+
+            lblCalCount = Lbl("0 份日历", 14, 28, 96, 22);
+            ol.Controls.Add(lblCalCount);
+            ol.Controls.Add(Lbl("默认提前", 118, 28, 56, 22));
+            numOutlookLead = Num(10, 178, 26, 50, 0, 120);
+            ol.Controls.Add(numOutlookLead);
+            ol.Controls.Add(Lbl("分", 232, 28, 20, 22));
+
+            var btnAdd = FlatButton("＋ 添加", 286, 24, 88, 28);
+            btnAdd.FlatAppearance.BorderColor = AccentColor;
+            btnAdd.ForeColor = AccentColor;
+            btnAdd.Click += delegate { EditCalendar(null); };
+            ol.Controls.Add(btnAdd);
+
+            btnCalLogin = FlatButton("Outlook 登录", 382, 24, 96, 28);
+            btnCalLogin.Click += delegate { OpenOutlookLogin(); };
+            ol.Controls.Add(btnCalLogin);
+
+            lstCalendars = new CheckedListBox();
+            lstCalendars.SetBounds(14, 58, 464, 112);
+            lstCalendars.CheckOnClick = true;
+            lstCalendars.IntegralHeight = false;
+            lstCalendars.BorderStyle = BorderStyle.FixedSingle;
+            lstCalendars.Font = UiFont.Make(9f, FontStyle.Regular);
+            lstCalendars.ItemCheck += delegate(object sender, ItemCheckEventArgs e)
+            {
+                if (loadingCals || e.Index < 0 || e.Index >= editCals.Count) return;
+                // ItemCheck 触发时勾选状态还没变，按 NewValue 预写
+                editCals[e.Index].enabled = e.NewValue == CheckState.Checked;
+                if (!IsDisposed) BeginInvoke((MethodInvoker)delegate { RefreshCalendarLabel(); });
+            };
+            lstCalendars.DoubleClick += delegate { EditCalendar(SelectedCalendar()); };
+            ol.Controls.Add(lstCalendars);
+
+            var btnEdit = FlatButton("编辑…", 14, 178, 76, 28);
+            btnEdit.Click += delegate { EditCalendar(SelectedCalendar()); };
+            ol.Controls.Add(btnEdit);
+
+            var btnDelete = FlatButton("删除", 98, 178, 64, 28);
+            btnDelete.Click += delegate { DeleteCalendar(SelectedCalendar()); };
+            ol.Controls.Add(btnDelete);
+
+            var btnSync = FlatButton("立即同步", 170, 178, 96, 28);
+            btnSync.FlatAppearance.BorderColor = AccentColor;
+            btnSync.ForeColor = AccentColor;
+            btnSync.Click += delegate { SyncCalendarsNow(); };
+            ol.Controls.Add(btnSync);
+
+            lblCalendarState = Hint("还没同步过。", 274, 176, 204, 52);
+            ol.Controls.Add(lblCalendarState);
+
+            ol.Controls.Add(Hint("可同时订阅多份日历（工作日历 / 个人日历）；双击一行编辑。", 14, 232, 464, 22));
+
+            var st = CardBox(page, "四类日程的通知样式", 8, 280, 492, 258);
+            st.Controls.Add(Lbl("日程类型", 14, 30, 90, 24));
+            st.Controls.Add(Lbl("提醒范围", 116, 30, 70, 24));
+            st.Controls.Add(Lbl("扩散样式", 196, 30, 80, 24));
+            st.Controls.Add(Lbl("配色", 314, 30, 50, 24));
+
+            cmbSpread = new ComboBox[4];
+            cmbShape = new ComboBox[4];
+            cmbColor = new ComboBox[4];
+            string[] spreadText = new string[] { "卡内", "全屏" };
+            string[] shapeText = new string[] { "圆形柔光", "进度条拉伸", "警戒带" };
+            for (int i = 0; i < StyleKinds.Length; i++)
+            {
+                int y = 58 + i * 44;
+                st.Controls.Add(Lbl(Reminders.KindName(StyleKinds[i]), 14, y, 100, 24));
+
+                cmbSpread[i] = new ComboBox();
+                cmbSpread[i].DropDownStyle = ComboBoxStyle.DropDownList;
+                foreach (string x in spreadText) cmbSpread[i].Items.Add(x);
+                cmbSpread[i].SetBounds(106, y - 2, 78, 24);
+                st.Controls.Add(cmbSpread[i]);
+
+                cmbShape[i] = new ComboBox();
+                cmbShape[i].DropDownStyle = ComboBoxStyle.DropDownList;
+                foreach (string x in shapeText) cmbShape[i].Items.Add(x);
+                cmbShape[i].SetBounds(190, y - 2, 112, 24);
+                st.Controls.Add(cmbShape[i]);
+
+                cmbColor[i] = new ComboBox();
+                cmbColor[i].DropDownStyle = ComboBoxStyle.DropDownList;
+                foreach (string id in ReminderStyles.Ids) cmbColor[i].Items.Add(ReminderStyles.ShortNameOf(id));
+                cmbColor[i].SetBounds(306, y - 2, 170, 24);
+                st.Controls.Add(cmbColor[i]);
+            }
+            st.Controls.Add(Hint("固定日程的每一条还能在「固定日程」页单独选配色，那里选的优先。", 14, 232, 466, 22));
+        }
+
+        private int ColorIndex(string id)
+        {
+            if (string.IsNullOrEmpty(id) || id == ReminderStyles.Follow) return 0;
+            var all = Themes.All;
+            for (int i = 0; i < all.Length; i++)
+                if (all[i].id == id) return i + 1;
+            return 0;
+        }
+
+        /// <summary>日历列表一行：名字 · 类型 · 提前量。</summary>
+        private void FillCalendarList()
+        {
+            if (lstCalendars == null) return;
+            int sel = lstCalendars.SelectedIndex;
+            loadingCals = true;
+            lstCalendars.BeginUpdate();
+            lstCalendars.Items.Clear();
+            foreach (var c in editCals) lstCalendars.Items.Add(c.DisplayName, c.enabled);
+            lstCalendars.EndUpdate();
+            loadingCals = false;
+            if (lstCalendars.Items.Count > 0)
+                lstCalendars.SelectedIndex = (sel >= 0 && sel < lstCalendars.Items.Count) ? sel : 0;
+            RefreshCalendarLabel();
+            UpdateOutlookState();
+        }
+
+        private CalendarSource SelectedCalendar()
+        {
+            if (lstCalendars == null) return null;
+            int i = lstCalendars.SelectedIndex;
+            if (i < 0 || i >= editCals.Count) return null;
+            return editCals[i];
+        }
+
+        private void RefreshCalendarLabel()
+        {
+            if (lblCalCount == null) return;
+            int active = 0;
+            foreach (var c in editCals) if (c.enabled && c.HasSource) active++;
+            lblCalCount.Text = editCals.Count + " 份 · " + active + " 启用";
+        }
+
+        private static List<CalendarSource> CloneCalendars(List<CalendarSource> src)
+        {
+            var list = new List<CalendarSource>();
+            if (src == null) return list;
+            foreach (var c in src)
+            {
+                if (c == null) continue;
+                var n = new CalendarSource();
+                n.id = c.id;
+                n.name = c.name;
+                n.enabled = c.enabled;
+                n.source = c.source;
+                n.url = c.url;
+                n.path = c.path;
+                n.leadMinutes = c.leadMinutes;
+                n.lastSync = c.lastSync;
+                n.lastError = c.lastError;
+                n.cached = c.cached == null ? new List<ReminderEvent>() : new List<ReminderEvent>(c.cached);
+                list.Add(n);
+            }
+            return list;
+        }
+
+        private void UpdateOutlookState()
+        {
+            if (btnCalLogin != null)
+                btnCalLogin.Text = string.IsNullOrWhiteSpace(s.outlook.refreshToken) ? "Outlook 登录" : "Outlook 账号";
+            if (lblCalendarState == null) return;
+            int active = 0;
+            string newest = "";
+            foreach (var c in editCals)
+            {
+                if (c.enabled && c.HasSource) active++;
+                if (!string.IsNullOrEmpty(c.lastSync) && c.lastSync.CompareTo(newest) > 0) newest = c.lastSync;
+            }
+            string text = active + " 份启用";
+            if (!string.IsNullOrEmpty(newest)) text += " · 上次同步 " + newest;
+            else if (!string.IsNullOrEmpty(s.outlook.lastSync)) text += " · 上次同步 " + s.outlook.lastSync;
+            if (!string.IsNullOrEmpty(s.outlook.lastError))
+                text += "\n" + LarkClient.Shorten(s.outlook.lastError, 62);
+            lblCalendarState.Text = text;
+        }
+
+        /// <summary>添加 / 编辑一份日历；existing 为 null 表示新增。</summary>
+        private void EditCalendar(CalendarSource existing)
+        {
+            bool isNew = existing == null;
+            var seed = isNew ? new CalendarSource() : CloneCalendars(new List<CalendarSource> { existing })[0];
+            if (isNew)
+            {
+                seed.id = "cal-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                seed.name = "我的日历";
+            }
+            using (var dlg = new CalendarEditForm(seed, isNew, !string.IsNullOrWhiteSpace(s.outlook.refreshToken)))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                var result = dlg.Result;
+                if (result.source == "graph")
+                {
+                    foreach (var c in editCals)
+                    {
+                        if (c == existing) continue;
+                        if (c.source == "graph")
+                        {
+                            MessageBox.Show(this, "只能添加一份「登录 Outlook」日历；其它日历请用 .ics 订阅。",
+                                "已经有一份登录日历", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                            return;
+                        }
+                    }
+                }
+                if (isNew) editCals.Add(result);
+                else
+                {
+                    int idx = editCals.IndexOf(existing);
+                    if (idx >= 0) editCals[idx] = result;
+                }
+                FillCalendarList();
+            }
+        }
+
+        private void DeleteCalendar(CalendarSource c)
+        {
+            if (c == null) return;
+            if (MessageBox.Show(this, "删除日历「" + c.DisplayName + "」？只会删本地订阅，不会动 Outlook 里的日历。",
+                    "删除日历", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            editCals.Remove(c);
+            FillCalendarList();
+        }
+
+        /// <summary>把工作副本里的所有启用日历拉一遍（点击时同步，不等待定时器）。</summary>
+        private void SyncCalendarsNow()
+        {
+            var active = new List<CalendarSource>();
+            foreach (var c in editCals) if (c.enabled && c.HasSource) active.Add(c);
+            if (active.Count == 0)
+            {
+                MessageBox.Show(this, "先添加一份日历并勾选启用。", "没有可同步的日历",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            Cursor = Cursors.WaitCursor;
+            try
+            {
+                int total = 0;
+                var errors = new List<string>();
+                foreach (var c in active)
+                {
+                    string err;
+                    var list = CalendarSync.Fetch(s.outlook, c, DateTime.Today, DateTime.Today.AddDays(14), 20000, out err);
+                    if (list != null)
+                    {
+                        c.cached = list;
+                        c.lastSync = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                        c.lastError = "";
+                        total += list.Count;
+                    }
+                    else
+                    {
+                        c.lastError = err;
+                        errors.Add((string.IsNullOrWhiteSpace(c.name) ? "日历" : c.name) + "：" + err);
+                    }
+                }
+                s.outlook.lastError = errors.Count == 0 ? "" : string.Join("；", errors.ToArray());
+                FillCalendarList();
+                lblCalendarState.Text = errors.Count == 0
+                    ? "同步成功：" + total + " 个日程（未来 14 天）"
+                    : "部分失败：" + LarkClient.Shorten(s.outlook.lastError, 70);
+            }
+            finally { Cursor = Cursors.Default; }
+        }
+
+        /// <summary>打开 Outlook 登录窗；首次登录成功后自动加一份 Graph 日历并同步。</summary>
+        private void OpenOutlookLogin()
+        {
+            bool wasLogged = !string.IsNullOrWhiteSpace(s.outlook.refreshToken);
+            using (var dlg = new OutlookLoginForm(s, store))
+            {
+                dlg.ShowDialog(this);
+                bool logged = !string.IsNullOrWhiteSpace(s.outlook.refreshToken);
+                bool hasGraph = editCals.Exists(delegate (CalendarSource c) { return c.source == "graph"; });
+                if (logged)
+                {
+                    // 刚登录：把已有的 Graph 日历重新启用（之前没登录会被 Normalize 停用）
+                    foreach (var c in editCals) if (c.source == "graph") c.enabled = true;
+                }
+                if (logged && !hasGraph)
+                {
+                    var c = new CalendarSource();
+                    c.id = "cal-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+                    c.name = string.IsNullOrWhiteSpace(s.outlook.account) ? "Outlook 登录日历" : s.outlook.account;
+                    c.source = "graph";
+                    c.enabled = true;
+                    editCals.Add(c);
+                    FillCalendarList();
+                }
+                else if (!logged && hasGraph)
+                {
+                    // 退出登录：把 graph 日历停用，避免一直去拉失败
+                    foreach (var c in editCals) if (c.source == "graph") c.enabled = false;
+                    FillCalendarList();
+                }
+                if (!wasLogged && logged) SyncCalendarsNow();
+            }
+        }
         // ---------------- 外观 ----------------
 
         private void BuildThemes(TabPage page)
         {
-            var g = CardBox(page, "主题配色", 8, 8, 492, 196);
+            var g = CardBox(page, "主题配色", 8, 8, 492, 232);
             picker = new ThemePicker();
             picker.SetBounds(14, 30, 456, 122);
             picker.SelectedIdChanged += delegate { UpdateThemeName(); };
             g.Controls.Add(picker);
             lblThemeName = Lbl("", 14, 160, 210, 20);
-            lblThemeName.ForeColor = Muted;
+            lblThemeName.ForeColor = Ui.Muted;
             g.Controls.Add(lblThemeName);
 
             btnEditTheme = FlatButton("编辑", 240, 156, 70, 28);
@@ -883,6 +1600,22 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnCustom.ForeColor = AccentColor;
             btnCustom.Click += delegate { NewCustomTheme(); };
             g.Controls.Add(btnCustom);
+
+            // 背景风格：纯色 / 磨砂玻璃（作用于悬浮卡片、小纸条面板、右键胶囊气泡）
+            g.Controls.Add(Lbl("背景风格", 14, 198, 62, 22));
+            rbBgSolid = new RadioButton();
+            rbBgSolid.Text = "纯色";
+            rbBgSolid.SetBounds(84, 196, 64, 24);
+            rbBgSolid.ForeColor = Ui.Ink;
+            rbBgSolid.BackColor = Color.Transparent;
+            g.Controls.Add(rbBgSolid);
+            rbBgGlass = new RadioButton();
+            rbBgGlass.Text = "磨砂玻璃";
+            rbBgGlass.SetBounds(156, 196, 96, 24);
+            rbBgGlass.ForeColor = Ui.Ink;
+            rbBgGlass.BackColor = Color.Transparent;
+            g.Controls.Add(rbBgGlass);
+            g.Controls.Add(Hint("磨砂玻璃：半透明 + 磨砂颗粒", 258, 198, 222, 20));
         }
 
         private void UpdateThemeName()
@@ -961,7 +1694,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildLook(TabPage page)
         {
-            var g = CardBox(page, "外观与提醒", 8, 212, 492, 224);
+            var g = CardBox(page, "外观与提醒", 8, 248, 492, 190);
 
             g.Controls.Add(Lbl("不透明度", 14, 28, 58, 24));
             numOpacity = Num(94, 76, 28, 56, 30, 100);
@@ -1000,43 +1733,29 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             g.Controls.Add(numReminderHold);
             g.Controls.Add(Lbl("秒（3–20），之后常驻到时段结束", 140, 106, 330, 24));
 
-            g.Controls.Add(Lbl("提醒扩散", 14, 132, 58, 24));
-            var spreadPair = new Panel();
-            spreadPair.SetBounds(76, 132, 220, 24);
-            spreadPair.BackColor = Ui.CardBg;
-            g.Controls.Add(spreadPair);
-            rbSpreadCard = new RadioButton();
-            rbSpreadCard.Text = "仅卡片";
-            rbSpreadCard.SetBounds(0, 0, 76, 22);
-            spreadPair.Controls.Add(rbSpreadCard);
-            rbSpreadScreen = new RadioButton();
-            rbSpreadScreen.Text = "全屏";
-            rbSpreadScreen.SetBounds(80, 0, 62, 22);
-            spreadPair.Controls.Add(rbSpreadScreen);
-
-            g.Controls.Add(Lbl("扩散样式", 14, 158, 58, 24));
-            var stylePair = new Panel();
-            stylePair.SetBounds(76, 158, 260, 24);
-            stylePair.BackColor = Ui.CardBg;
-            g.Controls.Add(stylePair);
-            rbStyleCircle = new RadioButton();
-            rbStyleCircle.Text = "圆形柔光";
-            rbStyleCircle.SetBounds(0, 0, 86, 22);
-            stylePair.Controls.Add(rbStyleCircle);
-            rbStyleBar = new RadioButton();
-            rbStyleBar.Text = "进度条拉伸";
-            rbStyleBar.SetBounds(90, 0, 100, 22);
-            stylePair.Controls.Add(rbStyleBar);
-
-            g.Controls.Add(Lbl("背景光效", 14, 184, 58, 24));
+            g.Controls.Add(Lbl("背景光效", 14, 134, 58, 24));
             cmbGlow = new ComboBox();
             cmbGlow.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbGlow.SetBounds(76, 182, 170, 24);
+            cmbGlow.SetBounds(76, 132, 170, 24);
             cmbGlow.Items.AddRange(new object[] { "原样式（默认）", "角落柔光 A", "进度条同色光 B", "两种都开 A+B" });
             g.Controls.Add(cmbGlow);
-            g.Controls.Add(Lbl("强度 1.6×", 254, 184, 90, 22));
+            g.Controls.Add(Lbl("强度 1.6×", 254, 134, 90, 22));
 
-            g.Controls.Add(Hint("固定日程按各自配色；其余提醒跟随当前主题。", 14, 206, 466, 16));
+            var btnFonts = FlatButton("字体…", 350, 132, 116, 28);
+            btnFonts.Click += delegate { ChooseFonts(); };
+            g.Controls.Add(btnFonts);
+
+            g.Controls.Add(Hint("提醒的范围 / 扩散样式 / 配色按四类日程分开设，在「日程」页。", 14, 160, 466, 20));
+        }
+
+        private void ChooseFonts()
+        {
+            using (var dlg = new FontsForm(editTextFont, editNumberFont))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                editTextFont = dlg.ResultTextFont;
+                editNumberFont = dlg.ResultNumberFont;
+            }
         }
 
         private void BuildBackup(TabPage page)
@@ -1118,6 +1837,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void LoadValues()
         {
+            editTextFont = string.IsNullOrWhiteSpace(s.ui.textFont) ? "" : s.ui.textFont;
+            editNumberFont = string.IsNullOrWhiteSpace(s.ui.numberFont) ? "Consolas" : s.ui.numberFont;
             bool flex = s.mode == "flex";
             rbFlex.Checked = flex;
             rbFixed.Checked = !flex;
@@ -1127,7 +1848,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             numFlexM.Value = Math.Max(0, Math.Min(59, s.flexMinutes % 60));
             UpdateFlexState();
 
-            for (int i = 0; i < 7; i++) cbDays[i].Checked = s.workdays[i];
+            for (int i = 0; i < 7; i++) cbDays[i].Checked = s.workdays[WorkdayArrayIndex(i)];
             RefreshExceptions();
 
             RefreshSchedules();
@@ -1143,6 +1864,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             RefreshEvents();
             UpdateEventEnd();
 
+            if (numSalary != null)
+            {
+                numSalary.Value = Math.Max(0m, Math.Min(10000000m, s.salary.monthly));
+                numPayday.Value = Math.Max(1, Math.Min(31, s.salary.payday));
+                UpdateSalaryPreview();
+            }
+
             numOpacity.Value = Math.Max(30, Math.Min(100, s.ui.opacity));
             numAutoCollapse.Value = Math.Max(0, Math.Min(120, s.ui.autoCollapseSeconds));
             cbTopMost.Checked = s.ui.alwaysOnTop;
@@ -1150,12 +1878,14 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             cbShowLunch.Checked = s.ui.showLunch;
             cbReducedMotion.Checked = s.ui.reducedMotion;
             numReminderHold.Value = Math.Max(3, Math.Min(20, s.ui.reminderHoldSeconds));
-            rbSpreadCard.Checked = s.ui.reminderSpread != "screen";
-            rbSpreadScreen.Checked = s.ui.reminderSpread == "screen";
-            rbStyleCircle.Checked = s.ui.reminderSpreadStyle != "bar";
-            rbStyleBar.Checked = s.ui.reminderSpreadStyle == "bar";
             cmbGlow.SelectedIndex = s.ui.cardGlow == "corner" ? 1
                 : s.ui.cardGlow == "bar" ? 2 : s.ui.cardGlow == "all" ? 3 : 0;
+            if (rbBgSolid != null)
+            {
+                bool glass = Frost.On(s.ui);
+                rbBgSolid.Checked = !glass;
+                rbBgGlass.Checked = glass;
+            }
 
             if (picker != null)
             {
@@ -1163,6 +1893,37 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 picker.Invalidate();
             }
             UpdateThemeName();
+
+            if (lstCalendars != null)
+            {
+                editCals = CloneCalendars(s.outlook.calendars);
+                numOutlookLead.Value = Math.Max(0, Math.Min(120, s.outlook.leadMinutes));
+                FillCalendarList();
+            }
+            for (int i = 0; i < StyleKinds.Length; i++)
+            {
+                ReminderStyleDef d = s.StyleOf(StyleKinds[i]);
+                cmbSpread[i].SelectedIndex = d.spread == "screen" ? 1 : 0;
+                cmbShape[i].SelectedIndex = d.shape == "tape" ? 2 : d.shape == "bar" ? 1 : 0;
+                cmbColor[i].SelectedIndex = ColorIndex(d.color);
+            }
+
+            if (rbNoteDrawer != null)
+            {
+                if (s.note == null) s.note = new NoteSettings();
+                s.note.Normalize();
+                editNoteId = s.note.id;
+                lblNoteId.Text = editNoteId;
+                tbNoteNick.Text = s.note.nickname ?? "";
+                rbNoteDrawer.Checked = s.note.style != "columns";
+                rbNoteColumns.Checked = s.note.style == "columns";
+                tbNoteRelay.Text = s.note.relayHost;
+                numNotePort.Value = Math.Max(1, Math.Min(65535, s.note.relayPort));
+                editNoteContacts = CloneNoteContacts(s.note.contacts);
+                FillNoteContacts();
+                lblNoteRelayState.Text = "还没测试";
+                lblNoteRelayState.ForeColor = Ui.Muted;
+            }
         }
 
         private bool Save()
@@ -1218,7 +1979,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.startTime = SettingsExtensions.FormatTime(startMin);
             s.endTime = SettingsExtensions.FormatTime(endMin);
             s.flexMinutes = flex;
-            for (int i = 0; i < 7; i++) s.workdays[i] = cbDays[i].Checked;
+            for (int i = 0; i < 7; i++) s.workdays[WorkdayArrayIndex(i)] = cbDays[i].Checked;
 
             s.lark.enabled = cbLark.Checked;
             s.lark.chatId = tbChatId.Text.Trim();
@@ -1236,10 +1997,52 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.showLunch = cbShowLunch.Checked;
             s.ui.reducedMotion = cbReducedMotion.Checked;
             s.ui.reminderHoldSeconds = (int)numReminderHold.Value;
-            s.ui.reminderSpread = rbSpreadScreen.Checked ? "screen" : "card";
-            s.ui.reminderSpreadStyle = rbStyleBar.Checked ? "bar" : "circle";
             string[] glowIds = new string[] { "classic", "corner", "bar", "all" };
             s.ui.cardGlow = glowIds[Math.Max(0, Math.Min(glowIds.Length - 1, cmbGlow.SelectedIndex))];
+            if (rbBgGlass != null) s.ui.bgStyle = rbBgGlass.Checked ? Frost.Glass : Frost.Solid;
+            s.ui.textFont = editTextFont ?? "";
+            s.ui.numberFont = string.IsNullOrWhiteSpace(editNumberFont) ? "Consolas" : editNumberFont;
+            UiFont.Configure(s.ui.textFont, s.ui.numberFont);
+
+            if (numSalary != null)
+            {
+                s.salary.monthly = numSalary.Value;
+                s.salary.payday = (int)numPayday.Value;
+            }
+
+            if (rbNoteDrawer != null)
+            {
+                s.note.style = rbNoteColumns.Checked ? "columns" : "drawer";
+                s.note.relayHost = tbNoteRelay.Text.Trim();
+                s.note.relayPort = (int)numNotePort.Value;
+                s.note.id = editNoteId;
+                s.note.nickname = tbNoteNick.Text.Trim();
+                s.note.contacts = CloneNoteContacts(editNoteContacts);
+            }
+
+            // 日程页：多份日历 + 四类日程各自的样式
+            s.outlook.calendars = CloneCalendars(editCals);
+            s.outlook.leadMinutes = (int)numOutlookLead.Value;
+            // 老字段继续写第一份日历的值，降级回旧版本时还能读
+            CalendarSource first = null;
+            foreach (var c in editCals) { if (c.enabled && c.HasSource) { first = c; break; } }
+            if (first == null && editCals.Count > 0) first = editCals[0];
+            if (first != null)
+            {
+                s.outlook.source = first.source;
+                s.outlook.url = first.url;
+                s.outlook.path = first.path;
+            }
+            s.outlook.enabled = s.outlook.HasEnabled;
+            string[] styleColorIds = ReminderStyles.Ids;
+            for (int i = 0; i < StyleKinds.Length; i++)
+            {
+                int ci = Math.Max(0, Math.Min(styleColorIds.Length - 1, cmbColor[i].SelectedIndex));
+                s.SetStyleOf(StyleKinds[i], new ReminderStyleDef(
+                    cmbSpread[i].SelectedIndex == 1 ? "screen" : "card",
+                    cmbShape[i].SelectedIndex == 2 ? "tape" : cmbShape[i].SelectedIndex == 1 ? "bar" : "circle",
+                    styleColorIds[ci]));
+            }
             if (cbAutoStart.Checked != Startup.IsEnabled()) Startup.SetEnabled(cbAutoStart.Checked);
 
             s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
@@ -1270,7 +2073,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             var l = new Label();
             l.Text = text;
             l.SetBounds(x, y, w, h);
-            l.ForeColor = Ink;
+            l.ForeColor = Ui.Ink;
             l.BackColor = Color.Transparent;
             return l;
         }
@@ -1280,7 +2083,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             var l = new Label();
             l.Text = text;
             l.SetBounds(x, y, w, h);
-            l.ForeColor = Muted;
+            l.ForeColor = Ui.Muted;
             l.BackColor = Color.Transparent;
             return l;
         }
@@ -1313,7 +2116,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             b.FlatStyle = FlatStyle.Flat;
             b.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
             b.BackColor = Color.White;
-            b.ForeColor = Ink;
+            b.ForeColor = Ui.Ink;
             return b;
         }
 
@@ -1348,6 +2151,378 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         }
 
 
+    }
+
+    /// <summary>添加 / 编辑一份订阅日历：名称、来源（.ics 链接 / 本地文件 / 登录 Outlook）、提前量。</summary>
+    internal class CalendarEditForm : Form
+    {
+        private readonly bool isNew;
+        private readonly bool graphLogged;
+        private readonly CalendarSource seed;
+        private TextBox tbName;
+        private TextBox tbAddress;
+        private ComboBox cmbSource;
+        private NumericUpDown numLead;
+        private Button btnBrowse;
+        private Label lblHint;
+
+        public CalendarSource Result;
+
+        public CalendarEditForm(CalendarSource seed, bool isNew, bool graphLogged)
+        {
+            this.seed = seed;
+            this.isNew = isNew;
+            this.graphLogged = graphLogged;
+
+            Text = isNew ? "添加订阅日历" : "编辑订阅日历";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.CenterParent;
+            ClientSize = new Size(440, 286);
+            BackColor = Color.White;
+            Font = UiFont.Make(9f, FontStyle.Regular);
+            AutoScaleMode = AutoScaleMode.None;
+
+            var l1 = new Label();
+            l1.Text = "名称";
+            l1.SetBounds(14, 16, 60, 20);
+            l1.ForeColor = Ui.Ink;
+            Controls.Add(l1);
+            tbName = new TextBox();
+            tbName.SetBounds(80, 14, 346, 24);
+            tbName.Text = seed.name;
+            Controls.Add(tbName);
+
+            var l2 = new Label();
+            l2.Text = "来源";
+            l2.SetBounds(14, 54, 60, 20);
+            l2.ForeColor = Ui.Ink;
+            Controls.Add(l2);
+            cmbSource = new ComboBox();
+            cmbSource.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbSource.Items.Add("订阅地址（.ics）");
+            cmbSource.Items.Add("本地 .ics");
+            cmbSource.Items.Add("登录 Outlook（Graph）");
+            cmbSource.SetBounds(80, 52, 180, 24);
+            cmbSource.SelectedIndex = seed.source == "file" ? 1 : seed.source == "graph" ? 2 : 0;
+            cmbSource.SelectedIndexChanged += delegate { UpdateSourceState(); };
+            Controls.Add(cmbSource);
+
+            var l3 = new Label();
+            l3.Text = "提前";
+            l3.SetBounds(272, 54, 36, 20);
+            l3.ForeColor = Ui.Ink;
+            Controls.Add(l3);
+            numLead = new NumericUpDown();
+            numLead.Minimum = 0;
+            numLead.Maximum = 120;
+            numLead.Value = Math.Max(0, Math.Min(120, seed.leadMinutes));
+            numLead.SetBounds(310, 52, 50, 24);
+            numLead.TextAlign = HorizontalAlignment.Center;
+            Controls.Add(numLead);
+            var l4 = new Label();
+            l4.Text = "分（0=默认）";
+            l4.SetBounds(364, 56, 76, 20);
+            l4.ForeColor = Ui.Muted;
+            Controls.Add(l4);
+
+            var l5 = new Label();
+            l5.Text = "地址";
+            l5.SetBounds(14, 92, 60, 20);
+            l5.ForeColor = Ui.Ink;
+            Controls.Add(l5);
+            tbAddress = new TextBox();
+            tbAddress.SetBounds(80, 90, 260, 24);
+            Controls.Add(tbAddress);
+            btnBrowse = new Button();
+            btnBrowse.Text = "选文件";
+            btnBrowse.SetBounds(348, 88, 78, 28);
+            btnBrowse.FlatStyle = FlatStyle.Flat;
+            btnBrowse.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
+            btnBrowse.BackColor = Color.White;
+            btnBrowse.Click += delegate { BrowseFile(); };
+            Controls.Add(btnBrowse);
+
+            lblHint = new Label();
+            lblHint.SetBounds(14, 124, 412, 46);
+            lblHint.ForeColor = Ui.Muted;
+            Controls.Add(lblHint);
+
+            var btnCancel = new Button();
+            btnCancel.Text = "取消";
+            btnCancel.SetBounds(224, 232, 96, 32);
+            btnCancel.FlatStyle = FlatStyle.Flat;
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
+            btnCancel.BackColor = Color.White;
+            btnCancel.DialogResult = DialogResult.Cancel;
+            Controls.Add(btnCancel);
+
+            var btnOk = new Button();
+            btnOk.Text = "确定";
+            btnOk.SetBounds(330, 232, 96, 32);
+            btnOk.FlatStyle = FlatStyle.Flat;
+            btnOk.FlatAppearance.BorderSize = 0;
+            btnOk.BackColor = Ui.Accent;
+            btnOk.ForeColor = Color.White;
+            btnOk.Click += delegate { Confirm(); };
+            Controls.Add(btnOk);
+            AcceptButton = btnOk;
+            CancelButton = btnCancel;
+
+            UpdateSourceState();
+            FitDpi();
+        }
+
+        private void FitDpi()
+        {
+            float k;
+            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
+            if (Math.Abs(k - 1f) < 0.01f) return;
+            SuspendLayout();
+            Scale(new SizeF(k, k));
+            ResumeLayout(true);
+        }
+
+        private void UpdateSourceState()
+        {
+            int src = cmbSource.SelectedIndex;
+            bool file = src == 1;
+            bool graph = src == 2;
+            if (tbAddress.Tag as string != (file ? "file" : "url"))
+            {
+                tbAddress.Tag = file ? "file" : "url";
+                tbAddress.Text = file ? seed.path : seed.url;
+            }
+            tbAddress.Visible = !graph;
+            btnBrowse.Visible = file;
+            if (graph)
+            {
+                lblHint.Text = graphLogged
+                    ? "使用已登录的 Outlook 账号读主日历；登录状态在「Outlook 账号」里管理。"
+                    : "还没登录 Outlook。保存后点「Outlook 登录」，登录成功会自动加一份登录日历。";
+            }
+            else
+            {
+                lblHint.Text = file
+                    ? "选一个 Outlook 导出的 .ics 文件；文件更新后同步时会重新读。"
+                    : "Outlook 网页版 → 设置 → 日历 → 共享日历 → 发布日历，把 .ics 链接粘到这里。";
+            }
+        }
+
+        private void BrowseFile()
+        {
+            using (var dlg = new OpenFileDialog())
+            {
+                dlg.Title = "选择 Outlook 导出的 .ics 文件";
+                dlg.Filter = "iCalendar 文件 (*.ics)|*.ics|所有文件 (*.*)|*.*";
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                cmbSource.SelectedIndex = 1;
+                tbAddress.Text = dlg.FileName;
+            }
+        }
+
+        private void Confirm()
+        {
+            string name = tbName.Text.Trim();
+            if (name.Length == 0)
+            {
+                MessageBox.Show(this, "给这份日历起个名字吧。", "还差一点", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                tbName.Focus();
+                return;
+            }
+            int src = cmbSource.SelectedIndex;
+            string address = tbAddress.Text.Trim();
+            if (src != 2 && address.Length == 0)
+            {
+                MessageBox.Show(this, src == 1 ? "先选一个 .ics 文件。" : "先填发布日历给的 .ics 链接。",
+                    "还没填地址", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            var r = new CalendarSource();
+            r.id = seed.id;
+            r.name = name;
+            r.enabled = seed.enabled;
+            r.source = src == 1 ? "file" : src == 2 ? "graph" : "url";
+            r.url = src == 0 ? address : "";
+            r.path = src == 1 ? address : "";
+            r.leadMinutes = (int)numLead.Value;
+            r.lastSync = seed.lastSync;
+            r.lastError = seed.lastError;
+            r.cached = seed.cached == null ? new List<ReminderEvent>() : new List<ReminderEvent>(seed.cached);
+            Result = r;
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+    }
+
+    /// <summary>Outlook 登录：设备码流程 + 退出登录。登录成功会把刷新令牌 DPAPI 加密存进设置。</summary>
+    internal class OutlookLoginForm : Form
+    {
+        private readonly Settings s;
+        private readonly SettingsStore store;
+        private Label lblAccount;
+        private TextBox tbClientId;
+        private Label lblState;
+        private Button btnLogin;
+
+        public OutlookLoginForm(Settings s, SettingsStore store)
+        {
+            this.s = s;
+            this.store = store;
+
+            Text = "Outlook 登录";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.CenterParent;
+            ClientSize = new Size(460, 300);
+            BackColor = Color.White;
+            Font = UiFont.Make(9f, FontStyle.Regular);
+            AutoScaleMode = AutoScaleMode.None;
+
+            lblAccount = new Label();
+            lblAccount.SetBounds(14, 16, 432, 22);
+            lblAccount.ForeColor = Ui.Ink;
+            Controls.Add(lblAccount);
+
+            var l1 = new Label();
+            l1.Text = "client ID";
+            l1.SetBounds(14, 52, 70, 20);
+            l1.ForeColor = Ui.Ink;
+            Controls.Add(l1);
+            tbClientId = new TextBox();
+            tbClientId.SetBounds(80, 50, 366, 24);
+            tbClientId.Text = s.outlook.clientId;
+            Controls.Add(tbClientId);
+
+            var hint = new Label();
+            hint.SetBounds(14, 82, 432, 52);
+            hint.ForeColor = Ui.Muted;
+            hint.Text = "Azure 应用注册成公共客户端，并授予 Microsoft Graph 的 Calendars.Read 权限。" +
+                "\r\n点「登录 Outlook」后浏览器会打开，把复制的设备码粘进去授权即可。";
+            Controls.Add(hint);
+
+            lblState = new Label();
+            lblState.SetBounds(14, 142, 432, 54);
+            lblState.ForeColor = Ui.Ink;
+            Controls.Add(lblState);
+
+            btnLogin = new Button();
+            btnLogin.SetBounds(14, 218, 150, 34);
+            btnLogin.FlatStyle = FlatStyle.Flat;
+            btnLogin.FlatAppearance.BorderSize = 0;
+            btnLogin.BackColor = Ui.Accent;
+            btnLogin.ForeColor = Color.White;
+            btnLogin.Click += delegate { ToggleLogin(); };
+            Controls.Add(btnLogin);
+
+            var btnClose = new Button();
+            btnClose.Text = "关闭";
+            btnClose.SetBounds(350, 218, 96, 34);
+            btnClose.FlatStyle = FlatStyle.Flat;
+            btnClose.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
+            btnClose.BackColor = Color.White;
+            btnClose.DialogResult = DialogResult.Cancel;
+            Controls.Add(btnClose);
+            CancelButton = btnClose;
+
+            UpdateUi();
+            FitDpi();
+        }
+
+        private void FitDpi()
+        {
+            float k;
+            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
+            if (Math.Abs(k - 1f) < 0.01f) return;
+            SuspendLayout();
+            Scale(new SizeF(k, k));
+            ResumeLayout(true);
+        }
+
+        private void UpdateUi()
+        {
+            bool logged = !string.IsNullOrWhiteSpace(s.outlook.refreshToken);
+            string account = string.IsNullOrWhiteSpace(s.outlook.account) ? "未登录" : s.outlook.account;
+            lblAccount.Text = "账号：" + account +
+                (string.IsNullOrEmpty(s.outlook.tokenAt) ? "" : " · 授权于 " + s.outlook.tokenAt);
+            btnLogin.Text = logged ? "退出登录" : "登录 Outlook";
+            if (logged) lblState.Text = "已登录，可以关闭这个窗口。";
+            else if (string.IsNullOrEmpty(lblState.Text) || lblState.Text == "已登录，可以关闭这个窗口。")
+                lblState.Text = "还没登录。";
+        }
+
+        private void ToggleLogin()
+        {
+            if (!string.IsNullOrWhiteSpace(s.outlook.refreshToken))
+            {
+                if (MessageBox.Show(this, "退出 Outlook 登录？之后不再同步 Graph 日历。", "退出登录",
+                        MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                s.outlook.refreshToken = "";
+                s.outlook.account = "";
+                s.outlook.tokenAt = "";
+                s.outlook.lastError = "";
+                try { store.Save(s); } catch { }
+                lblState.Text = "已退出登录。";
+                UpdateUi();
+                return;
+            }
+
+            string cid = tbClientId.Text.Trim();
+            if (cid.Length == 0)
+            {
+                MessageBox.Show(this, OutlookGraph.SetupHint, "先填 client ID", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            s.outlook.clientId = cid;
+            OutlookGraph.DeviceCodeInfo info;
+            string err;
+            lblState.Text = "正在向微软要设备码…";
+            if (!OutlookGraph.StartDeviceCode(cid, s.outlook.tenant, 20000, out info, out err))
+            {
+                lblState.Text = "要设备码失败：" + err;
+                return;
+            }
+            try { Clipboard.SetText(info.userCode); } catch { }
+            try { if (!string.IsNullOrEmpty(info.verifyUrl)) Process.Start(info.verifyUrl); } catch { }
+            lblState.Text = "浏览器里输入代码 " + info.userCode + "（已复制），授权后这里会自动变。";
+
+            string deviceCode = info.deviceCode;
+            int waitMs = Math.Min(600, Math.Max(90, info.expiresIn)) * 1000;
+            int interval = info.interval;
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                OutlookGraph.TokenInfo tk;
+                string perr;
+                bool ok = OutlookGraph.PollToken(cid, s.outlook.tenant, deviceCode, interval, waitMs, out tk, out perr);
+                if (IsDisposed || !IsHandleCreated) return;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (!ok)
+                        {
+                            s.outlook.lastError = perr;
+                            lblState.Text = "登录失败：" + perr;
+                            return;
+                        }
+                        s.outlook.refreshToken = OutlookGraph.Protect(tk.refreshToken);
+                        s.outlook.tokenAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                        string name, mail, meErr;
+                        OutlookGraph.FetchMe(tk.accessToken, 15000, out name, out mail, out meErr);
+                        s.outlook.account = mail.Length > 0 ? mail : name;
+                        s.outlook.lastError = "";
+                        try { store.Save(s); } catch { }
+                        UpdateUi();
+                        lblState.Text = "登录成功。关闭后回到设置页点「立即同步」即可。";
+                    });
+                }
+                catch { }
+            });
+        }
     }
 
     /// <summary>设置窗口的共用色。</summary>
@@ -1881,7 +3056,216 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             }
         }
 
-        /// <summary>自己配色：色相条 + 明度/饱和方块，选完起个名字存成主题。</summary>
+        /// <summary>字体设置：中文和数字分开选，下面给一张和卡片同色的小预览。</summary>
+    internal class FontsForm : Form
+    {
+        private readonly ComboBox cmbText;
+        private readonly ComboBox cmbNumber;
+        private readonly FontPreview preview;
+        private readonly string[] families;
+        private string selText = "";
+        private string selNumber = "Consolas";
+
+        public string ResultTextFont { get; private set; }
+        public string ResultNumberFont { get; private set; }
+
+        public FontsForm(string textFont, string numberFont)
+        {
+            Text = "字体设置";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.CenterParent;
+            ClientSize = new Size(460, 368);
+            BackColor = Color.White;
+            Font = UiFont.Make(9f, FontStyle.Regular);
+            AutoScaleMode = AutoScaleMode.None;
+
+            families = UiFont.Families();
+            selText = string.IsNullOrWhiteSpace(textFont) ? "" : textFont;
+            selNumber = string.IsNullOrWhiteSpace(numberFont) ? "Consolas" : numberFont;
+
+            var l1 = new Label();
+            l1.Text = "中文字体";
+            l1.SetBounds(16, 16, 200, 20);
+            l1.ForeColor = Ui.Ink;
+            Controls.Add(l1);
+
+            cmbText = new ComboBox();
+            cmbText.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbText.SetBounds(16, 38, 200, 26);
+            cmbText.Items.Add("跟随系统（推荐）");
+            foreach (var f in families) cmbText.Items.Add(f);
+            int ti = 0;
+            for (int i = 1; i < cmbText.Items.Count; i++)
+                if (string.Equals(cmbText.Items[i].ToString(), selText, StringComparison.OrdinalIgnoreCase)) { ti = i; break; }
+            if (ti == 0 && selText.Length > 0) { cmbText.Items.Add(selText); ti = cmbText.Items.Count - 1; }
+            cmbText.SelectedIndex = ti;
+            cmbText.SelectedIndexChanged += delegate { OnPicked(); };
+            Controls.Add(cmbText);
+
+            var l2 = new Label();
+            l2.Text = "数字字体";
+            l2.SetBounds(240, 16, 200, 20);
+            l2.ForeColor = Ui.Ink;
+            Controls.Add(l2);
+
+            cmbNumber = new ComboBox();
+            cmbNumber.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbNumber.SetBounds(240, 38, 200, 26);
+            cmbNumber.Items.Add("Consolas（默认）");
+            foreach (var f in families) cmbNumber.Items.Add(f);
+            int ni = 0;
+            for (int i = 1; i < cmbNumber.Items.Count; i++)
+                if (string.Equals(cmbNumber.Items[i].ToString(), selNumber, StringComparison.OrdinalIgnoreCase)) { ni = i; break; }
+            if (ni == 0 && !string.Equals(selNumber, "Consolas", StringComparison.OrdinalIgnoreCase))
+            {
+                cmbNumber.Items.Add(selNumber);
+                ni = cmbNumber.Items.Count - 1;
+            }
+            cmbNumber.SelectedIndex = ni;
+            cmbNumber.SelectedIndexChanged += delegate { OnPicked(); };
+            Controls.Add(cmbNumber);
+
+            var hint = new Label();
+            hint.Text = "中文影响界面文字；数字影响大号倒计时、工资数字和 ¥ 图标。\r\n数字建议选等宽字体，倒计时不会左右跳。";
+            hint.SetBounds(16, 70, 428, 38);
+            hint.ForeColor = Ui.Muted;
+            Controls.Add(hint);
+
+            preview = new FontPreview();
+            preview.SetBounds(16, 112, 428, 174);
+            Controls.Add(preview);
+
+            var btnCancel = new Button();
+            btnCancel.Text = "取消";
+            btnCancel.SetBounds(248, 312, 96, 32);
+            btnCancel.FlatStyle = FlatStyle.Flat;
+            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
+            btnCancel.BackColor = Color.White;
+            btnCancel.DialogResult = DialogResult.Cancel;
+            Controls.Add(btnCancel);
+
+            var btnOk = new Button();
+            btnOk.Text = "确定";
+            btnOk.SetBounds(352, 312, 92, 32);
+            btnOk.FlatStyle = FlatStyle.Flat;
+            btnOk.FlatAppearance.BorderSize = 0;
+            btnOk.BackColor = Ui.Accent;
+            btnOk.ForeColor = Color.White;
+            btnOk.Click += delegate
+            {
+                ResultTextFont = selText;
+                ResultNumberFont = selNumber;
+                DialogResult = DialogResult.OK;
+                Close();
+            };
+            Controls.Add(btnOk);
+            AcceptButton = btnOk;
+            CancelButton = btnCancel;
+
+            OnPicked();
+            FitDpi();
+        }
+
+        private void OnPicked()
+        {
+            selText = cmbText.SelectedIndex <= 0 ? "" : cmbText.SelectedItem.ToString();
+            selNumber = cmbNumber.SelectedIndex <= 0 ? "Consolas" : cmbNumber.SelectedItem.ToString();
+            preview.TextFamily = selText;
+            preview.NumberFamily = selNumber;
+            preview.Invalidate();
+        }
+
+        private void FitDpi()
+        {
+            float k;
+            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
+            if (Math.Abs(k - 1f) < 0.01f) return;
+            SuspendLayout();
+            Scale(new SizeF(k, k));
+            ResumeLayout(true);
+        }
+
+        /// <summary>和卡片同色的小预览：中文样张 + 数字样张。</summary>
+        private class FontPreview : Control
+        {
+            public string TextFamily = "";
+            public string NumberFamily = "Consolas";
+
+            public FontPreview()
+            {
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                    | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                Graphics g = e.Graphics;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                g.Clear(Color.White);
+                float k = g.DpiX / 96f;
+                var r = new Rectangle(0, 0, Width - 1, Height - 1);
+                using (var path = Round(r, (int)Math.Round(14 * k)))
+                {
+                    using (var b = new LinearGradientBrush(r, Color.FromArgb(26, 32, 46), Color.FromArgb(38, 46, 64), 90f))
+                        g.FillPath(b, path);
+                    using (var p = new Pen(Color.FromArgb(30, 255, 255, 255))) g.DrawPath(p, path);
+                }
+
+                Color ink = Color.FromArgb(236, 241, 250);
+                Color muted = Color.FromArgb(154, 166, 189);
+                using (var f = MakeTextFont(11.5f))
+                using (var b = new SolidBrush(muted))
+                    g.DrawString("中文字体 · 上班工具箱", f, b, 22 * k, 20 * k);
+                using (var f = MakeNumberFont(30f, FontStyle.Bold))
+                using (var b = new SolidBrush(ink))
+                    g.DrawString("05:05:17", f, b, 20 * k, 48 * k);
+                using (var f = MakeNumberFont(18f, FontStyle.Bold))
+                using (var b = new SolidBrush(Color.FromArgb(76, 141, 255)))
+                    g.DrawString("¥12,345.678", f, b, 22 * k, 108 * k);
+                using (var f = MakeTextFont(9f))
+                using (var b = new SolidBrush(muted))
+                    g.DrawString("数字字体 · 等宽显示更整齐", f, b, 22 * k, 150 * k);
+            }
+
+            private Font MakeTextFont(float size)
+            {
+                if (!string.IsNullOrWhiteSpace(TextFamily))
+                {
+                    try { return new Font(TextFamily, size, FontStyle.Regular, GraphicsUnit.Point); }
+                    catch { }
+                }
+                return UiFont.Make(size);
+            }
+
+            private Font MakeNumberFont(float size, FontStyle style)
+            {
+                if (!string.IsNullOrWhiteSpace(NumberFamily))
+                {
+                    try { return new Font(NumberFamily, size, style, GraphicsUnit.Point); }
+                    catch { }
+                }
+                return UiFont.MakeNumber(size, style);
+            }
+
+            private static GraphicsPath Round(Rectangle r, int radius)
+            {
+                int d = Math.Max(2, radius * 2);
+                var path = new GraphicsPath();
+                path.AddArc(r.X, r.Y, d, d, 180, 90);
+                path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+                path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                path.CloseFigure();
+                return path;
+            }
+        }
+    }
+
+    /// <summary>自己配色：色相条 + 明度/饱和方块，选完起个名字存成主题。</summary>
         public class ColorWheelForm : Form
         {
             public string ThemeName = "我的主题";
@@ -2198,30 +3582,36 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
                     g.Clear(Color.White);
+                    // 控件本身已被 DPI 放大，画笔坐标也要跟着放大，否则 150% 下文字和进度条会叠在一起
+                    float k = g.DpiX / 96f;
                     ThemeDef t = Themes.FromColors("preview", "预览", HexOf(Bg), HexOf(Bar));
                     var r = new Rectangle(0, 0, Width - 1, Height - 1);
-                    using (var path = Round(r, 12))
+                    using (var path = Round(r, (int)Math.Round(12 * k)))
                     {
                         using (var b = new LinearGradientBrush(r, t.bgTop, t.bgBottom, 90f))
                             g.FillPath(b, path);
                         using (var p = new Pen(Color.FromArgb(28, 255, 255, 255))) g.DrawPath(p, path);
                     }
                     using (var b = new SolidBrush(Bar))
-                        g.FillEllipse(b, 12, 12, 7, 7);
+                        g.FillEllipse(b, 12 * k, 12 * k, 7 * k, 7 * k);
                     using (var f = UiFont.Make(7.5f))
                     using (var b = new SolidBrush(t.textMuted))
-                        g.DrawString("工作中", f, b, 25, 10);
-                    using (var f = UiFont.Make(18f, FontStyle.Bold))
+                        g.DrawString("工作中", f, b, 25 * k, 10 * k);
+                    using (var f = UiFont.MakeNumber(18f, FontStyle.Bold))
                     using (var b = new SolidBrush(t.textMain))
-                        g.DrawString("12:34", f, b, 10, 26);
-                    using (var b = new SolidBrush(t.track)) g.FillRectangle(b, 12, 58, Width - 26, 5);
-                    using (var b = new SolidBrush(Bar)) g.FillRectangle(b, 12, 58, (Width - 26) * 3 / 5, 5);
+                        g.DrawString("12:34", f, b, 10 * k, 26 * k);
+                    int barY = (int)Math.Round(58 * k);
+                    int barH = Math.Max(1, (int)Math.Round(5 * k));
+                    int barX = (int)Math.Round(12 * k);
+                    int barW = Width - (int)Math.Round(26 * k);
+                    using (var b = new SolidBrush(t.track)) g.FillRectangle(b, barX, barY, barW, barH);
+                    using (var b = new SolidBrush(Bar)) g.FillRectangle(b, barX, barY, barW * 3 / 5, barH);
                     using (var b = new SolidBrush(t.textDim))
-                    using (var f = UiFont.Make(7f))
-                        g.DrawString("背景  " + HexOf(Bg), f, b, 12, 69);
-                    using (var b = new SolidBrush(Bar))
-                    using (var f = UiFont.Make(7f))
-                        g.DrawString("进度条  " + HexOf(Bar), f, b, 12, 79);
+                    using (var f = UiFont.Make(6.5f))
+                    {
+                        g.DrawString("背景  " + HexOf(Bg), f, b, 12 * k, 64 * k);
+                        g.DrawString("进度条  " + HexOf(Bar), f, b, 12 * k, 76 * k);
+                    }
                 }
 
                 private static GraphicsPath Round(Rectangle r, int radius)

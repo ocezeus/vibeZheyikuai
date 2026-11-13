@@ -77,7 +77,7 @@ public class PW {
         if ($p -eq $procId -and [PW]::IsWindowVisible($h)) {
             $sb = New-Object System.Text.StringBuilder 256
             [PW]::GetWindowText($h, $sb, 256) | Out-Null
-            if ($sb.ToString() -eq '下班倒计时') { $script:target = $h }
+            if ($sb.ToString() -eq '上班工具箱') { $script:target = $h }
         }
         return $true
     }, [IntPtr]::Zero) | Out-Null
