@@ -53,10 +53,13 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $dist = Join-Path $root 'dist'
-$zipName = "上班工具箱-v$Version.zip"
+$zipName = "上班工具箱-v$Version.zip"          # 本地 zip 名字（中文，给人看的）
 $zip = Join-Path $dist $zipName
 $exeName = 'WorkCountdown.exe'
 $exe = Join-Path $dist $exeName
+# GitHub 的 Release 资产名会把非 ASCII 字符抹掉（本轮实测：中文名上传后变成 "-v3.6.0.zip"），
+# 所以资产用 ASCII 名：WorkCountdown-v<Version>.zip。zip 本身还是那个中文名的本地文件。
+$zipAssetName = "WorkCountdown-v$Version.zip"
 $tag = "v$Version"
 $releaseName = "上班工具箱 v$Version"
 $expectedFileVersion = "$($Version).0"
@@ -159,7 +162,7 @@ try {
 
     # 本次要上传的资产（顺序 = 上传顺序；同名旧资产会先删）
     $uploadList = @(
-        @{ Path = $zip; Name = $zipName; Label = '完整压缩包（含说明书/安装脚本/字体说明）'; ContentType = 'application/zip'; SizeKB = $zipKB },
+        @{ Path = $zip; Name = $zipAssetName; Label = '完整压缩包（含说明书/安装脚本/字体说明）'; ContentType = 'application/zip'; SizeKB = $zipKB },
         @{ Path = $exe; Name = $exeName; Label = '自动更新用全量 exe'; ContentType = 'application/octet-stream'; SizeKB = $exeKB }
     )
     Say '  本次会上传 2 个资产：'
@@ -238,14 +241,14 @@ try {
 
     # ---------- ④ Release 说明 ----------
     Step '[4/6] 准备 Release 说明'
-    $defaultBody = "**上班工具箱 v$Version**（Windows，只需系统自带的 .NET Framework 4.x）`n`n下载下面的 ``$zipName``，解压后双击「安装.cmd」。`n`n- ``$zipName``：完整发布包（含一图说明书 / 安装脚本 / 字体说明）`n- ``$exeName``：自动更新用的全量 exe，程序「检查更新」会下载它并替换自身`n`n也可以用便携版：把 WorkCountdown.exe 放到任意文件夹，同目录建一个空的 ``portable.txt``。"
+    $defaultBody = "**上班工具箱 v$Version**（Windows，只需系统自带的 .NET Framework 4.x）`n`n下载下面的 ``$zipAssetName``，解压后双击「安装.cmd」。`n`n- ``$zipAssetName``：完整发布包（含一图说明书 / 安装脚本 / 字体说明）`n- ``$exeName``：自动更新用的全量 exe，程序「检查更新」会下载它并替换自身`n`n也可以用便携版：把 WorkCountdown.exe 放到任意文件夹，同目录建一个空的 ``portable.txt``。"
     if ($Notes -and $Notes.Trim()) {
         $body = $Notes.Trim()
         Say '  来源：-Notes 参数'
     } else {
         $section = Get-ChangelogSection $Version
         if ($section) {
-            $body = "**上班工具箱 v$Version** · Windows（.NET Framework 4.x 自带即可运行）`n`n下载 ``$zipName``，解压后双击「安装.cmd」。`n`n程序里「检查更新」会自动下载 ``$exeName`` 并替换自身。`n`n---`n`n## 本次更新`n`n$section"
+            $body = "**上班工具箱 v$Version** · Windows（.NET Framework 4.x 自带即可运行）`n`n下载 ``$zipAssetName``，解压后双击「安装.cmd」。`n`n程序里「检查更新」会自动下载 ``$exeName`` 并替换自身。`n`n---`n`n## 本次更新`n`n$section"
             Say '  来源：CHANGELOG.md 里对应版本的小节'
         } else {
             $body = $defaultBody
@@ -280,9 +283,9 @@ try {
         Plan "     已存在：PATCH $api/repos/$Repo/releases/<id>   （name/tag/body 重写）"
         Plan "     不存在：POST  $api/repos/$Repo/releases   （tag_name=$tag, target_commitish=$Branch, name=$releaseName, draft=false, prerelease=false）"
         Plan "GET  $api/repos/$Repo/releases/<id>/assets"
-        Plan "     先删同名旧资产：$zipName（存在就 DELETE）"
+        Plan "     先删同名旧资产：$zipAssetName（存在就 DELETE）"
         Plan "     先删同名旧资产：$exeName（存在就 DELETE）"
-        Plan "POST $api/repos/$Repo/releases/<id>/assets?name=$zipName   （application/zip, $zipKB KB, -InFile $zip）"
+        Plan "POST $api/repos/$Repo/releases/<id>/assets?name=$zipAssetName   （application/zip, $zipKB KB, -InFile $zip）"
         Plan "POST $api/repos/$Repo/releases/<id>/assets?name=$exeName&label=自动更新用全量 exe   （application/octet-stream, $exeKB KB, -InFile $exe）"
         Say '  [DryRun] 以上 API 调用都没有真正执行（2 个资产都没上传）' 'Yellow'
     } else {
@@ -336,6 +339,15 @@ try {
                 }
             }
         }
+        # 再删掉「不该存在」的资产：以前中文名被 GitHub 抹成 "-v3.6.0.zip" 这类残留，
+        # 不清掉的话 Release 上会挂着两个 zip。只保留本次要传的两个名字。
+        $keep = @($uploadList | ForEach-Object { $_.Name })
+        foreach ($a in @($existingAssets)) {
+            if (-not $a) { continue }
+            if ($keep -contains $a.name) { continue }
+            Say "  删除多余旧资产：$($a.name)  id=$($a.id)" 'Yellow'
+            Invoke-GitHub -Method Delete -Path "/repos/$Repo/releases/assets/$($a.id)" | Out-Null
+        }
 
         # 上传两个资产：完整 zip + 自动更新用 exe
         # 注意：资产上传必须走 Release 的 upload_url（uploads.github.com 主机）；直接打
@@ -371,3 +383,6 @@ try {
     if ($_.ScriptStackTrace) { Say $_.ScriptStackTrace 'DarkGray' }
     exit 1
 }
+# 明确返回 0：package.ps1 靠这个退出码判断发布成功；不写的话某些 PowerShell
+# 版本会因为命令流里的 stderr（git 的进度输出）带出非零退出码。
+exit 0
