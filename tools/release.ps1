@@ -338,8 +338,12 @@ try {
         }
 
         # 上传两个资产：完整 zip + 自动更新用 exe
+        # 注意：资产上传必须走 Release 的 upload_url（uploads.github.com 主机）；直接打
+        # api.github.com/repos/.../releases/<id>/assets 会 404（本轮实测踩过）。
+        $uploadBase = ($rel.upload_url -replace '\{\?[^}]*\}', '')
+        if (-not $uploadBase) { $uploadBase = "https://uploads.github.com/repos/$Repo/releases/$relId/assets" }
         foreach ($u in $uploadList) {
-            $uploadUri = "$api/repos/$Repo/releases/$relId/assets?name=" + [uri]::EscapeDataString($u.Name) + "&label=" + [uri]::EscapeDataString($u.Label)
+            $uploadUri = $uploadBase + "?name=" + [uri]::EscapeDataString($u.Name) + "&label=" + [uri]::EscapeDataString($u.Label)
             Say "  上传资产：$($u.Name)  ($($u.SizeKB) KB, $($u.ContentType)) …"
             $asset = Invoke-RestMethod -Uri $uploadUri -Method Post -Headers $script:Headers `
                 -ContentType $u.ContentType -InFile $u.Path -TimeoutSec 600 -ErrorAction Stop
