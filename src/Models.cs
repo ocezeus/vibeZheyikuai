@@ -1116,6 +1116,11 @@ namespace WorkCountdown
         public string eveningEnd { get; set; }
         public bool breakNotify { get; set; }        // 午休/晚休开始与结束时用提醒动画提示
 
+        // 没绑飞书对话时，右键「上班 / 下班」记在本机；值形如 "2026-11-17 09:05"。
+        // 只认当天，跨天自然失效；重复点同一个按钮用新时间覆盖。
+        public string clockInLocal { get; set; }
+        public string clockOutLocal { get; set; }
+
         public bool[] workdays { get; set; }        // 索引 0=周日 .. 6=周六
         public List<HolidayEntry> exceptions { get; set; }
         /// <summary>固定日程（午休/晚休/下班 + 自己加的）。</summary>
@@ -1170,6 +1175,8 @@ namespace WorkCountdown
             eventLeadMinutes = o.eventLeadMinutes;
             calendarPollMinutes = o.calendarPollMinutes;
             events = o.events;
+            clockInLocal = o.clockInLocal;
+            clockOutLocal = o.clockOutLocal;
         }
 
         // ---- 日程提醒 ----
@@ -1207,6 +1214,8 @@ namespace WorkCountdown
             eventLeadMinutes = 10;
             calendarPollMinutes = 15;
             events = new List<ReminderEvent>();
+            clockInLocal = "";
+            clockOutLocal = "";
         }
     }
 
@@ -1381,6 +1390,8 @@ namespace WorkCountdown
             if (s.version < 2) s.version = 2;    // 工作日索引迁移只做一次（v3.5 起 schema = 2）
             if (s.exceptions == null) s.exceptions = new List<HolidayEntry>();
             if (s.events == null) s.events = new List<ReminderEvent>();
+            if (s.clockInLocal == null) s.clockInLocal = "";
+            if (s.clockOutLocal == null) s.clockOutLocal = "";
             if (s.calendarLeadMinutes < 0) s.calendarLeadMinutes = 0;
             if (s.calendarLeadMinutes > 120) s.calendarLeadMinutes = 120;
             if (s.eventLeadMinutes < 0) s.eventLeadMinutes = 0;
@@ -1647,10 +1658,131 @@ namespace WorkCountdown
         public string note { get; set; }
         public int messageCount { get; set; }
 
+        /// <summary>这份快照从哪来：lark / local / shift（只用于显示，不落盘）。</summary>
+        [ScriptIgnore]
+        public string source { get; set; }
+
         public AttendanceSnapshot()
         {
             ok = false;
             fetchedAt = DateTime.MinValue;
+            source = "";
+        }
+    }
+
+    /// <summary>
+    /// 右键「上班 / 下班」的判定与本地记录：有飞书对话就走飞书，没有就写本机。
+    /// 只做纯计算，不弹窗、不落盘；保存由窗口走 SettingsStore 的同一条安全写入。
+    /// </summary>
+    public static class ManualClock
+    {
+        public const string LocalFormat = "yyyy-MM-dd HH:mm";
+
+        /// <summary>有飞书对话（已启用且填了会话 ID）才走飞书打卡。</summary>
+        public static bool ShouldUseLark(Settings settings)
+        {
+            return settings != null && settings.lark != null
+                && settings.lark.enabled && !string.IsNullOrWhiteSpace(settings.lark.chatId);
+        }
+
+        public static bool TryParseLocal(string text, out DateTime at)
+        {
+            return DateTime.TryParseExact((text ?? "").Trim(), LocalFormat,
+                CultureInfo.InvariantCulture, DateTimeStyles.None, out at);
+        }
+
+        public static string FormatLocal(DateTime at)
+        {
+            return at.ToString(LocalFormat, CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>把今天这次打卡写进设置（重复点同一个按钮用新时间覆盖），返回本地快照。</summary>
+        public static AttendanceSnapshot Record(Settings settings, bool clockIn, DateTime now)
+        {
+            if (settings == null) return null;
+            string value = FormatLocal(now);
+            if (clockIn) settings.clockInLocal = value;
+            else settings.clockOutLocal = value;
+            return AttendanceSource.Resolve(settings, null, now);
+        }
+
+        /// <summary>托盘气泡文案：已记录 09:05 上班打卡（本地）。</summary>
+        public static string BalloonText(bool clockIn, DateTime now)
+        {
+            return "已记录 " + now.ToString("HH:mm", CultureInfo.InvariantCulture)
+                + (clockIn ? " 上班" : " 下班") + "打卡（本地）";
+        }
+    }
+
+    /// <summary>
+    /// 卡片该用哪份考勤：飞书 ok 快照 > 今天的本地记录 > 按班次推算。
+    /// 窗口只把结果交给 StatusBuilder，不在界面里重复判断来源。
+    /// </summary>
+    public static class AttendanceSource
+    {
+        public const string Lark = "lark";
+        public const string Local = "local";
+        public const string Shift = "shift";
+
+        public static AttendanceSnapshot Resolve(Settings settings, AttendanceSnapshot larkSnapshot, DateTime now)
+        {
+            if (settings == null) return null;
+            // 已经解析过的快照直接沿用，避免 Build 再解析一次时把 shift 又当成原始飞书数据
+            if (larkSnapshot != null && (larkSnapshot.source == Local || larkSnapshot.source == Shift))
+                return larkSnapshot;
+
+            if (ManualClock.ShouldUseLark(settings) && larkSnapshot != null && larkSnapshot.ok
+                && !OnlyForeignDay(larkSnapshot, now))
+            {
+                larkSnapshot.source = Lark;
+                return larkSnapshot;
+            }
+
+            AttendanceSnapshot local = LocalSnapshot(settings, now);
+            if (local != null) return local;
+            return ShiftSnapshot(settings, now);
+        }
+
+        /// <summary>飞书快照里的打卡时间全是别的日期：按旧逻辑跨天不认，改走本地 / 班次。</summary>
+        private static bool OnlyForeignDay(AttendanceSnapshot snapshot, DateTime now)
+        {
+            bool hasIn = snapshot.clockIn.HasValue;
+            bool hasOut = snapshot.clockOut.HasValue;
+            if (!hasIn && !hasOut) return false;
+            bool inToday = hasIn && snapshot.clockIn.Value.Date == now.Date;
+            bool outToday = hasOut && snapshot.clockOut.Value.Date == now.Date;
+            return !inToday && !outToday;
+        }
+
+        /// <summary>今天有本地 in/out 才返回本地快照；昨天的记录不参与。</summary>
+        private static AttendanceSnapshot LocalSnapshot(Settings settings, DateTime now)
+        {
+            DateTime atIn, atOut;
+            bool hasIn = ManualClock.TryParseLocal(settings.clockInLocal, out atIn) && atIn.Date == now.Date;
+            bool hasOut = ManualClock.TryParseLocal(settings.clockOutLocal, out atOut) && atOut.Date == now.Date;
+            if (!hasIn && !hasOut) return null;
+            // 先点下班再点上班这种顺序：下班早于上班时不认下班，免得算出负工时
+            if (hasIn && hasOut && atOut < atIn) hasOut = false;
+
+            var snap = new AttendanceSnapshot();
+            snap.ok = true;
+            snap.source = Local;
+            snap.fetchedAt = now;
+            if (hasIn) snap.clockIn = atIn;
+            if (hasOut) snap.clockOut = atOut;
+            return snap;
+        }
+
+        /// <summary>没飞书也没本地记录：按班次推算（上班前显示距上班，上班后按已上班算）。</summary>
+        private static AttendanceSnapshot ShiftSnapshot(Settings settings, DateTime now)
+        {
+            var plan = Policy.Build(settings, now.Date);
+            var snap = new AttendanceSnapshot();
+            snap.ok = false;
+            snap.source = Shift;
+            snap.fetchedAt = now;
+            if (plan.isWorkday) snap.clockIn = plan.suggestStart;
+            return snap;
         }
     }
 
@@ -2418,15 +2550,11 @@ namespace WorkCountdown
                 return st;
             }
 
-            DateTime? inTime = snap != null ? snap.clockIn : null;
-            DateTime? outTime = snap != null ? snap.clockOut : null;
-
-            // 没接飞书：按班次推算，别显示「还没打卡」这种必然出现的话
-            if (!s.lark.enabled || string.IsNullOrWhiteSpace(s.lark.chatId))
-            {
-                inTime = plan.suggestStart;
-                outTime = null;
-            }
+            // 来源优先级只在 AttendanceSource 里判断：飞书 ok > 今天本地记录 > 按班次推算
+            AttendanceSnapshot attendance = AttendanceSource.Resolve(s, snap, now);
+            DateTime? inTime = attendance != null ? attendance.clockIn : null;
+            DateTime? outTime = attendance != null ? attendance.clockOut : null;
+            bool localClock = attendance != null && attendance.source == AttendanceSource.Local;
 
             // 跨天保护：只认当天的打卡记录
             if (inTime.HasValue && inTime.Value.Date != now.Date) inTime = null;
@@ -2448,7 +2576,9 @@ namespace WorkCountdown
                 st.bigIsClock = false;
                 st.sub = inTime.HasValue
                     ? inTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture) + " → " + outTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture)
-                    : "下班 " + outTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture);
+                        + (localClock ? " · 本地打卡" : "")
+                    : "下班 " + outTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture)
+                        + (localClock ? " · 本地打卡" : "");
                 int required = plan.mode == "fixed" ? (int)Math.Round((plan.fixedEnd - plan.suggestStart).TotalMinutes) : plan.requiredMinutes;
                 st.extra = worked.TotalMinutes >= required ? "工时已达标 · 应勤 " + Policy.Hm(required) : "工时 " + Policy.CompactDuration(worked) + " / 应勤 " + Policy.CompactDuration(TimeSpan.FromMinutes(required));
                 st.progress = 1;
@@ -2468,7 +2598,9 @@ namespace WorkCountdown
                     st.bigLabel = "距离上班";
                     st.big = Policy.Clock(plan.suggestStart - now);
                     st.sub = "上班时间 " + plan.suggestStart.ToString("HH:mm", CultureInfo.InvariantCulture) + " · " + plan.dayLabel;
-                    st.extra = s.lark.enabled ? "飞书里发「1」即完成上班打卡" : "未接入飞书，按班次时间计算";
+                    st.extra = ManualClock.ShouldUseLark(s)
+                        ? "飞书里发「1」即完成上班打卡"
+                        : "未接入飞书，右键「上班」记本地打卡";
                     if (st.lunch == LunchState.After) { st.lunch = LunchState.None; st.lunchLabel = ""; st.lunchValue = ""; }
                     return st;
                 }
@@ -2477,9 +2609,9 @@ namespace WorkCountdown
                 st.bigLabel = "上班已过";
                 st.big = Policy.Clock(now - plan.suggestStart);
                 st.sub = "上班时间 " + plan.suggestStart.ToString("HH:mm", CultureInfo.InvariantCulture) + " · " + plan.dayLabel;
-                st.extra = s.lark.enabled
+                st.extra = ManualClock.ShouldUseLark(s)
                     ? (snap != null && !string.IsNullOrEmpty(snap.error) ? "飞书读取失败：" + snap.error : "在飞书给「" + s.lark.botName + "」发「1」完成打卡")
-                    : "未接入飞书，按班次时间计算";
+                    : "未接入飞书，右键「上班」记本地打卡";
                 st.accent = Color.FromArgb(242, 179, 76);
                 if (st.lunch == LunchState.After) { st.lunch = LunchState.None; st.lunchLabel = ""; st.lunchValue = ""; }
                 return st;
@@ -2490,7 +2622,9 @@ namespace WorkCountdown
             double total = Math.Max(1, (target - start).TotalSeconds);
             double elapsed = (now - start).TotalSeconds;
             st.progress = Math.Max(0, Math.Min(1, elapsed / total));
-            st.sub = "上班 " + inTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture) + " · 预计下班 " + target.ToString("HH:mm", CultureInfo.InvariantCulture);
+            st.sub = localClock
+                ? "今日 " + inTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture) + " 上班打卡（本地）"
+                : "上班 " + inTime.Value.ToString("HH:mm", CultureInfo.InvariantCulture) + " · 预计下班 " + target.ToString("HH:mm", CultureInfo.InvariantCulture);
             st.targetText = target.ToString("HH:mm", CultureInfo.InvariantCulture);
             st.targetIso = target.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
             ResolveAfterLunch(st, target, now);
@@ -2510,7 +2644,8 @@ namespace WorkCountdown
             st.headline = "已达标";
             st.bigLabel = "可下班 · 已超";
             st.big = Policy.Clock(now - target);
-            st.extra = "在岗 " + Policy.CompactDuration(now - inTime.Value) + " · 下班后发「2」记录";
+            st.extra = "在岗 " + Policy.CompactDuration(now - inTime.Value)
+                + (localClock || !ManualClock.ShouldUseLark(s) ? " · 右键「下班」记录本地打卡" : " · 下班后发「2」记录");
             st.accent = theme.success;
             st.offAlert = true;   // 到了下班时间还没打卡：常驻「该下班啦」，直到飞书同步到下班
             return st;

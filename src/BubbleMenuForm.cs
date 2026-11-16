@@ -1790,7 +1790,7 @@ namespace WorkCountdown
                 using (var b = new SolidBrush(Alpha(FieldBg, a))) g.FillPath(b, p);
                 DrawTextMid(g, i == 0 ? "1" : "2", fKbd, Alpha(Muted, a), kbd.X, kbd.Y + kbd.Height / 2f, kbd.Width);
             }
-            DrawText(g, "没配飞书会话时会提示先去设置里填。", fRowSub, Alpha(Dim, a), x, r.Y + S(156));
+            DrawText(g, "没配飞书会话时，会直接记在本机。", fRowSub, Alpha(Dim, a), x, r.Y + S(156));
         }
 
         private void DrawScheduleBody(Graphics g, Rectangle r, int x, int w, int a)

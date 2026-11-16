@@ -4383,6 +4383,54 @@ class Check
             }
         }
 
+        // ---- 无飞书对话时右键上下班：直接记本地，卡片立刻反映，不弹错误框 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.lark.chatId = "";
+            s.calendarEnabled = false;
+            s.mode = "fixed";
+            s.startTime = "00:00";
+            s.endTime = "23:59";
+            s.workdays = new bool[] { true, true, true, true, true, true, true };
+            s.ui.edge = "free";
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Set(form, "snapshot", null);
+                var menu = (ContextMenuStrip)Get(form, "menu");
+                ToolStripMenuItem itemIn = null, itemOut = null;
+                foreach (ToolStripItem item in menu.Items)
+                {
+                    var mi = item as ToolStripMenuItem;
+                    if (mi == null) continue;
+                    if (mi.Text.IndexOf("上班打卡", StringComparison.Ordinal) >= 0) itemIn = mi;
+                    else if (mi.Text.IndexOf("下班打卡", StringComparison.Ordinal) >= 0) itemOut = mi;
+                }
+                Ok("无飞书对话时托盘菜单仍能点本地上班打卡",
+                    itemIn != null && itemIn.Enabled && itemIn.Text == "记录本地上班打卡",
+                    itemIn == null ? "没找到菜单项" : itemIn.Text + " enabled=" + itemIn.Enabled);
+                if (itemIn != null) itemIn.PerformClick(); else Call(form, "SendClock", true);
+                var live = (Settings)Get(form, "settings");
+                string hm = live.clockInLocal.Length >= 16 ? live.clockInLocal.Substring(11, 5) : "";
+                var st = (CardStatus)Get(form, "status");
+                Ok("无飞书对话时点上班记到 clockInLocal",
+                    live.clockInLocal.StartsWith(DateTime.Today.ToString("yyyy-MM-dd")) && hm.Length == 5,
+                    live.clockInLocal);
+                Ok("本地打卡后卡片写「今日 HH:mm 上班打卡（本地）」",
+                    st != null && st.sub == "今日 " + hm + " 上班打卡（本地）",
+                    st == null ? "status=null" : st.sub);
+
+                if (itemOut != null) itemOut.PerformClick(); else Call(form, "SendClock", false);
+                st = (CardStatus)Get(form, "status");
+                Ok("无飞书对话时点下班记到 clockOutLocal",
+                    live.clockOutLocal.StartsWith(DateTime.Today.ToString("yyyy-MM-dd")),
+                    live.clockOutLocal);
+                Ok("本地下班后卡片进入已下班", st != null && st.state.ToString() == "Done",
+                    st == null ? "status=null" : st.state.ToString());
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
         Console.WriteLine(fail == 0 ? ("ALL PASS  (" + pass + " checks)") : ("FAILED  " + fail + " of " + (pass + fail)));
         return fail == 0 ? 0 : 1;
     }

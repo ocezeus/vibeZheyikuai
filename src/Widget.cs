@@ -553,7 +553,8 @@ namespace WorkCountdown
             theme = Skins.ResolveTheme(settings.ui);
             // 窗口底色必须和卡片一致：圆角抗锯齿边缘会与底色混合，浅灰底会出现一圈白边
             if (BackColor != theme.bgBottom) BackColor = theme.bgBottom;
-            status = StatusBuilder.Build(settings, snapshot, DateTime.Now, theme);
+            DateTime now = DateTime.Now;
+            status = StatusBuilder.Build(settings, AttendanceSource.Resolve(settings, snapshot, now), now, theme);
             if (cardGlow != null)
             {
                 cardGlow.SetTheme(theme);
@@ -4164,7 +4165,9 @@ namespace WorkCountdown
             {
                 e.source = "alert";
                 e.title = "该下班啦";
-                e.detail = "在飞书发「2」打卡后自动消失";
+                e.detail = ManualClock.ShouldUseLark(settings)
+                    ? "在飞书发「2」打卡后自动消失"
+                    : "右键「下班」记录本地打卡后自动消失";
                 e.start = Reminders.FormatStart(now);
             }
             else if (kind == "lark")
@@ -4470,9 +4473,10 @@ namespace WorkCountdown
                 e.source = "local";
                 StartReminder(e);
             };
-            var miIn = new ToolStripMenuItem("在飞书发「1」上班打卡");
+            bool useLarkClock = ManualClock.ShouldUseLark(settings);
+            var miIn = new ToolStripMenuItem(useLarkClock ? "在飞书发「1」上班打卡" : "记录本地上班打卡");
             miIn.Click += delegate { SendClock(true); };
-            var miOut = new ToolStripMenuItem("在飞书发「2」下班打卡");
+            var miOut = new ToolStripMenuItem(useLarkClock ? "在飞书发「2」下班打卡" : "记录本地下班打卡");
             miOut.Click += delegate { SendClock(false); };
             var miMute = new ToolStripMenuItem("忽略今天的下班提醒");
             miMute.Click += delegate { MuteOffAlert(); };
@@ -4532,9 +4536,12 @@ namespace WorkCountdown
                 miNext.Text = "下一个日程：" + NextEventText();
                 miDismiss.Enabled = reminding && remindEvent != null;
                 miDismiss.Text = remindEvent != null ? "关闭当前提醒：" + remindEvent.title : "关闭当前提醒";
-                bool hasChat = settings.lark.enabled && !string.IsNullOrWhiteSpace(settings.lark.chatId);
-                miIn.Enabled = hasChat;
-                miOut.Enabled = hasChat;
+                bool hasChat = ManualClock.ShouldUseLark(settings);
+                // 没飞书对话也能用：记在本机，文案跟着来源变
+                miIn.Enabled = true;
+                miOut.Enabled = true;
+                miIn.Text = hasChat ? "在飞书发「1」上班打卡" : "记录本地上班打卡";
+                miOut.Text = hasChat ? "在飞书发「2」下班打卡" : "记录本地下班打卡";
                 miCal.Enabled = hasChat && settings.calendarEnabled;
             };
             return m;
@@ -4609,13 +4616,20 @@ namespace WorkCountdown
 
         private void SendClock(bool clockIn)
         {
-            string text = clockIn ? "1" : "2";
             string label = clockIn ? "上班" : "下班";
-            if (!settings.lark.enabled || string.IsNullOrWhiteSpace(settings.lark.chatId))
+
+            // 没有飞书对话：不弹错误框，直接把今天这次打卡记在本机并落盘
+            if (!ManualClock.ShouldUseLark(settings))
             {
-                MessageBox.Show(this, "还没有配置飞书考勤会话，请先在设置里填写会话 ID。", "飞书打卡", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                DateTime now = DateTime.Now;
+                ManualClock.Record(settings, clockIn, now);
+                SaveSettingsQuietly("本地打卡");
+                Recompute();
+                ShowBalloon(ManualClock.BalloonText(clockIn, now));
                 return;
             }
+
+            string text = clockIn ? "1" : "2";
             string question = "将以你本人的身份，向「" + settings.lark.botName + "」发送「" + text + "」，记一条" + label + "打卡。\r\n\r\n确定发送吗？";
             if (MessageBox.Show(this, question, "飞书打卡", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
 

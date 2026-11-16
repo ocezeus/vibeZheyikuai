@@ -93,8 +93,9 @@ internal static class Test
 
         // 4. 没打卡且已过上班时间
         st = StatusBuilder.Build(s, null, new DateTime(2026, 11, 3, 9, 40, 0), Themes.Get("midnight"));
-        Check("9:40 未打卡", st.state.ToString(), "NotClockedIn");
-        Check("9:40 已过", st.big, "40:00.00");
+        // 新语义：飞书没有 ok 快照、今天也没有本地记录时，按班次推算（不再显示「还没打卡」）
+        Check("9:40 无快照按班次推算", st.state.ToString(), "Working");
+        Check("9:40 按班次倒计时", st.big, "09:50:00");
 
         // 5. 早于上班时间
         st = StatusBuilder.Build(s, null, new DateTime(2026, 11, 3, 8, 30, 0), Themes.Get("midnight"));
@@ -3437,6 +3438,119 @@ internal static class Test
                         (missing.Length == 0).ToString(), "True" + (missing.Length == 0 ? "" : ("（缺 " + missing + "）")));
                 }
             }
+
+        // 27. 无飞书对话时本地记录上下班打卡（功能 A）
+        {
+            var a = new Settings();
+            Check("27.1 没飞书对话不走飞书", ManualClock.ShouldUseLark(a).ToString(), "False");
+            a.lark.enabled = true;
+            Check("27.2 开了飞书但没会话也不走飞书", ManualClock.ShouldUseLark(a).ToString(), "False");
+            a.lark.chatId = "oc_demo";
+            Check("27.3 有飞书对话才走飞书", ManualClock.ShouldUseLark(a).ToString(), "True");
+
+            var b = new Settings();
+            b.mode = "fixed";
+            b.startTime = "09:00";
+            b.endTime = "18:00";
+            b.workdays = new bool[] { false, true, true, true, true, true, false };
+            DateTime day = new DateTime(2026, 11, 17, 9, 5, 0);
+            var localSnap27 = ManualClock.Record(b, true, day);
+            Check("27.4 上班记到 clockInLocal", b.clockInLocal, "2026-11-17 09:05");
+            Check("27.5 本地快照 ok 且有上班时间", localSnap27.ok + "/" + localSnap27.clockIn.Value.ToString("HH:mm"), "True/09:05");
+            ManualClock.Record(b, true, day.AddMinutes(20));
+            Check("27.6 当天重复点上班用新时间覆盖", b.clockInLocal, "2026-11-17 09:25");
+            var outSnap = ManualClock.Record(b, false, new DateTime(2026, 11, 17, 18, 6, 0));
+            Check("27.7 下班记到 clockOutLocal", b.clockOutLocal, "2026-11-17 18:06");
+            Check("27.8 本地快照带上下班", outSnap.clockIn.Value.ToString("HH:mm") + "/" + outSnap.clockOut.Value.ToString("HH:mm"), "09:25/18:06");
+
+            var c = new Settings();
+            c.clockInLocal = "2026-11-16 09:05";
+            c.clockOutLocal = "2026-11-16 18:05";
+            var nextDay = AttendanceSource.Resolve(c, null, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.9 昨天本地记录跨天自然失效", nextDay.source, AttendanceSource.Shift);
+            Check("27.10 跨天后按班次快照", nextDay.clockIn.Value.ToString("HH:mm"), "09:00");
+
+            var d = new Settings();
+            d.lark.enabled = true;
+            d.lark.chatId = "oc";
+            d.clockInLocal = "2026-11-17 09:05";
+            var larkSnap = new AttendanceSnapshot();
+            larkSnap.ok = true;
+            larkSnap.clockIn = new DateTime(2026, 11, 17, 9, 27, 0);
+            var r1 = AttendanceSource.Resolve(d, larkSnap, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.11 飞书 ok 优先", r1.source + "/" + r1.clockIn.Value.ToString("HH:mm"), "lark/09:27");
+            var bad = new AttendanceSnapshot();
+            bad.ok = false;
+            var r2 = AttendanceSource.Resolve(d, bad, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.12 飞书失败用今天本地", r2.source + "/" + r2.clockIn.Value.ToString("HH:mm"), "local/09:05");
+            var e = new Settings();
+            var r3 = AttendanceSource.Resolve(e, null, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.13 两边都没有才按班次", r3.source + "/" + r3.clockIn.Value.ToString("HH:mm"), "shift/09:00");
+            var emptyLark = new AttendanceSnapshot();
+            emptyLark.ok = true;
+            var r4 = AttendanceSource.Resolve(d, emptyLark, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.14 飞书 ok 但今天还没打卡仍走飞书", r4.source, "lark");
+            var foreign = new AttendanceSnapshot();
+            foreign.ok = true;
+            foreign.clockIn = new DateTime(2026, 11, 16, 9, 0, 0);
+            var r5 = AttendanceSource.Resolve(d, foreign, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.15 飞书快照是昨天的改用本地", r5.source, "local");
+
+            var f = new Settings();
+            f.clockInLocal = "2026-11-17 09:05";
+            f.clockOutLocal = "2026-11-17 18:05";
+            var clone = f.Clone();
+            Check("27.16 Clone 带上本地打卡", clone.clockInLocal + "/" + clone.clockOutLocal, "2026-11-17 09:05/2026-11-17 18:05");
+            var copied = new Settings();
+            copied.CopyFrom(f);
+            Check("27.16b CopyFrom 带上本地打卡", copied.clockInLocal + "/" + copied.clockOutLocal,
+                "2026-11-17 09:05/2026-11-17 18:05");
+            var raw = new Settings();
+            raw.clockInLocal = null;
+            raw.clockOutLocal = null;
+            raw.Normalize();
+            Check("27.17 Normalize 旧配置空字符串", (raw.clockInLocal == "") + "/" + (raw.clockOutLocal == ""), "True/True");
+            var json = new JavaScriptSerializer().Serialize(f);
+            var backJson = new JavaScriptSerializer().Deserialize<Settings>(json);
+            Check("27.18 JSON 往返保留本地打卡", backJson.clockInLocal + "/" + backJson.clockOutLocal,
+                f.clockInLocal + "/" + f.clockOutLocal);
+
+            string dir = NewTempDir();
+            try
+            {
+                var store = StoreIn(dir);
+                string exportPath = System.IO.Path.Combine(dir, "export.json");
+                var exported = store.Export(f, exportPath);
+                var imported = store.Import(exportPath);
+                Check("27.19 导入导出保留本地打卡",
+                    exported.Succeeded + "/" + (imported.Succeeded
+                        ? imported.Settings.clockInLocal + "/" + imported.Settings.clockOutLocal : "fail"),
+                    "True/2026-11-17 09:05/2026-11-17 18:05");
+
+                string savedNoSave = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+                Environment.SetEnvironmentVariable("WC_NO_SAVE", "0");
+                try
+                {
+                    var saved = store.Save(f);
+                    var loaded = store.Load();
+                    Check("27.20 本地打卡能安全落盘再读回",
+                        saved.Status + "/" + loaded.Settings.clockInLocal + "/" + loaded.Settings.clockOutLocal,
+                        "Saved/2026-11-17 09:05/2026-11-17 18:05");
+                    string before = System.IO.File.ReadAllText(store.SettingsPath);
+                    Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
+                    try
+                    {
+                        var skipped = store.Save(f);
+                        Check("27.21 WC_NO_SAVE 不落盘",
+                            skipped.Status + "/" + (System.IO.File.ReadAllText(store.SettingsPath) == before),
+                            "Skipped/True");
+                    }
+                    finally { Environment.SetEnvironmentVariable("WC_NO_SAVE", "0"); }
+                }
+                finally { Environment.SetEnvironmentVariable("WC_NO_SAVE", savedNoSave); }
+            }
+            finally { DeleteTempDir(dir); }
+        }
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURES");
