@@ -69,6 +69,9 @@ $common = @(
     ('/win32manifest:' + $manifest)
 )
 
+# 两套测试共用的可控同步 adapter / 调度器
+$testKit = @((Join-Path $testDir 'SyncFakes.cs'))
+
 $suites = @(
     [pscustomobject]@{ Name = 'Test';  Src = 'Test.cs';  Exe = 'Test.exe'  },
     [pscustomobject]@{ Name = 'Check'; Src = 'Check.cs'; Exe = 'Check.exe' }
@@ -77,7 +80,7 @@ $suites = @(
 # ---------- 编译 ----------
 foreach ($s in $suites) {
     $exe = Join-Path $testDir $s.Exe
-    $cscArgs = $common + @(('/out:' + $exe)) + $refs + $sources + @((Join-Path $testDir $s.Src))
+    $cscArgs = $common + @(('/out:' + $exe)) + $refs + $sources + $testKit + @((Join-Path $testDir $s.Src))
     Write-Host "编译 -> $($s.Exe)"
     & $csc $cscArgs
     if ($LASTEXITCODE -ne 0) { throw "编译失败：$($s.Exe)（exit $LASTEXITCODE）" }

@@ -670,20 +670,22 @@ internal static class Test
             {
                 id = "f2", name = "个人", source = "file", path = f2, enabled = true, leadMinutes = 0
             });
-            string pollError;
-            var polled = CalendarSync.Poll(multiSet.outlook, DateTime.Today, DateTime.Today.AddDays(14), 3000, out pollError);
-            Check("两份本地日历都能同步", polled.Count + "/" + pollError, "2/");
+            var firstFetch = CalendarSync.Fetch(CalendarSync.Request(multiSet.outlook.calendars[0],
+                multiSet.outlook, DateTime.Today, DateTime.Today.AddDays(14), 3000));
+            var secondFetch = CalendarSync.Fetch(CalendarSync.Request(multiSet.outlook.calendars[1],
+                multiSet.outlook, DateTime.Today, DateTime.Today.AddDays(14), 3000));
+            Check("两份本地日历都能直接读取", firstFetch.Succeeded + "/" + secondFetch.Succeeded, "True/True");
             Check("同步时套用每份日历自己的提前量",
-                polled[0].leadMinutes + "/" + polled[1].leadMinutes, "7/12");
-            Check("每份日历都记了同步时间",
-                (multiSet.outlook.calendars[0].lastSync.Length > 0 && multiSet.outlook.calendars[1].lastSync.Length > 0).ToString(),
-                "True");
+                firstFetch.Events[0].leadMinutes + "/" + secondFetch.Events[0].leadMinutes, "7/12");
+            Check("读取不写共享配置缓存",
+                multiSet.outlook.calendars[0].cached.Count + "/" + multiSet.outlook.calendars[1].cached.Count, "0/0");
 
-            // 把第二份改成一个不存在的文件：第一份照样成功，第二份保留上次缓存
+            // 把第二份改成一个不存在的文件：第一份照样成功，第二份给出失败
             multiSet.outlook.calendars[1].path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-missing-" + Guid.NewGuid().ToString("N") + ".ics");
-            var partial = CalendarSync.Poll(multiSet.outlook, DateTime.Today, DateTime.Today.AddDays(14), 3000, out pollError);
-            Check("一份失败不影响另一份", partial.Count + "/" + (pollError.IndexOf("个人") >= 0), "2/True");
-            Check("失败的那份保留自己的缓存", multiSet.outlook.calendars[1].cached.Count.ToString(), "1");
+            var missingFetch = CalendarSync.Fetch(CalendarSync.Request(multiSet.outlook.calendars[1],
+                multiSet.outlook, DateTime.Today, DateTime.Today.AddDays(14), 3000));
+            Check("一份失败不影响另一份",
+                (firstFetch.Succeeded && !missingFetch.Succeeded && missingFetch.Error.Length > 0).ToString(), "True");
             try { System.IO.File.Delete(f1); System.IO.File.Delete(f2); } catch { }
         }
 
@@ -1515,6 +1517,665 @@ internal static class Test
             Check("没有未来日程时 NextEvent 返回 null",
                 (new ReminderEngine().NextEvent(sDis, emptySnap, new DateTime(2026, 11, 16, 23, 0, 0)) == null).ToString(), "True");
 
+        }
+
+        // 22. 同步模块：请求生命周期、配置代次、按来源缓存与结果发布
+        {
+            Func<string, string, string, string, ReminderEvent> Ev = delegate(string id, string title, string start, string source)
+            {
+                return SyncTestKit.Ev(id, title, start, source);
+            };
+            var fixedNow = new DateTime(2026, 11, 16, 9, 0, 0);
+            Func<DateTime> clock = delegate { return fixedNow; };
+
+            // 22.1 启动缓存与来源过滤 / 去重（AC4）
+            {
+                var sCache = new Settings();
+                sCache.Normalize();
+                sCache.lark.enabled = false;
+                sCache.calendarEnabled = false;
+                sCache.outlook.leadMinutes = 10;
+                var cacheA = new CalendarSource { id = "cA", name = "工作", source = "url", url = "https://example.com/a.ics", enabled = true };
+                cacheA.cached.Add(Ev("ol:dup", "共享的会", "2026-11-16 10:00", "outlook"));
+                cacheA.cached.Add(Ev("ol:a", "工作 11 点", "2026-11-16 11:00", "outlook"));
+                cacheA.lastSync = "2026-11-15 12:00";
+                var cacheB = new CalendarSource { id = "cB", name = "个人", source = "url", url = "https://example.com/b.ics", enabled = true };
+                cacheB.cached.Add(Ev("ol:dup", "共享的会", "2026-11-16 10:00", "outlook"));
+                cacheB.cached.Add(Ev("ol:b", "个人 9 点", "2026-11-16 09:00", "outlook"));
+                cacheB.lastSync = "2026-11-15 13:00";
+                var cacheOff = new CalendarSource { id = "cOff", name = "停用的", source = "url", url = "https://example.com/off.ics", enabled = false };
+                cacheOff.cached.Add(Ev("ol:off", "停用的会", "2026-11-16 12:00", "outlook"));
+                cacheOff.lastError = "停用来源的旧错误";
+                sCache.outlook.calendars.Add(cacheA);
+                sCache.outlook.calendars.Add(cacheB);
+                sCache.outlook.calendars.Add(cacheOff);
+                sCache.Normalize();
+
+                var cacheSched = new ManualSyncScheduler();
+                var cacheDisp = new ImmediateSyncDispatcher();
+                var cacheAtt = new ControlledAttendanceReader();
+                var cacheCal = new ControlledCalendarReader();
+                var cacheSink = new RecordingSyncConfigSink();
+                var cacheEngine = new SyncEngine(cacheSched, cacheDisp, cacheAtt, cacheCal, clock);
+                cacheEngine.ConfigSink = cacheSink;
+                cacheEngine.Configure(sCache);
+                var cacheSnap = cacheEngine.Snapshot();
+                string cacheOrder = "";
+                foreach (var e in cacheSnap.OutlookEvents) cacheOrder += (cacheOrder.Length == 0 ? "" : "/") + e.title;
+                Check("AC4 启动缓存只启用且有效的来源参与", cacheSnap.OutlookEvents.Count.ToString(), "3");
+                Check("AC4 启动缓存跨来源去重并按开始时间排序", cacheOrder, "个人 9 点/共享的会/工作 11 点");
+                Check("AC4 禁用来源不参与且错误不进入视图",
+                    (cacheSnap.OutlookError == null && cacheSnap.OutlookLastSync == "2026-11-15 13:00").ToString(), "True");
+
+                // 禁用 / 删除来源后，同一份视图规则立即生效
+                cacheB.enabled = false;
+                cacheEngine.Configure(sCache);
+                cacheSnap = cacheEngine.Snapshot();
+                Check("AC4 请求前禁用来源立即移出视图",
+                    cacheSnap.OutlookEvents.Count + "/" + (cacheSnap.OutlookEvents.FindAll(delegate(ReminderEvent e) { return e.id == "ol:b"; }).Count), "2/0");
+                cacheB.enabled = true;
+                sCache.outlook.calendars.Remove(cacheA);
+                cacheEngine.Configure(sCache);
+                cacheSnap = cacheEngine.Snapshot();
+                Check("AC4 删除来源后不再参与视图",
+                    cacheSnap.OutlookEvents.Count + "/" + (cacheSnap.OutlookEvents.FindAll(delegate(ReminderEvent e) { return e.id == "ol:a"; }).Count), "2/0");
+            }
+
+            // 22.1b 成功 / 部分失败 / 全部失败共用同一来源过滤与去重（AC4）
+            {
+                var sView = new Settings();
+                sView.Normalize();
+                sView.lark.enabled = false;
+                sView.calendarEnabled = false;
+                var viewA = new CalendarSource { id = "va", name = "工作", source = "url", url = "https://example.com/va.ics", enabled = true };
+                viewA.cached.Add(Ev("ol:dup", "共享的会", "2026-11-16 10:00", "outlook"));
+                viewA.cached.Add(Ev("ol:a", "工作 11 点", "2026-11-16 11:00", "outlook"));
+                var viewB = new CalendarSource { id = "vb", name = "个人", source = "url", url = "https://example.com/vb.ics", enabled = true };
+                viewB.cached.Add(Ev("ol:dup", "共享的会", "2026-11-16 10:00", "outlook"));
+                viewB.cached.Add(Ev("ol:b", "个人 9 点", "2026-11-16 09:00", "outlook"));
+                sView.outlook.calendars.Add(viewA);
+                sView.outlook.calendars.Add(viewB);
+                sView.Normalize();
+
+                var viewSched = new ManualSyncScheduler();
+                var viewAtt = new ControlledAttendanceReader();
+                var viewCal = new ControlledCalendarReader();
+                var viewSink = new RecordingSyncConfigSink();
+                var viewEngine = new SyncEngine(viewSched, new ImmediateSyncDispatcher(), viewAtt, viewCal, clock);
+                viewEngine.ConfigSink = viewSink;
+                viewEngine.Configure(sView);
+                var viewPubs = new List<SyncPublication>();
+                viewEngine.Published += delegate(SyncPublication p) { viewPubs.Add(p); };
+
+                Func<List<ReminderEvent>, string> Titles = delegate(List<ReminderEvent> list)
+                {
+                    string order = "";
+                    foreach (var e in list) order += (order.Length == 0 ? "" : "/") + e.title;
+                    return order;
+                };
+
+                // 成功：两份来源都返回，其中共享了同一个 id
+                viewCal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    if (r.SourceId == "va")
+                        return SyncTestKit.CalendarOk("va",
+                            Ev("ol:dup", "共享的会", "2026-11-16 10:00", "outlook"),
+                            Ev("ol:newa", "新 A", "2026-11-16 12:00", "outlook"));
+                    return SyncTestKit.CalendarOk("vb",
+                        Ev("ol:dup", "共享的会", "2026-11-16 10:00", "outlook"),
+                        Ev("ol:newb", "新 B", "2026-11-16 08:00", "outlook"));
+                };
+                viewEngine.RequestOutlook(false);
+                viewSched.RunAll();
+                Check("AC4 成功后仍按 id 去重并排序",
+                    Titles(viewEngine.Snapshot().OutlookEvents), "新 B/共享的会/新 A");
+                Check("AC4 成功状态与无错误",
+                    (viewPubs.Count == 1 ? viewPubs[0].Status : "count") + "/" + (viewEngine.Snapshot().OutlookError == null),
+                    "success/True");
+
+                // 部分失败：A 成功，B 失败；B 保留上次成功缓存
+                viewCal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    if (r.SourceId == "va")
+                        return SyncTestKit.CalendarOk("va", Ev("ol:newa2", "新 A2", "2026-11-16 13:00", "outlook"));
+                    return SyncTestKit.CalendarFail("vb", "B 挂了");
+                };
+                viewEngine.RequestOutlook(false);
+                viewSched.RunAll();
+                Check("AC4 部分失败保留失败来源的最后成功缓存",
+                    Titles(viewEngine.Snapshot().OutlookEvents), "新 B/共享的会/新 A2");
+                string partialError = viewEngine.Snapshot().OutlookError ?? "";
+                Check("AC4 部分失败状态与错误带来源名",
+                    (viewPubs.Count == 2 ? viewPubs[1].Status : "count") + "/"
+                    + (partialError.IndexOf("个人") >= 0 && partialError.IndexOf("B 挂了") >= 0),
+                    "partial/True");
+
+                // 全部失败：视图仍用各来源最后一次成功缓存，错误列出两份来源
+                viewCal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    return SyncTestKit.CalendarFail(r.SourceId, r.SourceId + " 挂了");
+                };
+                viewEngine.RequestOutlook(false);
+                viewSched.RunAll();
+                string failedError = viewEngine.Snapshot().OutlookError ?? "";
+                Check("AC4 全部失败仍显示各来源最后成功缓存",
+                    Titles(viewEngine.Snapshot().OutlookEvents), "新 B/共享的会/新 A2");
+                Check("AC4 全部失败状态与错误",
+                    (viewPubs.Count == 3 ? viewPubs[2].Status : "count") + "/"
+                    + (failedError.IndexOf("工作") >= 0 && failedError.IndexOf("个人") >= 0),
+                    "failed/True");
+            }
+
+            // 22.2 生命周期：同来源去重 / 不同来源并发隔离 / 异常后可刷新（AC1）
+            {
+                var sLive = new Settings();
+                sLive.Normalize();
+                sLive.lark.enabled = true;
+                sLive.lark.chatId = "oc_live";
+                sLive.lark.command = "lark-live";
+                sLive.calendarEnabled = true;
+                sLive.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "live", name = "工作", source = "url",
+                    url = "https://example.com/live.ics", enabled = true
+                });
+                sLive.Normalize();
+
+                var sched = new ManualSyncScheduler();
+                var disp = new ImmediateSyncDispatcher();
+                var att = new ControlledAttendanceReader();
+                var cal = new ControlledCalendarReader();
+                var sink = new RecordingSyncConfigSink();
+                var eng = new SyncEngine(sched, disp, att, cal, clock);
+                eng.ConfigSink = sink;
+                eng.Configure(sLive);
+                var pubs = new List<SyncPublication>();
+                eng.Published += delegate(SyncPublication p) { pubs.Add(p); };
+
+                var t1 = eng.RequestAttendance(false);
+                var t2 = eng.RequestAttendance(true);
+                Check("AC1 同来源在途请求去重",
+                    (t1 != null) + "/" + (t2 == null) + "/" + sched.Pending.Count, "True/True/1");
+                Check("AC6 快照暴露在途状态而不是私有字段", eng.Snapshot().AttendanceFetching.ToString(), "True");
+
+                att.Respond = delegate(AttendanceReadRequest r) { return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 5, 0)); };
+                sched.RunAll();
+                Check("AC1 完成后清掉在途状态并可再次刷新",
+                    (eng.Snapshot().AttendanceFetching == false) + "/" + att.Calls + "/" + (eng.RequestAttendance(false) != null),
+                    "True/1/True");
+                sched.RunAll();
+                pubs.Clear();
+                var manualTicket = eng.RequestAttendance(true);
+                sched.RunAll();
+                Check("AC1 手动与自动共用同一生命周期",
+                    (manualTicket != null) + "/" + (pubs.Count == 1 ? pubs[0].Manual.ToString() : "count" + pubs.Count),
+                    "True/True");
+
+                // 三个来源同时跑，按相反顺序完成，各自结果都保留
+                pubs.Clear();
+                var la = eng.RequestAttendance(false);
+                var ll = eng.RequestLarkCalendar(false);
+                var lo = eng.RequestOutlook(false);
+                Check("AC1 不同来源各自启动且互不阻塞",
+                    (la != null) + "/" + (ll != null) + "/" + (lo != null) + "/" + sched.Pending.Count,
+                    "True/True/True/3");
+                cal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    if (r.Kind == "lark")
+                        return SyncTestKit.CalendarOk("lark:calendar", Ev("lark:1", "飞书会", "2026-11-16 14:00", "lark"));
+                    return SyncTestKit.CalendarOk(r.SourceId, Ev("ol:live", "Outlook 会", "2026-11-16 15:00", "outlook"));
+                };
+                sched.Run(2);
+                Check("AC1 乱序完成不覆盖其它来源的在途状态",
+                    (eng.Snapshot().AttendanceFetching && eng.Snapshot().LarkFetching
+                     && !eng.Snapshot().OutlookFetching && eng.Snapshot().OutlookEvents.Count == 1).ToString(), "True");
+                sched.Run(1);
+                sched.Run(0);
+                Check("AC1 三个来源的结果各自发布",
+                    eng.Snapshot().Attendance.ok + "/" + eng.Snapshot().LarkEvents.Count + "/"
+                    + eng.Snapshot().OutlookEvents.Count + "/" + pubs.Count,
+                    "True/1/1/3");
+
+                // 飞书日历失败时保留上次成功的那一份，不把已有日程抹掉
+                cal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    if (r.Kind == "lark") return SyncTestKit.CalendarFail("lark:calendar", "飞书日程服务超时");
+                    return SyncTestKit.CalendarOk(r.SourceId, Ev("ol:live", "Outlook 会", "2026-11-16 15:00", "outlook"));
+                };
+                eng.RequestLarkCalendar(false);
+                sched.RunAll();
+                Check("AC4 飞书日程失败保留上次成功缓存",
+                    eng.Snapshot().LarkEvents.Count + "/"
+                    + (eng.Snapshot().LarkError != null && eng.Snapshot().LarkError.IndexOf("超时") >= 0),
+                    "1/True");
+
+                // adapter 异常：状态失败、清掉在途，之后还能再刷新
+                pubs.Clear();
+                att.Respond = delegate(AttendanceReadRequest r) { throw new Exception("adapter 崩了"); };
+                eng.RequestAttendance(false);
+                sched.RunAll();
+                Check("AC1 后台异常转为失败结果并清掉在途",
+                    (pubs.Count == 1 ? pubs[0].Status : "count") + "/"
+                    + (eng.Snapshot().AttendanceError != null && eng.Snapshot().AttendanceError.IndexOf("adapter 崩了") >= 0)
+                    + "/" + eng.Snapshot().AttendanceFetching,
+                    "failed/True/False");
+                att.Respond = delegate(AttendanceReadRequest r) { return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 6, 0)); };
+                var afterCrash = eng.RequestAttendance(false);
+                sched.RunAll();
+                Check("AC1 异常后可再次刷新", (afterCrash != null) + "/" + eng.Snapshot().Attendance.ok, "True/True");
+
+                // 超时（adapter 返回失败）同样不粘住生命周期
+                pubs.Clear();
+                att.Respond = delegate(AttendanceReadRequest r) { return SyncTestKit.AttendanceFailed("lark-cli 响应超时"); };
+                eng.RequestAttendance(false);
+                sched.RunAll();
+                Check("AC1 超时后清掉在途并可重试",
+                    (pubs.Count == 1 ? pubs[0].Status : "count") + "/" + (eng.RequestAttendance(false) != null),
+                    "failed/True");
+                sched.RunAll();
+            }
+
+            // 22.3 请求 A 进行中配置变化：旧结果不得发布 / 写缓存 / 改令牌（AC2）
+            {
+                var sStale = new Settings();
+                sStale.Normalize();
+                sStale.lark.enabled = true;
+                sStale.lark.chatId = "oc_old";
+                sStale.calendarEnabled = true;
+                sStale.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "c1", name = "工作", source = "url",
+                    url = "https://example.com/old.ics", enabled = true
+                });
+                sStale.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "c2", name = "个人", source = "url",
+                    url = "https://example.com/me.ics", enabled = true
+                });
+                sStale.Normalize();
+                sStale.outlook.calendars[0].cached.Add(Ev("ol:old1", "工作旧缓存", "2026-11-16 10:00", "outlook"));
+                sStale.outlook.calendars[1].cached.Add(Ev("ol:old2", "个人旧缓存", "2026-11-16 11:00", "outlook"));
+
+                var sched = new ManualSyncScheduler();
+                var disp = new ImmediateSyncDispatcher();
+                var att = new ControlledAttendanceReader();
+                var cal = new ControlledCalendarReader();
+                var sink = new RecordingSyncConfigSink();
+                var eng = new SyncEngine(sched, disp, att, cal, clock);
+                eng.ConfigSink = sink;
+                eng.Configure(sStale);
+                var pubs = new List<SyncPublication>();
+                eng.Published += delegate(SyncPublication p) { pubs.Add(p); };
+
+                // 考勤：请求后改会话 ID，再让旧请求成功
+                att.Respond = delegate(AttendanceReadRequest r)
+                {
+                    if (r.ChatId != "oc_old" && r.ChatId != "oc_new")
+                        throw new Exception("后台拿到了未知配置: " + r.ChatId);
+                    return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 10, 0));
+                };
+                var oldAttendance = eng.RequestAttendance(true);
+                var oldVersion = oldAttendance.ConfigVersion;
+                sStale.lark.chatId = "oc_new";
+                eng.Configure(sStale);
+                Check("AC2 配置变化使配置代次前进", (eng.ConfigVersion > oldVersion).ToString(), "True");
+                Check("AC2 旧请求被标记为取消", oldAttendance.Cancelled.ToString(), "True");
+                var freshAttendance = eng.RequestAttendance(false);
+                Check("AC2 旧请求被取消后新请求可以启动", (freshAttendance != null && sched.Pending.Count == 2).ToString(), "True");
+                sched.Run(0);
+                Check("AC2 旧考勤结果不发布、不更新当前状态",
+                    (pubs.Count == 0) + "/" + (eng.Snapshot().Attendance == null) + "/" + att.Requests[0].ChatId,
+                    "True/True/oc_old");
+                sched.RunAll();
+                Check("AC2 新配置的请求正常发布",
+                    (pubs.Count == 1) + "/" + (eng.Snapshot().Attendance != null ? eng.Snapshot().Attendance.ok.ToString() : "null")
+                    + "/" + att.Requests[1].ChatId,
+                    "True/True/oc_new");
+
+                // 飞书日历：请求后关掉日历开关，旧结果不得写回日程或错误
+                pubs.Clear();
+                cal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    return SyncTestKit.CalendarOk("lark:calendar", Ev("lark:stale", "旧飞书日程", "2026-11-16 16:00", "lark"));
+                };
+                eng.RequestLarkCalendar(true);
+                sStale.calendarEnabled = false;
+                eng.Configure(sStale);
+                sched.RunAll();
+                Check("AC2 关掉飞书日历后旧结果不写日程/错误",
+                    (pubs.Count == 0) + "/" + eng.Snapshot().LarkEvents.Count + "/" + (eng.Snapshot().LarkError == null),
+                    "True/0/True");
+                sStale.calendarEnabled = true;
+                eng.Configure(sStale);
+
+                // Outlook：请求后禁用一份来源，旧结果不得更新任何来源的缓存
+                pubs.Clear();
+                sink.Updates.Clear();
+                cal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    if (r.SourceId == "c1") return SyncTestKit.CalendarOk("c1", Ev("ol:new1", "工作新日程", "2026-11-16 12:00", "outlook"));
+                    return SyncTestKit.CalendarOk("c2", Ev("ol:new2", "个人新日程", "2026-11-16 13:00", "outlook"));
+                };
+                eng.RequestOutlook(true);
+                sStale.outlook.calendars[0].enabled = false;
+                eng.Configure(sStale);
+                sched.RunAll();
+                var disabledSnap = eng.Snapshot();
+                string disabledTitles = "";
+                foreach (var e in disabledSnap.OutlookEvents) disabledTitles += (disabledTitles.Length == 0 ? "" : "/") + e.title;
+                Check("AC2 禁用来源后旧结果不更新当前日程/缓存/错误",
+                    (pubs.Count == 0) + "/" + (sink.Updates.Count == 0) + "/" + disabledTitles,
+                    "True/True/个人旧缓存");
+
+                // Outlook：删除一份来源，旧结果同样作废
+                pubs.Clear();
+                sink.Updates.Clear();
+                sStale.outlook.calendars[0].enabled = true;
+                sStale.outlook.calendars.RemoveAt(0);
+                eng.Configure(sStale);
+                eng.RequestOutlook(true);
+                sStale.outlook.calendars.RemoveAt(0);
+                eng.Configure(sStale);
+                sched.RunAll();
+                Check("AC2 删除来源后旧结果不进入视图",
+                    (pubs.Count == 0) + "/" + (eng.Snapshot().OutlookEvents.Count == 0), "True/True");
+
+                // 切换账号：旧请求带回来的轮换令牌不得覆盖当前令牌
+                var sAccount = new Settings();
+                sAccount.Normalize();
+                sAccount.lark.enabled = false;
+                sAccount.calendarEnabled = false;
+                sAccount.outlook.refreshToken = OutlookGraph.Protect("rt-old");
+                sAccount.outlook.account = "old@example.com";
+                var graph = new CalendarSource { id = "g1", name = "Outlook 登录", source = "graph", enabled = true };
+                graph.cached.Add(Ev("ol:g", "账号旧缓存", "2026-11-16 10:00", "outlook"));
+                sAccount.outlook.calendars.Add(graph);
+                sAccount.Normalize();
+                var accountSched = new ManualSyncScheduler();
+                var accountAtt = new ControlledAttendanceReader();
+                var accountCal = new ControlledCalendarReader();
+                var accountSink = new RecordingSyncConfigSink();
+                var accountEngine = new SyncEngine(accountSched, new ImmediateSyncDispatcher(), accountAtt, accountCal, clock);
+                accountEngine.ConfigSink = accountSink;
+                accountEngine.Configure(sAccount);
+                var accountPubs = new List<SyncPublication>();
+                accountEngine.Published += delegate(SyncPublication p) { accountPubs.Add(p); };
+                string oldProtected = sAccount.outlook.refreshToken;
+                accountCal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    var ok = SyncTestKit.CalendarOk("g1", Ev("ol:gnew", "新账号日程", "2026-11-16 14:00", "outlook"));
+                    ok.RotatedRefreshToken = OutlookGraph.Protect("rt-rotated-old-account");
+                    return ok;
+                };
+                accountEngine.RequestOutlook(true);
+                sAccount.outlook.refreshToken = OutlookGraph.Protect("rt-new");
+                sAccount.outlook.account = "new@example.com";
+                accountEngine.Configure(sAccount);
+                accountSched.RunAll();
+                Check("AC2 切换账号后旧令牌不覆盖当前令牌",
+                    (accountPubs.Count == 0) + "/" + (accountSink.Updates.Count == 0) + "/"
+                    + (sAccount.outlook.refreshToken == oldProtected) + "/"
+                    + accountEngine.Snapshot().OutlookEvents.Count,
+                    "True/True/False/1");
+
+                // 旧请求回来的是失败：同样不能把错误盖到当前配置上
+                var sOldError = new Settings();
+                sOldError.Normalize();
+                sOldError.lark.enabled = false;
+                sOldError.calendarEnabled = false;
+                var errSource = new CalendarSource
+                {
+                    id = "err", name = "错误日历", source = "url",
+                    url = "https://example.com/err.ics", enabled = true
+                };
+                errSource.cached.Add(Ev("ol:err-old", "错误前缓存", "2026-11-16 10:00", "outlook"));
+                sOldError.outlook.calendars.Add(errSource);
+                sOldError.Normalize();
+                var errSched = new ManualSyncScheduler();
+                var errCal = new ControlledCalendarReader();
+                var errSink = new RecordingSyncConfigSink();
+                var errEngine = new SyncEngine(errSched, new ImmediateSyncDispatcher(),
+                    new ControlledAttendanceReader(), errCal, clock);
+                errEngine.ConfigSink = errSink;
+                errEngine.Configure(sOldError);
+                var errPubs = new List<SyncPublication>();
+                errEngine.Published += delegate(SyncPublication p) { errPubs.Add(p); };
+                errCal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    return SyncTestKit.CalendarFail("err", "旧请求的失败");
+                };
+                errEngine.RequestOutlook(true);
+                sOldError.outlook.leadMinutes = 5;
+                errEngine.Configure(sOldError);
+                errSched.RunAll();
+                Check("AC2 旧失败结果不改当前错误/缓存",
+                    (errPubs.Count == 0) + "/" + (errSink.Updates.Count == 0) + "/"
+                    + (errEngine.Snapshot().OutlookError == null) + "/"
+                    + errEngine.Snapshot().OutlookEvents.Count,
+                    "True/True/True/1");
+            }
+
+            // 22.3b 与同步无关的设置变化不推进同步代次（ADR-0002「按受影响范围生效」）
+            {
+                var sTheme = new Settings();
+                sTheme.Normalize();
+                sTheme.lark.enabled = true;
+                sTheme.lark.chatId = "oc_theme";
+                sTheme.calendarEnabled = false;
+                var themeSched = new ManualSyncScheduler();
+                var themeAtt = new ControlledAttendanceReader();
+                var themeEngine = new SyncEngine(themeSched, new ImmediateSyncDispatcher(),
+                    themeAtt, new ControlledCalendarReader(), clock);
+                themeEngine.Configure(sTheme);
+                var themePubs = new List<SyncPublication>();
+                themeEngine.Published += delegate(SyncPublication p) { themePubs.Add(p); };
+                themeAtt.Respond = delegate(AttendanceReadRequest r)
+                {
+                    return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 30, 0));
+                };
+                long themeVersion = themeEngine.ConfigVersion;
+                themeEngine.RequestAttendance(false);
+                sTheme.ui.theme = "ivory";
+                themeEngine.Configure(sTheme);
+                Check("AC2 无关设置变化不推进同步代次",
+                    (themeEngine.ConfigVersion == themeVersion).ToString(), "True");
+                themeSched.RunAll();
+                Check("AC2 无关设置变化不丢弃已开始的同步结果",
+                    (themePubs.Count == 1) + "/" + themeEngine.Snapshot().Attendance.ok,
+                    "True/True");
+            }
+
+            // 22.4 释放模块 / 关闭窗口：在途结果不发布、不写配置（AC3）
+            {
+                var sClose = new Settings();
+                sClose.Normalize();
+                sClose.lark.enabled = true;
+                sClose.lark.chatId = "oc_close";
+                sClose.calendarEnabled = true;
+                sClose.outlook.refreshToken = OutlookGraph.Protect("rt-close");
+                sClose.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "gc", name = "Outlook 登录", source = "graph", enabled = true
+                });
+                sClose.Normalize();
+                var sched = new ManualSyncScheduler();
+                var att = new ControlledAttendanceReader();
+                var cal = new ControlledCalendarReader();
+                var sink = new RecordingSyncConfigSink();
+                var eng = new SyncEngine(sched, new ImmediateSyncDispatcher(), att, cal, clock);
+                eng.ConfigSink = sink;
+                eng.Configure(sClose);
+                var pubs = new List<SyncPublication>();
+                eng.Published += delegate(SyncPublication p) { pubs.Add(p); };
+
+                att.Respond = delegate(AttendanceReadRequest r) { return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 0, 0)); };
+                cal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    var ok = SyncTestKit.CalendarOk("gc", Ev("ol:late", "关闭后返回的日程", "2026-11-16 15:00", "outlook"));
+                    ok.RotatedRefreshToken = OutlookGraph.Protect("rt-after-close");
+                    return ok;
+                };
+                eng.RequestAttendance(true);
+                eng.RequestOutlook(true);
+                eng.Dispose();
+                sched.RunAll();
+                Check("AC3 释放后在途 adapter 仍可自然结束",
+                    (att.Calls == 1 && cal.Calls == 1) + "/" + eng.Snapshot().AttendanceFetching + "/" + eng.Snapshot().OutlookFetching,
+                    "True/False/False");
+                Check("AC3 释放后不发布界面回调、不写缓存与令牌",
+                    (pubs.Count == 0) + "/" + (sink.Updates.Count == 0) + "/" + (eng.Snapshot().Attendance == null)
+                    + "/" + eng.Snapshot().OutlookEvents.Count + "/"
+                    + (sClose.outlook.refreshToken == OutlookGraph.Protect("rt-close") || OutlookGraph.Unprotect(sClose.outlook.refreshToken) == "rt-close"),
+                    "True/True/True/0/True");
+                Check("AC3 释放后不再接受新请求", (eng.RequestAttendance(false) == null).ToString(), "True");
+                long versionBefore = eng.ConfigVersion;
+                eng.Configure(sClose);
+                Check("AC3 释放后配置不再变化", (eng.ConfigVersion == versionBefore).ToString(), "True");
+            }
+
+            // 22.5 后台 adapter 只读请求快照；接受结果时由状态拥有者应用配置更新（AC5）
+            {
+                var sSnap = new Settings();
+                sSnap.Normalize();
+                sSnap.lark.enabled = true;
+                sSnap.lark.chatId = "oc_snapshot";
+                sSnap.calendarEnabled = false;
+                sSnap.outlook.refreshToken = OutlookGraph.Protect("rt-old");
+                sSnap.outlook.account = "snapshot@example.com";
+                var graph = new CalendarSource { id = "gs", name = "Outlook 登录", source = "graph", enabled = true };
+                graph.cached.Add(Ev("ol:before", "同步前缓存", "2026-11-16 09:00", "outlook"));
+                sSnap.outlook.calendars.Add(graph);
+                sSnap.Normalize();
+
+                var sched = new ManualSyncScheduler();
+                var att = new ControlledAttendanceReader();
+                var cal = new ControlledCalendarReader();
+                var sink = new RecordingSyncConfigSink();
+                var eng = new SyncEngine(sched, new ImmediateSyncDispatcher(), att, cal, clock);
+                eng.ConfigSink = sink;
+                eng.Configure(sSnap);
+                var pubs = new List<SyncPublication>();
+                eng.Published += delegate(SyncPublication p) { pubs.Add(p); };
+
+                // Configure 之后再改共享 Settings：请求仍使用请求时的快照
+                string oldChat = sSnap.lark.chatId;
+                string oldUrl = sSnap.outlook.calendars[0].url;
+                sSnap.lark.chatId = "oc_changed_after_configure";
+                sSnap.outlook.calendars[0].url = "https://example.com/changed.ics";
+                att.Respond = delegate(AttendanceReadRequest r)
+                {
+                    if (r.ChatId != oldChat) throw new Exception("考勤 adapter 读到了改后的配置");
+                    return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 20, 0));
+                };
+                eng.RequestAttendance(false);
+                sched.RunAll();
+                Check("AC5 考勤 adapter 只读请求时快照", att.Requests[0].ChatId, oldChat);
+
+                cal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    if (r.Url != oldUrl) throw new Exception("日历 adapter 读到了改后的地址");
+                    var ok = SyncTestKit.CalendarOk("gs", Ev("ol:after", "同步后日程", "2026-11-16 10:30", "outlook"));
+                    ok.RotatedRefreshToken = OutlookGraph.Protect("rt-new");
+                    ok.TokenAt = "2026-11-16 09:20";
+                    return ok;
+                };
+                string settingsTokenBefore = sSnap.outlook.refreshToken;
+                string settingsCachedBefore = sSnap.outlook.calendars[0].cached[0].id;
+                eng.RequestOutlook(true);
+                sched.RunAll();
+                Check("AC5 后台 adapter 不原地修改共享 Settings",
+                    (sSnap.outlook.refreshToken == settingsTokenBefore) + "/" + (sSnap.outlook.calendars[0].cached[0].id == settingsCachedBefore)
+                    + "/" + (sink.Updates.Count == 1),
+                    "True/True/True");
+                Check("AC5 接受结果时把配置更新交给状态拥有者",
+                    (pubs.Count == 2) + "/" + (pubs[1].Status) + "/" + (pubs[1].Snapshot.OutlookEvents.Count),
+                    "True/success/1");
+                var update = sink.Updates.Count == 0 ? null : sink.Updates[0];
+                Check("AC5 令牌轮换以受保护值交给拥有者",
+                    update == null ? "null" : (update.RefreshToken != null && update.RefreshToken.StartsWith("dpapi:")
+                        && OutlookGraph.Unprotect(update.RefreshToken) == "rt-new") + "/" + update.TokenAt,
+                    "True/2026-11-16 09:20");
+                Check("AC5 每份来源的缓存与同步时间在更新里",
+                    update == null ? "null" : (update.Calendars.Count + "/" + update.Calendars[0].Succeeded + "/"
+                        + update.Calendars[0].Events.Count + "/" + update.Calendars[0].LastSync),
+                    "1/True/1/2026-11-16 09:00");
+                Check("AC5 汇总缓存也在配置更新里",
+                    update == null ? "null" : (update.OutlookCached.Count + "/" + update.OutlookLastSync + "/" + (update.OutlookLastError == null || update.OutlookLastError.Length == 0)),
+                    "1/2026-11-16 09:00/True");
+
+                // 轮换后的受保护令牌要用于下一次刷新，而不是退回请求时的旧令牌
+                cal.Respond = delegate(CalendarFetchRequest r)
+                {
+                    return SyncTestKit.CalendarOk("gs", Ev("ol:next", "下一次日程", "2026-11-16 12:30", "outlook"));
+                };
+                eng.RequestOutlook(false);
+                sched.RunAll();
+                string nextToken = cal.Requests[cal.Requests.Count - 1].RefreshToken;
+                Check("AC5 轮换后的令牌用于下一次刷新",
+                    OutlookGraph.Unprotect(nextToken), "rt-new");
+            }
+
+            // 22.6 CalendarSync.Fetch：认证/解析/失败语义仍集中在原处，且不再写共享配置
+            {
+                string icsPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-fetch-" + Guid.NewGuid().ToString("N") + ".ics");
+                string stamp = DateTime.Today.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+                System.IO.File.WriteAllText(icsPath,
+                    "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:fetch-1\r\nSUMMARY:直接读取的会\r\n" +
+                    "DTSTART:" + stamp + "T100000\r\nDTEND:" + stamp + "T103000\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+                    System.Text.Encoding.UTF8);
+                var fetchReq = new CalendarFetchRequest();
+                fetchReq.Kind = "file";
+                fetchReq.SourceId = "fetch";
+                fetchReq.SourceName = "直接读取";
+                fetchReq.Path = icsPath;
+                fetchReq.LeadMinutes = 0;
+                fetchReq.DefaultLeadMinutes = 12;
+                fetchReq.From = DateTime.Today;
+                fetchReq.To = DateTime.Today.AddDays(14);
+                fetchReq.TimeoutMs = 3000;
+                var fetched = CalendarSync.Fetch(fetchReq);
+                Check("AC5 Fetch 成功解析并套用默认提前量",
+                    fetched.Succeeded + "/" + (fetched.Events == null ? -1 : fetched.Events.Count) + "/"
+                    + (fetched.Events != null && fetched.Events.Count > 0 ? fetched.Events[0].leadMinutes : -1),
+                    "True/1/12");
+                fetchReq.Path = icsPath + ".missing";
+                var fetchMissing = CalendarSync.Fetch(fetchReq);
+                Check("AC5 Fetch 失败保留真实失败语义", (fetchMissing.Succeeded == false && fetchMissing.Error.Length > 0).ToString(), "True");
+                var fetchGraph = new CalendarFetchRequest();
+                fetchGraph.Kind = "graph";
+                fetchGraph.SourceId = "g";
+                fetchGraph.From = DateTime.Today;
+                fetchGraph.To = DateTime.Today.AddDays(1);
+                fetchGraph.TimeoutMs = 100;
+                var fetchNoToken = CalendarSync.Fetch(fetchGraph);
+                Check("AC5 Fetch 没登录时给可读错误", fetchNoToken.Error, "还没登录 Outlook");
+
+                // 生产日历 adapter 与可控 adapter 走同一个 ICalendarSourceReader seam
+                var sProd = new Settings();
+                sProd.Normalize();
+                sProd.lark.enabled = false;
+                sProd.calendarEnabled = false;
+                sProd.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "prod", name = "生产 adapter", source = "file",
+                    path = icsPath, enabled = true, leadMinutes = 3
+                });
+                sProd.Normalize();
+                var prodSched = new ManualSyncScheduler();
+                var prodSink = new RecordingSyncConfigSink();
+                var prodEngine = new SyncEngine(prodSched, new ImmediateSyncDispatcher(),
+                    new ControlledAttendanceReader(),
+                    new LiveCalendarSourceReader(new LarkClient(new SettingsStore())), clock);
+                prodEngine.ConfigSink = prodSink;
+                prodEngine.Configure(sProd);
+                var prodTicket = prodEngine.RequestOutlook(false);
+                prodSched.RunAll();
+                Check("生产日历 adapter 走同一 seam",
+                    (prodTicket != null) + "/" + prodEngine.Snapshot().OutlookEvents.Count + "/"
+                    + (prodSink.Updates.Count == 1 ? prodSink.Updates[0].Calendars[0].Succeeded.ToString() : "no-update"),
+                    "True/1/True");
+                try { System.IO.File.Delete(icsPath); } catch { }
+            }
         }
 
         Console.WriteLine();

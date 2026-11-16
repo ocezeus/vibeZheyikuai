@@ -12,7 +12,7 @@ using System.Windows.Forms;
 
 namespace WorkCountdown
 {
-    public class WidgetForm : Form
+    public class WidgetForm : Form, ISyncConfigSink
     {
         // 96 DPI 下的设计尺寸，实际按 scale 放大
         private const int DesignExpandedW = 280;
@@ -33,8 +33,8 @@ namespace WorkCountdown
         private readonly SettingsStore store;
         private Settings settings;
         private readonly LarkClient lark;
+        private readonly SyncEngine sync;
 
-        private AttendanceSnapshot snapshot;
         private CardStatus status;
         private ThemeDef theme;
         private float scale = 1f;
@@ -46,9 +46,19 @@ namespace WorkCountdown
         /// </summary>
         private SkinDef Skin { get { return Skins.Current(settings.ui); } }
 
-        private bool fetching;
-        private bool lastFetchFailed;
         private DateTime lastDay = DateTime.Today;
+
+        /// <summary>考勤展示快照：只由同步模块接受结果时赋值，窗口不再自己拉取或合并。</summary>
+        private AttendanceSnapshot snapshot;
+
+        private bool lastFetchFailed
+        {
+            get
+            {
+                AttendanceSnapshot state = snapshot;
+                return state != null && !state.ok;
+            }
+        }
 
         private bool collapsed;
         private readonly System.Windows.Forms.Timer tick;
@@ -65,13 +75,7 @@ namespace WorkCountdown
         private Bitmap frame;
         private byte frameAlpha = 240;
 
-        // 日程提醒
-        private List<ReminderEvent> larkEvents = new List<ReminderEvent>();
-        private List<ReminderEvent> outlookEvents = new List<ReminderEvent>();
-        private string outlookError;
-        private bool olFetching;
-        private string larkEventError;
-        private bool calFetching;
+        // 日程提醒：日程快照（飞书 / Outlook 各来源的合并、去重、过滤）由 SyncEngine 统一拥有
         private readonly ReminderEngine engine = new ReminderEngine();
         private bool reminding;
         private DateTime remindAt;
@@ -201,6 +205,12 @@ namespace WorkCountdown
         private Font fontGlyphSalary;
 
         public WidgetForm(SettingsStore store, Settings settings)
+            : this(store, settings, null)
+        {
+        }
+
+        /// <summary>测试 / 宿主可以注入同步模块；生产构造走上面那个重载，使用真实 adapter。</summary>
+        internal WidgetForm(SettingsStore store, Settings settings, SyncEngine sync)
         {
             this.store = store;
             this.settings = settings;
@@ -209,6 +219,14 @@ namespace WorkCountdown
             settings.NormalizeCustomThemes();
             if (settings.note == null) settings.note = new NoteSettings();
             settings.note.Normalize();
+            this.sync = sync != null ? sync : new SyncEngine(
+                new ThreadPoolSyncScheduler(), new ControlSyncDispatcher(this),
+                new LarkAttendanceReader(this.lark), new LiveCalendarSourceReader(this.lark),
+                delegate { return DateTime.Now; });
+            this.sync.ConfigSink = this;
+            this.sync.Published += OnSyncPublished;
+            this.sync.Configure(settings);
+            this.snapshot = this.sync.Snapshot().Attendance;
             this.theme = Skins.ResolveTheme(settings.ui);
 
             using (var screen = Graphics.FromHwnd(IntPtr.Zero))
@@ -250,6 +268,7 @@ namespace WorkCountdown
                 if (lastDay != DateTime.Today)
                 {
                     lastDay = DateTime.Today;
+                    sync.ResetAttendance();
                     snapshot = null;
                     RequestRefresh(false);
                     RequestCalendar(false);
@@ -316,7 +335,7 @@ namespace WorkCountdown
             tapeT.Tick += delegate { StepTapeFlow(); };
 
             ApplySettings();
-            outlookEvents = CachedOutlookEvents();            BackColor = theme.bgBottom;
+            BackColor = theme.bgBottom;
             collapsed = settings.ui.edge != "free";
             Size = collapsed ? new Size(S(DesignCollapsedW), S(DesignCollapsedH)) : new Size(S(DesignExpandedW), ExpandedH);
             PlaceInitial();
@@ -383,6 +402,12 @@ namespace WorkCountdown
         internal int CardRadiusPx
         {
             get { return S(CardRadiusDip); }
+        }
+
+        /// <summary>验收 / 宿主读取同步快照的接口；窗口不再暴露私有 fetching 字段。</summary>
+        internal SyncSnapshot CurrentSync
+        {
+            get { return sync.Snapshot(); }
         }
 
         /// <summary>按当前设置重建所有卡片字体（换中文字体 / 数字字体后调用）。</summary>
@@ -494,6 +519,7 @@ namespace WorkCountdown
             if (cardGlow != null) { cardGlow.CloseNow(); cardGlow = null; }
             if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
             tick.Stop(); poll.Stop(); autoCollapse.Stop(); animT.Stop(); flowT.Stop(); topT.Stop(); calPoll.Stop(); olPoll.Stop(); remindT.Stop(); tapeT.Stop();
+            sync.Dispose();
             CloseDrawer();
             base.OnFormClosing(e);
         }
@@ -519,6 +545,7 @@ namespace WorkCountdown
                 CloseNotePanel();
                 if (noteRelay != null) { noteRelay.Dispose(); noteRelay = null; }
                 if (cardGlow != null) { cardGlow.CloseNow(); cardGlow = null; }
+                if (sync != null) sync.Dispose();
                 if (menu != null) menu.Dispose();
             }
             base.Dispose(disposing);
@@ -550,41 +577,7 @@ namespace WorkCountdown
 
         private void RequestRefresh(bool manual)
         {
-            if (!settings.lark.enabled)
-            {
-                snapshot = null;
-                Recompute();
-                return;
-            }
-            if (fetching) return;
-            fetching = true;
-            Invalidate();
-            var cfg = settings.lark;
-            ThreadPool.QueueUserWorkItem(delegate (object state)
-            {
-                AttendanceSnapshot result;
-                try { result = lark.ReadToday(cfg); }
-                catch (Exception ex)
-                {
-                    result = new AttendanceSnapshot();
-                    result.error = ex.Message;
-                }
-                try
-                {
-                    BeginInvoke((MethodInvoker)delegate
-                    {
-                        fetching = false;
-                        snapshot = result;
-                        lastFetchFailed = !result.ok;
-                        if (!result.ok) store.Log("飞书读取失败: " + result.error);
-                        Recompute();
-                        if (manual) ShowBalloon(result.ok
-                            ? "已同步：" + DescribeSnapshot(result)
-                            : "同步失败：" + LarkClient.Shorten(result.error, 90));
-                    });
-                }
-                catch { fetching = false; }
-            });
+            if (sync.RequestAttendance(manual) != null) Invalidate();
         }
 
         private static string DescribeSnapshot(AttendanceSnapshot s)
@@ -598,47 +591,13 @@ namespace WorkCountdown
 
         private void RequestCalendar(bool manual)
         {
-            if (!settings.calendarEnabled || !settings.lark.enabled)
-            {
-                larkEvents = new List<ReminderEvent>();
-                larkEventError = null;
-                return;
-            }
-            if (calFetching) return;
-            calFetching = true;
-            var cfg = settings.lark;
-            ThreadPool.QueueUserWorkItem(delegate (object state)
-            {
-                List<ReminderEvent> list = null;
-                string error = null;
-                try { list = lark.ReadCalendar(cfg, DateTime.Today, DateTime.Today.AddDays(2), out error); }
-                catch (Exception ex) { error = ex.Message; }
-                try
-                {
-                    BeginInvoke((MethodInvoker)delegate
-                    {
-                        calFetching = false;
-                        if (list != null) larkEvents = list;
-                        string previous = larkEventError;
-                        larkEventError = error;
-                        if (!string.IsNullOrEmpty(error) && error != previous)
-                            store.Log("飞书日程读取失败: " + error);
-                        if (manual)
-                        {
-                            if (error != null) ShowBalloon("日程同步失败：" + LarkClient.Shorten(error, 90));
-                            else if (larkEvents.Count == 0) ShowBalloon("飞书日程：这两天没有日程");
-                            else ShowBalloon("飞书日程：" + larkEvents.Count + " 个 · " + NextEventText());
-                        }
-                        Invalidate();
-                    });
-                }
-                catch { calFetching = false; }
-            });
+            if (sync.RequestLarkCalendar(manual) != null) Invalidate();
         }
 
         private ReminderScheduleSnapshot ScheduleSnapshot()
         {
-            return new ReminderScheduleSnapshot(larkEvents, outlookEvents);
+            SyncSnapshot state = sync.Snapshot();
+            return new ReminderScheduleSnapshot(state.LarkEvents, state.OutlookEvents);
         }
 
         private string NextEventText()
@@ -649,83 +608,107 @@ namespace WorkCountdown
             return start.ToString("HH:mm") + " " + next.title;
         }
 
-        /// <summary>把各份日历上次成功同步的缓存拼起来（启动时先用它顶着，等网络回来再刷新）。</summary>
-        private List<ReminderEvent> CachedOutlookEvents()
+        private void RequestOutlook(bool manual)
         {
-            var all = new List<ReminderEvent>();
-            if (settings.outlook == null || settings.outlook.calendars == null) return all;
-            var seen = new HashSet<string>();
-            foreach (var c in settings.outlook.calendars)
-            {
-                if (c == null || c.cached == null) continue;
-                foreach (var e in c.cached)
-                {
-                    if (e == null) continue;
-                    string key = string.IsNullOrEmpty(e.id) ? e.title + "@" + e.start : e.id;
-                    if (!seen.Add(key)) continue;
-                    all.Add(e);
-                }
-            }
-            all.Sort(delegate (ReminderEvent a, ReminderEvent b)
-            {
-                return Reminders.ParseStart(a).CompareTo(Reminders.ParseStart(b));
-            });
-            return all;
+            if (sync.RequestOutlook(manual) != null) Invalidate();
         }
 
         /// <summary>
-        /// 把所有启用的 Outlook 日历拉一遍（.ics 订阅 / 本地文件 / Graph 登录），
-        /// 每份日历各自写回 lastSync / lastError / cached，再汇总成提醒池。
-        /// 一份失败不影响其它日历，失败时保留它上次成功的缓存。
+        /// 同步模块接受结果后的界面应用：只读快照做日志与手动提示；
+        /// 日程合并、来源过滤、在途去重与过期判断都不在窗口里。
         /// </summary>
-        private void RequestOutlook(bool manual)
+        private void OnSyncPublished(SyncPublication publication)
         {
-            if (settings.outlook == null || !settings.outlook.HasEnabled)
+            if (publication == null || IsDisposed || Disposing) return;
+            SyncSnapshot state = publication.Snapshot == null ? sync.Snapshot() : publication.Snapshot;
+            if (publication.Scope == SyncScopes.Attendance)
             {
-                outlookEvents = new List<ReminderEvent>();
-                outlookError = null;
-                return;
+                AttendanceSnapshot attendance = state.Attendance;
+                snapshot = attendance;
+                if (attendance != null && !attendance.ok)
+                    store.Log("飞书读取失败: " + (attendance.error ?? ""));
+                Recompute();
+                if (publication.Manual)
+                {
+                    ShowBalloon(attendance != null && attendance.ok
+                        ? "已同步：" + DescribeSnapshot(attendance)
+                        : "同步失败：" + LarkClient.Shorten(attendance == null ? "没有返回考勤记录" : attendance.error, 90));
+                }
             }
-            if (olFetching) return;
-            olFetching = true;
-            var cfg = settings.outlook;
-            ThreadPool.QueueUserWorkItem(delegate (object state)
+            else if (publication.Scope == SyncScopes.LarkCalendar)
             {
-                List<ReminderEvent> list = null;
-                string error = null;
-                try
+                if (publication.ErrorChanged && !string.IsNullOrEmpty(state.LarkError))
+                    store.Log("飞书日程读取失败: " + state.LarkError);
+                if (publication.Manual)
                 {
-                    list = CalendarSync.Poll(cfg, DateTime.Today, DateTime.Today.AddDays(14), 20000, out error);
+                    if (!string.IsNullOrEmpty(state.LarkError))
+                        ShowBalloon("日程同步失败：" + LarkClient.Shorten(state.LarkError, 90));
+                    else if (state.LarkEvents.Count == 0)
+                        ShowBalloon("飞书日程：这两天没有日程");
+                    else
+                        ShowBalloon("飞书日程：" + state.LarkEvents.Count + " 个 · " + NextEventText());
                 }
-                catch (Exception ex) { error = ex.Message; }
-                try
+                Invalidate();
+            }
+            else if (publication.Scope == SyncScopes.Outlook)
+            {
+                if (publication.ErrorChanged && !string.IsNullOrEmpty(state.OutlookError))
+                    store.Log("Outlook 日程读取失败: " + state.OutlookError);
+                if (publication.Manual)
                 {
-                    BeginInvoke((MethodInvoker)delegate
+                    if (!string.IsNullOrEmpty(state.OutlookError) && state.OutlookEvents.Count == 0)
+                        ShowBalloon("Outlook 同步失败：" + LarkClient.Shorten(state.OutlookError, 90));
+                    else if (!string.IsNullOrEmpty(state.OutlookError))
+                        ShowBalloon("Outlook 日程：" + state.OutlookEvents.Count + " 个 · 部分日历失败：" +
+                            LarkClient.Shorten(state.OutlookError, 50));
+                    else
+                        ShowBalloon("Outlook 日程：" + state.OutlookEvents.Count + " 个 · " + NextEventText());
+                }
+                Invalidate();
+            }
+        }
+
+        /// <summary>
+        /// 状态拥有者在这里应用同步模块接受的配置更新：每份日历的缓存 / 同步时间 / 错误、
+        /// 汇总缓存与 Graph 轮换后的受保护令牌，然后按原约定保存。
+        /// </summary>
+        public void ApplySyncConfigUpdate(SyncConfigUpdate update)
+        {
+            if (update == null || settings == null || settings.outlook == null) return;
+            if (update.Calendars != null)
+            {
+                foreach (var item in update.Calendars)
+                {
+                    if (item == null) continue;
+                    CalendarSource source = FindCalendarSource(item.SourceId);
+                    if (source == null) continue;
+                    if (item.Succeeded)
                     {
-                        olFetching = false;
-                        if (list != null) outlookEvents = list;
-                        bool changed = error != outlookError;
-                        string previous = outlookError;
-                        outlookError = error;
-                        cfg.lastError = error ?? "";
-                        try { store.Save(settings); } catch { }
-                        if (!string.IsNullOrEmpty(error) && error != previous)
-                            store.Log("Outlook 日程读取失败: " + error);
-                        if (manual)
-                        {
-                            if (!string.IsNullOrEmpty(error) && (outlookEvents == null || outlookEvents.Count == 0))
-                                ShowBalloon("Outlook 同步失败：" + LarkClient.Shorten(error, 90));
-                            else if (!string.IsNullOrEmpty(error))
-                                ShowBalloon("Outlook 日程：" + outlookEvents.Count + " 个 · 部分日历失败：" +
-                                    LarkClient.Shorten(error, 50));
-                            else
-                                ShowBalloon("Outlook 日程：" + outlookEvents.Count + " 个 · " + NextEventText());
-                        }
-                        Invalidate();
-                    });
+                        source.cached = item.Events == null
+                            ? new List<ReminderEvent>() : new List<ReminderEvent>(item.Events);
+                        source.lastSync = item.LastSync ?? "";
+                    }
+                    source.lastError = item.LastError ?? "";
                 }
-                catch { olFetching = false; }
-            });
+            }
+            settings.outlook.cached = update.OutlookCached == null
+                ? new List<ReminderEvent>() : new List<ReminderEvent>(update.OutlookCached);
+            settings.outlook.lastSync = update.OutlookLastSync ?? "";
+            settings.outlook.lastError = update.OutlookLastError ?? "";
+            if (update.RefreshToken != null)
+            {
+                settings.outlook.refreshToken = update.RefreshToken;
+                settings.outlook.tokenAt = update.TokenAt ?? "";
+            }
+            try { store.Save(settings); } catch { }
+        }
+
+        private CalendarSource FindCalendarSource(string id)
+        {
+            if (settings.outlook == null || settings.outlook.calendars == null) return null;
+            foreach (var source in settings.outlook.calendars)
+                if (source != null && source.id == id) return source;
+            return null;
         }
 
         /// <summary>
@@ -1458,6 +1441,11 @@ namespace WorkCountdown
 
         private void ApplySettings()
         {
+            if (sync != null)
+            {
+                sync.Configure(settings);
+                snapshot = sync.Snapshot().Attendance;
+            }
             CloseDrawer();
             CloseNotePanel();
             if (settings.note == null) settings.note = new NoteSettings();
@@ -2658,7 +2646,7 @@ namespace WorkCountdown
                         g.FillEllipse(brush,rectNote.Right-S(5),rectNote.Top+S(1),S(5),S(5));
                 DrawGlyph(g,"salary",rectSalary,Fade(salaryOpen?status.accent:dim,a));
                 DrawGlyph(g,"gear",rectGear,Fade(dim, a));
-                DrawGlyph(g,"refresh",rectRefresh,Fade(fetching?status.accent:dim, a));
+                DrawGlyph(g,"refresh",rectRefresh,Fade(sync.Snapshot().AttendanceFetching?status.accent:dim, a));
                 DrawGlyph(g,"chevron",rectChevron,Fade(dim, a));
                 y+=head+gap;
             }

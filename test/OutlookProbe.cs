@@ -75,10 +75,12 @@ class OutlookProbe
         s.ui.edge = "free";
         s.ui.autoCollapseSeconds = 0;
         s.Normalize();
+        s.outlook.calendars.Add(new CalendarSource
+        {
+            id = "probe-cal", name = "探针日历", source = "file", path = tmp,
+            enabled = true, leadMinutes = 10
+        });
         s.outlook.enabled = true;
-        s.outlook.source = "file";
-        s.outlook.path = tmp;
-        s.outlook.leadMinutes = 10;
         s.SetStyleOf(Reminders.KindOutlook, new ReminderStyleDef("card", "circle", "lv-kongque"));
 
         using (var form = new WidgetForm(new SettingsStore(), s))
@@ -90,7 +92,7 @@ class OutlookProbe
             Call(form, "RequestOutlook", true);
             Pump(1500);
 
-            var events = (List<ReminderEvent>)Get(form, "outlookEvents");
+            var events = form.CurrentSync.OutlookEvents;
             Ok("本地 .ics 拉进来 1 条", events != null && events.Count == 1,
                 (events == null ? "null" : events.Count.ToString()) + " 条");
             if (events == null || events.Count == 0) { form.Close(); return; }

@@ -110,6 +110,8 @@ $sources = @(
     (Join-Path $src 'AssemblyInfo.cs'),
     (Join-Path $src 'Models.cs'),
     (Join-Path $src 'ReminderEngine.cs'),
+    (Join-Path $src 'SyncEngine.cs'),
+    (Join-Path $src 'SyncAdapters.cs'),
     (Join-Path $src 'Skins.cs'),
     (Join-Path $src 'Frost.cs'),
     (Join-Path $src 'Updates.cs'),

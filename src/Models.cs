@@ -317,128 +317,138 @@ namespace WorkCountdown
         }
     }
 
+    /// <summary>读一份日历来源的请求：字段是请求时的快照，后台不引用共享 Settings。</summary>
+    public class CalendarFetchRequest
+    {
+        public string Kind { get; set; }          // lark | url | file | graph
+        public string SourceId { get; set; }
+        public string SourceName { get; set; }
+        public string Url { get; set; }
+        public string Path { get; set; }
+        public int LeadMinutes { get; set; }
+        public int DefaultLeadMinutes { get; set; }
+        public string ClientId { get; set; }
+        public string Tenant { get; set; }
+        public string RefreshToken { get; set; }  // DPAPI 加密的刷新令牌
+        public string LarkCommand { get; set; }
+        public string LarkChatId { get; set; }
+        public DateTime From { get; set; }
+        public DateTime To { get; set; }
+        public int TimeoutMs { get; set; }
+    }
+
+    /// <summary>读一份日历来源的结果：成功返回日程（可能为空），失败返回错误；令牌轮换只带加密值。</summary>
+    public class CalendarFetchResult
+    {
+        public string SourceId { get; set; }
+        public string SourceName { get; set; }
+        public List<ReminderEvent> Events { get; set; }
+        public string Error { get; set; }
+        public string RotatedRefreshToken { get; set; }  // DPAPI 加密；null = 没轮换
+        public string TokenAt { get; set; }
+
+        public bool Succeeded
+        {
+            get { return Error == null; }
+        }
+    }
+
     /// <summary>
-    /// 把 OutlookSettings 里所有启用的日历拉一遍：.ics 走网络/本地文件，graph 走登录令牌。
-    /// 每份日历各自更新 lastSync / lastError / cached，最后把结果汇总给调用方；
-    /// 一份失败不影响其它日历，错误串会带上日历名。
+    /// 读一份日历来源：.ics 文件/订阅与 Graph 的认证、解析和真实失败语义都集中在这里。
+    /// 请求只读配置快照，结果自带日程、错误与受保护的轮换令牌；聚合与缓存归 SyncEngine。
     /// </summary>
     public static class CalendarSync
     {
-        public static List<ReminderEvent> Poll(OutlookSettings cfg, DateTime from, DateTime to, int timeoutMs, out string error)
+        /// <summary>把一份日历配置折算成读取请求（请求时快照）；认证字段在设置页 / 同步模块那边填。</summary>
+        public static CalendarFetchRequest Request(CalendarSource source, OutlookSettings settings,
+            DateTime from, DateTime to, int timeoutMs)
         {
-            var all = new List<ReminderEvent>();
-            error = "";
-            if (cfg == null) return all;
-            if (cfg.calendars == null) cfg.calendars = new List<CalendarSource>();
-
-            var errors = new List<string>();
-            int okCount = 0;
-            string newest = "";
-            foreach (var c in cfg.calendars)
+            var request = new CalendarFetchRequest();
+            if (source != null)
             {
-                if (c == null || !c.enabled || !c.HasSource) continue;
-                string oneError;
-                var list = Fetch(cfg, c, from, to, timeoutMs, out oneError);
-                if (list != null)
-                {
-                    c.cached = list;
-                    c.lastSync = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-                    c.lastError = "";
-                    okCount++;
-                    if (c.lastSync.CompareTo(newest) > 0) newest = c.lastSync;
-                }
-                else
-                {
-                    c.lastError = oneError ?? "同步失败";
-                    errors.Add((string.IsNullOrWhiteSpace(c.name) ? "日历" : c.name) + "：" + c.lastError);
-                }
+                request.Kind = source.source == "file" || source.source == "graph" ? source.source : "url";
+                request.SourceId = source.id ?? "";
+                request.SourceName = source.name ?? "";
+                request.Url = source.url ?? "";
+                request.Path = source.path ?? "";
+                request.LeadMinutes = Math.Max(0, source.leadMinutes);
             }
-
-            // 汇总用每份日历「最后一次成功」的缓存：某一份这次失败，也不该把它的日程从提醒池里抹掉
-            foreach (var c in cfg.calendars)
+            if (settings != null)
             {
-                if (c == null || !c.enabled || !c.HasSource || c.cached == null) continue;
-                foreach (var e in c.cached) if (e != null) all.Add(e);
+                request.ClientId = settings.clientId ?? "";
+                request.Tenant = settings.tenant ?? "";
+                request.RefreshToken = settings.refreshToken ?? "";
+                request.DefaultLeadMinutes = Math.Max(0, settings.leadMinutes);
             }
-            // 同一个 id 可能被两份日历都推下来（比如同一份日历订阅了两次），只留一条
-            all = Dedupe(all);
-            if (okCount > 0)
-            {
-                cfg.cached = all;
-                cfg.lastSync = newest;
-            }
-            cfg.lastError = errors.Count == 0 ? "" : string.Join("；", errors.ToArray());
-            cfg.enabled = cfg.HasEnabled;
-            if (errors.Count > 0) error = cfg.lastError;
-            return all;
+            request.From = from;
+            request.To = to;
+            request.TimeoutMs = timeoutMs;
+            return request;
         }
 
-        /// <summary>拉单份日历。成功返回日程列表（可能是空表），失败返回 null。</summary>
-        public static List<ReminderEvent> Fetch(OutlookSettings cfg, CalendarSource c, DateTime from, DateTime to,
-            int timeoutMs, out string error)
+        /// <summary>
+        /// 拉一份日历来源。认证、.ics 解析与真实失败语义都在这里；请求只读快照，
+        /// 不写共享 Settings，Graph 轮换令牌只以受保护形式带回结果。
+        /// </summary>
+        public static CalendarFetchResult Fetch(CalendarFetchRequest request)
         {
-            error = "";
+            var result = new CalendarFetchResult();
+            if (request == null)
+            {
+                result.Error = "读取失败：没有同步请求";
+                return result;
+            }
+            result.SourceId = request.SourceId;
+            result.SourceName = request.SourceName;
             List<ReminderEvent> list = null;
+            string error = null;
             try
             {
-                if (c.source == "graph")
+                if (request.Kind == "graph")
                 {
-                    string refresh = OutlookGraph.Unprotect(cfg.refreshToken);
-                    if (refresh.Length == 0) { error = "还没登录 Outlook"; return null; }
-                    OutlookGraph.TokenInfo tk;
-                    string err;
-                    if (!OutlookGraph.Refresh(cfg.clientId, cfg.tenant, refresh, timeoutMs, out tk, out err))
+                    string refresh = OutlookGraph.Unprotect(request.RefreshToken);
+                    if (refresh.Length == 0) { result.Error = "还没登录 Outlook"; return result; }
+                    OutlookGraph.TokenInfo token;
+                    string tokenError;
+                    if (!OutlookGraph.Refresh(request.ClientId, request.Tenant, refresh, request.TimeoutMs,
+                            out token, out tokenError))
                     {
-                        error = err.IndexOf("invalid_grant", StringComparison.OrdinalIgnoreCase) >= 0
-                            ? "登录已失效，去设置里重新登录 Outlook" : err;
-                        return null;
+                        result.Error = tokenError.IndexOf("invalid_grant", StringComparison.OrdinalIgnoreCase) >= 0
+                            ? "登录已失效，去设置里重新登录 Outlook" : tokenError;
+                        return result;
                     }
-                    if (!string.IsNullOrEmpty(tk.refreshToken))
+                    if (!string.IsNullOrEmpty(token.refreshToken))
                     {
-                        cfg.refreshToken = OutlookGraph.Protect(tk.refreshToken);
-                        cfg.tokenAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                        result.RotatedRefreshToken = OutlookGraph.Protect(token.refreshToken);
+                        result.TokenAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
                     }
-                    if (!OutlookGraph.FetchCalendar(tk.accessToken, from, to, timeoutMs, out list, out err))
+                    if (!OutlookGraph.FetchCalendar(token.accessToken, request.From, request.To,
+                            request.TimeoutMs, out list, out tokenError))
                     {
-                        error = err;
-                        return null;
+                        result.Error = tokenError;
+                        return result;
                     }
                 }
                 else
                 {
-                    string text = Ics.ReadText(c.source, c.url, c.path, timeoutMs, out error);
-                    if (text == null) return null;
-                    list = Ics.Parse(text, from, to);
+                    string text = Ics.ReadText(request.Kind, request.Url, request.Path, request.TimeoutMs, out error);
+                    if (text == null) { result.Error = error; return result; }
+                    list = Ics.Parse(text, request.From, request.To);
                 }
-                int lead = c.leadMinutes > 0 ? c.leadMinutes : Math.Max(0, cfg.leadMinutes);
+                if (list == null) list = new List<ReminderEvent>();
+                int lead = request.LeadMinutes > 0 ? request.LeadMinutes : Math.Max(0, request.DefaultLeadMinutes);
                 foreach (var e in list) e.leadMinutes = lead;
-                return list;
+                result.Events = list;
+                result.Error = null;
+                return result;
             }
             catch (Exception ex)
             {
-                error = "读取失败：" + ex.Message;
-                return null;
+                result.Error = "读取失败：" + ex.Message;
+                return result;
             }
         }
 
-        private static List<ReminderEvent> Dedupe(List<ReminderEvent> list)
-        {
-            var seen = new Dictionary<string, ReminderEvent>();
-            var order = new List<ReminderEvent>();
-            foreach (var e in list)
-            {
-                if (e == null) continue;
-                string key = (string.IsNullOrEmpty(e.id) ? e.title + "@" + e.start : e.id);
-                if (seen.ContainsKey(key)) continue;
-                seen[key] = e;
-                order.Add(e);
-            }
-            order.Sort(delegate (ReminderEvent a, ReminderEvent b)
-            {
-                return Reminders.ParseStart(a).CompareTo(Reminders.ParseStart(b));
-            });
-            return order;
-        }
     }
 
     /// <summary>

@@ -2937,6 +2937,105 @@ class Check
             }
         }
 
+        // 同步模块接进窗口：刷新只读模块快照，令牌轮换由窗口作为状态拥有者落盘（AC5/AC6 冒烟）
+        {
+            var s = new Settings();
+            s.lark.enabled = true;
+            s.lark.chatId = "oc_check_sync";
+            s.calendarEnabled = true;
+            s.ui.edge = "free";
+            s.outlook.refreshToken = OutlookGraph.Protect("rt-check");
+            s.outlook.account = "check@example.com";
+            s.outlook.calendars.Add(new CalendarSource
+            {
+                id = "cal-sync", name = "窗口日历", source = "graph", enabled = true
+            });
+            s.Normalize();
+
+            var sched = new ManualSyncScheduler();
+            var disp = new ImmediateSyncDispatcher();
+            var att = new ControlledAttendanceReader();
+            var cal = new ControlledCalendarReader();
+            var engine = new SyncEngine(sched, disp, att, cal,
+                delegate { return new DateTime(2026, 11, 16, 10, 0, 0); });
+            att.Respond = delegate(AttendanceReadRequest r)
+            {
+                return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 0, 0));
+            };
+            cal.Respond = delegate(CalendarFetchRequest r)
+            {
+                var ok = SyncTestKit.CalendarOk(r.SourceId,
+                    SyncTestKit.Ev("ol:window", "窗口同步的会", "2026-11-16 11:00", "outlook"));
+                ok.RotatedRefreshToken = OutlookGraph.Protect("rt-rotated");
+                ok.TokenAt = "2026-11-16 10:00";
+                return ok;
+            };
+            using (var form = new WidgetForm(new SettingsStore(), s, engine))
+            {
+                Call(form, "RequestRefresh", true);
+                sched.RunAll();
+                var state = form.CurrentSync;
+                Ok("窗口刷新走同步模块快照",
+                    state.Attendance != null && state.Attendance.ok && !state.AttendanceFetching,
+                    state.Attendance == null ? "null" : ("ok=" + state.Attendance.ok + " fetching=" + state.AttendanceFetching));
+
+                Call(form, "RequestOutlook", true);
+                sched.RunAll();
+                state = form.CurrentSync;
+                Ok("窗口日程刷新走模块快照",
+                    state.OutlookEvents.Count == 1 && state.OutlookError == null && !state.OutlookFetching,
+                    state.OutlookEvents.Count + " 条 / error=" + (state.OutlookError == null ? "无" : state.OutlookError));
+                Ok("窗口作为状态拥有者写回每份日历缓存与轮换令牌",
+                    s.outlook.calendars[0].cached.Count == 1
+                    && OutlookGraph.Unprotect(s.outlook.refreshToken) == "rt-rotated"
+                    && s.outlook.lastSync == "2026-11-16 10:00",
+                    "cache=" + s.outlook.calendars[0].cached.Count
+                    + " token=" + OutlookGraph.Unprotect(s.outlook.refreshToken)
+                    + " lastSync=" + s.outlook.lastSync);
+                Ok("手动同步提示与刷新 UI 冒烟", true, "考勤/Outlook 两次手动刷新均未异常");
+            }
+        }
+
+        // 关闭窗口释放同步模块：在途 Outlook 结果不得写回配置（AC3）
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.ui.edge = "free";
+            s.outlook.refreshToken = OutlookGraph.Protect("rt-close-check");
+            s.outlook.calendars.Add(new CalendarSource
+            {
+                id = "cal-close", name = "关闭日历", source = "graph", enabled = true
+            });
+            s.Normalize();
+
+            var sched = new ManualSyncScheduler();
+            var cal = new ControlledCalendarReader();
+            var engine = new SyncEngine(sched, new ImmediateSyncDispatcher(),
+                new ControlledAttendanceReader(), cal,
+                delegate { return new DateTime(2026, 11, 16, 10, 0, 0); });
+            cal.Respond = delegate(CalendarFetchRequest r)
+            {
+                var ok = SyncTestKit.CalendarOk(r.SourceId,
+                    SyncTestKit.Ev("ol:after-close", "关闭后才回来的会", "2026-11-16 11:00", "outlook"));
+                ok.RotatedRefreshToken = OutlookGraph.Protect("rt-after-close");
+                return ok;
+            };
+            using (var form = new WidgetForm(new SettingsStore(), s, engine))
+            {
+                Call(form, "RequestOutlook", true);
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                sched.RunAll();
+                Ok("关闭窗口后在途同步不发布、不写配置",
+                    form.CurrentSync.OutlookEvents.Count == 0
+                    && s.outlook.calendars[0].cached.Count == 0
+                    && OutlookGraph.Unprotect(s.outlook.refreshToken) == "rt-close-check",
+                    "events=" + form.CurrentSync.OutlookEvents.Count
+                    + " cache=" + s.outlook.calendars[0].cached.Count
+                    + " token=" + OutlookGraph.Unprotect(s.outlook.refreshToken));
+            }
+        }
+
         // ---- 16. 工资页 + 工资面板：点击拉长、双击固定 ----
         {
             var s = new Settings();

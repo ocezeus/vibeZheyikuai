@@ -1815,19 +1815,24 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 var errors = new List<string>();
                 foreach (var c in active)
                 {
-                    string err;
-                    var list = CalendarSync.Fetch(s.outlook, c, DateTime.Today, DateTime.Today.AddDays(14), 20000, out err);
-                    if (list != null)
+                    var request = CalendarSync.Request(c, s.outlook, DateTime.Today, DateTime.Today.AddDays(14), 20000);
+                    var fetched = CalendarSync.Fetch(request);
+                    if (fetched.RotatedRefreshToken != null)
                     {
-                        c.cached = list;
+                        s.outlook.refreshToken = fetched.RotatedRefreshToken;
+                        s.outlook.tokenAt = fetched.TokenAt;
+                    }
+                    if (fetched.Succeeded)
+                    {
+                        c.cached = fetched.Events == null ? new List<ReminderEvent>() : fetched.Events;
                         c.lastSync = DateTime.Now.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
                         c.lastError = "";
-                        total += list.Count;
+                        total += c.cached.Count;
                     }
                     else
                     {
-                        c.lastError = err;
-                        errors.Add((string.IsNullOrWhiteSpace(c.name) ? "日历" : c.name) + "：" + err);
+                        c.lastError = fetched.Error;
+                        errors.Add((string.IsNullOrWhiteSpace(c.name) ? "日历" : c.name) + "：" + fetched.Error);
                     }
                 }
                 s.outlook.lastError = errors.Count == 0 ? "" : string.Join("；", errors.ToArray());
