@@ -35,9 +35,11 @@
 
 **版本 / 打包 / 发布**
 - 版本号 3.7.0 → **3.8.0**：`src/Models.cs`（AppInfo.Version）、`src/AssemblyInfo.cs`、`package.ps1` 默认 `-Version`、`README.md` 顶部、`design/manual-poster.html` 版本 / 页脚。
-- 一图说明书同步「8 条 → 最多 16 条 / 一屏 8 条可滚动」并重出（2400 宽）。
-- 打包 + GitHub Release v3.8.0（双资产）；装机 `FileVersion 3.8.0.0`；更新链路 `test\UpdateProbe.exe` 实测（见下条提交）。
-
+- 一图说明书同步「8 条 → 最多 16 条 / 一屏 8 条可滚动」并重出：**2400×11386（4,501,016 B）**。
+- **打包**：`dist\上班工具箱-v3.8.0.zip`（**4,176,051 B / 4078.2 KB**）：`WorkCountdown.exe`（453,632 B / FileVersion 3.8.0.0）、一图说明书、使用说明、安装脚本。
+- **发布**：commit `604f053`（12 文件）→ push main + tag `v3.8.0` → GitHub Release **https://github.com/ocezeus/vibeZheyikuai/releases/tag/v3.8.0**（id 446701944），两个资产：`WorkCountdown-v3.8.0.zip`（4078.2 KB）+ `WorkCountdown.exe`（443 KB）；`package.ps1` 这次**一条命令跑完全流程**（上一版修的 stderr 假失败没再复现）。
+- **装机**：`.\tools\install-dev.ps1` → **FileVersion 3.8.0.0，PID 37360（14:58）**；装机后用 `test\note-history-shot.ps1` 真机点开历史页：8 行全部显示、最新一条在最后一行、标题「最近 8 条」；合成 16 条的离屏图验证滚动条定位。
+- **更新链路**：`test\UpdateProbe.exe` → 当前 3.8.0 / 最新 3.8.0 / `IsNewer=false`（已是最新）。注：这次匿名 GitHub API 正好被 60 次/小时限流，探针走了 HTML 兜底只拿到版本号、asset 为空；带 token 的 Release API 已确认双资产都在（zip 4078.2 KB + exe 443 KB）。限流只影响「全量更新」按钮在那一刻退化成「打开发布页」，不影响判断「有新版本 / 已是最新」。
 ### 2026-11-16 · v3.7.0 六套整体界面主题（默认 + 无垠/云母/宣纸/仪表/霓虹）
 
 用户从 `design/theme-packs/` 的 5 套方向稿里选定后，要求做成**能切换的整体界面主题**。落实为 **6 套「界面风格」**：默认（保留原来的 39 套配色主题 + 背景风格）+ 无垠 Quiet / 云母 Mica / 宣纸 Ink / 仪表 Instrument / 霓虹 Neon，在 **设置 →「外观」→「界面风格」** 切换；换的不只是配色，卡片 / 设置窗口 / 小纸条 / 右键胶囊 / 提醒整套一起换。
