@@ -38,9 +38,12 @@
 - 真机/离屏证据：`test\visual\skins\sheet-cornerflash.png`（两下快闪的帧对照）、`test\visual\real-flash\live-0048.png`（真 WidgetForm 消息循环下左上角亮带）；群聊历史 8 行图 `test\visual\real-note\history-MIKFU.png`（合成 16 条）。
 
 **④ 版本 / 打包 / 发布**
-- 版本 3.8.0 → **3.8.1**：`src/Models.cs`、`src/AssemblyInfo.cs`、`package.ps1` 默认 `-Version`、`README.md` 顶部、`design/manual-poster.html` 版本/页脚。
-- 一图说明书同步「没读时左上角每 5 秒快闪两下」并重出（2400 宽）。
-- 打包 + GitHub Release v3.8.1（双资产）、装机 `FileVersion 3.8.1.0`、更新链路实测（见下条提交）。
+- 版本 3.8.0 → **3.8.1**：`src/Models.cs`（AppInfo.Version）、`src/AssemblyInfo.cs`、`package.ps1` 默认 `-Version`、`README.md` 顶部、`design/manual-poster.html` 版本/页脚。
+- 一图说明书同步「没读时左上角每 5 秒快闪两下」并重出：**2400×11413（4,510,398 B）**。
+- **打包**：`dist\上班工具箱-v3.8.1.zip`（**4,189,060 B / 4090.9 KB**）：`WorkCountdown.exe`（455,680 B / FileVersion 3.8.1.0）、一图说明书、使用说明、安装脚本。
+- **发布**：commit `bc6df7a`（15 文件）→ push main + tag `v3.8.1` → GitHub Release **https://github.com/ocezeus/vibeZheyikuai/releases/tag/v3.8.1**（id 446721886），两个资产：`WorkCountdown-v3.8.1.zip`（4090.9 KB）+ `WorkCountdown.exe`（445 KB）；`package.ps1` 一条命令跑完。
+- **装机**：`.\tools\install-dev.ps1` → **FileVersion 3.8.1.0，PID 45184（15:28）**；装机后把 `ui.skin` 恢复成用户此前选的「无垠（quiet）」并重启（PID 46104 / 15:28:53）。
+- **更新链路**：`test\UpdateProbe.exe` → 当前 3.8.1 / 最新 3.8.1 / `IsNewer=false`（已是最新）。匿名 API 仍被限流（HTML 兜底只有版本号），带 token 的 Release API 已确认双资产齐全。
 
 ### 2026-11-16 15:05 · v3.8.0 小纸条：修「最新一条不显示」+ 保留 16 条 / 一屏 8 条滚动
 
