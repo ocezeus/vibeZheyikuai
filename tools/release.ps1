@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     上班工具箱：把 dist 里打好的 zip / exe 提交、推送到 GitHub，并发布成 Release。
 
@@ -40,7 +40,7 @@
     本文件必须保持 UTF-8 BOM（PowerShell 5.1 靠 BOM 保住中文字符串）。
 #>
 param(
-    [string]$Version = '4.0.0',
+    [string]$Version = '4.1.0',
     [string]$Repo = 'ocezeus/vibeZheyikuai',
     [string]$Branch = 'main',
     [string]$Notes = '',

@@ -11,7 +11,7 @@ namespace WorkCountdown
     /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
     public static class AppInfo
     {
-        public const string Version = "4.0.0";
+        public const string Version = "4.1.0";
     }
 
     public class HolidayEntry
@@ -2329,11 +2329,20 @@ namespace WorkCountdown
             r.isWorkday = plan.isWorkday;
             r.required = TimeSpan.FromMinutes(DailyMinutes(s, now));
 
-            // 今天这次打卡（和卡片用的是同一个快照；没接飞书就按班次时间算）
+            // 今天这次打卡：本地手工记录是用户显式动作，优先采信；
+            // 其余沿用既有口径（没接飞书按班次起算，接了飞书但没数据算未打卡）
             DateTime? inT = snap != null ? snap.clockIn : null;
             DateTime? outT = snap != null ? snap.clockOut : null;
-            if (!s.lark.enabled || string.IsNullOrWhiteSpace(s.lark.chatId))
+            AttendanceSnapshot localClock = AttendanceSource.Resolve(s, null, now);
+            if (localClock != null && localClock.source == AttendanceSource.Local)
+            {
+                inT = localClock.clockIn;
+                outT = localClock.clockOut;
+            }
+            else if (!ManualClock.ShouldUseLark(s))
+            {
                 inT = plan.isWorkday ? plan.suggestStart : (DateTime?)null;
+            }
             if (inT.HasValue && inT.Value.Date != now.Date) inT = null;
             if (outT.HasValue && (outT.Value.Date != now.Date || outT.Value > now)) outT = null;
             if (inT.HasValue && inT.Value > now) inT = null;

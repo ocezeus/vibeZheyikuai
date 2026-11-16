@@ -6,9 +6,40 @@
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
 
-## 当前版本：v4.0.0
+## 当前版本：v4.1.0
 
 已装机（FileVersion 3.8.1.0）；日常改动**不升版本号、不出 zip、不动一图说明书**，改动全部追加在下面；用户说「发版」才走下面的发版流程。
+
+### 2026-11-17 22:20 · v4.1.0 更新记录可展开 / 本地打卡 / 循环日程
+
+用户要求（原话整理）：① 更新记录每个版本要能一句话展现全部变化，现在看不到完整内容；② 右键触发上下班打卡无需绑定飞书，有飞书对话就走飞书，没有就手动记录上下班时间；③ 固定日程增加每小时 / 每 30 分钟 / 每两小时循环，仅在上班期间触发；④ 检查更新页要有下载读条，点击下载后气泡不要消失。完成后打包新版本并更新 Release。
+
+**① 更新记录：一句话摘要 + 点开看完整内容（`src/UpdateChangelog.cs` / `src/BubbleMenuForm.cs`）**
+- `ChangelogEntry` 增加 `Summary`：一条 24–180 字的一句话，覆盖该版本全部要点；8 条历史记录逐条重写，每条都有「摘要覆盖全部要点」的测试（26.12–26.19）。
+- 「更新记录」每行显示 版本 + 日期 + 摘要（按宽度折行），点行展开/收起完整要点（同一时间只展开一条），默认展开最新一条；最新版本号用主题强调色；展开后行高、内容总高与滚动上限一起重算并 clamp。
+- 更新面板额外高度 330 → 378 DIP（整颗 418），视口 110 → 152 DIP；按钮、发布页链接与列表不重叠。
+
+**② 右键打卡不再依赖飞书（`src/Models.cs` / `src/Widget.cs`）**
+- 新增 `ManualClock.ShouldUseLark`：有飞书对话（enabled 且 chatId 非空）才走飞书发「1」「2」；否则本地记录。
+- 本地记录写到 `Settings.clockInLocal` / `clockOutLocal`（`yyyy-MM-dd HH:mm`），当天重复点用新时间覆盖，跨天自然失效；走 `SaveSettingsQuietly` 同一条安全写入，`WC_NO_SAVE` 下不落盘。
+- `AttendanceSource.Resolve`：飞书 ok 快照 > 今天本地记录 > 按班次推算；卡片文案「今日 HH:mm 上班打卡（本地）」；工资面板也采信本地打卡（显式用户动作），飞书已接但无数据时仍沿用旧口径。
+- 托盘菜单上下班项不再因没飞书而禁用，文案改为「记录本地上班/下班打卡」。
+
+**③ 固定日程循环（`src/Models.cs` / `src/ReminderEngine.cs` / `src/SettingsForm.cs`）**
+- `repeat` 新增 `every30` / `hourly` / `every2h`；`FixedSchedule.RepeatMinutes / IsRecurring / RepeatLabel` 支持新文案，`Normalize` 接受新值（非法值仍回退 daily，内置午休/晚休/下班强制 daily）。
+- 触发窗口 = 工作日 `DayPlan.suggestStart` → `TargetEnd(suggestStart)`；从窗口起点按间隔生成发生点，起点不算、终点不含（09:00–18:00 + 每 30 分钟 = 09:30…17:30 共 17 次）；窗口外与休息日不触发。
+- 引擎在「开始 → 结束 → 中途启动」之后、普通日程之前新增循环 pass；去重键 `fix:<id>:rep@yyyyMMddHHmm`，同一发生点只响一次；循环日程跳过「结束也提醒」「中途启动恢复」。
+- 设置页：自定义日程「重复」下拉 6 项、内置三条仍 3 项；循环时开始/结束/结束提醒禁用并提示「只在工作日、上班期间按间隔提醒」。
+
+**④ 下载读条留在气泡里（`src/BubbleMenuForm.cs`）**
+- 「立即更新（全量）」不再关闭气泡：点击后当场开始下载，页内进度条与百分比实时刷新。
+- 只有下载完成、按钮变成「立即重启并更新」时才关闭气泡并替换重启；下载中主按钮变成 busy 命中区，重复点击不重复下载；失败在页面显示原因。
+
+**⑤ 测试 / 构建 / 探针 / 版本**
+- `.\test\build-tests.ps1`：**Test 636 / Check 384 全绿**（v4.0.0 收尾时 575/369；本轮新增 61 / 15）。
+- `.\build.ps1` 通过；`.\test\build-probes.ps1` **72/72 OK**；`dist\WorkCountdown.exe` FileVersion = **4.1.0.0**。
+- 版本 4.0.0 → **4.1.0**：`AppInfo.Version`、`AssemblyInfo`、`package.ps1` / `tools\release.ps1` 默认版本、README；本文件新增本小节。
+- 兼容约定未变：`WorkCountdown.exe`、`%APPDATA%\WorkCountdown`、便携 `portable.txt` + `data\`、旧配置字段与迁移语义；旧配置没有 `clockInLocal` / `clockOutLocal` 时按空处理、行为不变。
 
 ### 2026-11-16 20:30 · v4.0.0 深模块重构收尾 + 检查更新页变更记录
 

@@ -421,8 +421,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "4.0.0/4.0.0");
-            Check("程序集版本是 4.0.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "4.0.0.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "4.1.0/4.1.0");
+            Check("程序集版本是 4.1.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "4.1.0.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");
@@ -3514,6 +3514,24 @@ internal static class Test
             var backJson = new JavaScriptSerializer().Deserialize<Settings>(json);
             Check("27.18 JSON 往返保留本地打卡", backJson.clockInLocal + "/" + backJson.clockOutLocal,
                 f.clockInLocal + "/" + f.clockOutLocal);
+
+            // 工资面板也要吃本地打卡：与卡片同一来源规则，不能一边显示本地打卡、一边按班次算钱
+            var sal = new Settings();
+            sal.mode = "fixed";
+            sal.startTime = "09:00";
+            sal.endTime = "18:00";
+            sal.workdays = new bool[] { false, true, true, true, true, true, false };
+            sal.salary.monthly = 21000m;
+            sal.clockInLocal = "2026-11-17 09:00";
+            var salSnap = SalaryCalc.Compute(sal, null, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.19 工资面板认本地打卡", salSnap.clockedIn.ToString(), "True");
+            Check("27.20 本地打卡算出约 1 小时工时", Math.Round(salSnap.worked.TotalMinutes).ToString(CultureInfo.InvariantCulture), "60");
+            var salLark = new Settings();
+            salLark.lark.enabled = true;
+            salLark.lark.chatId = "oc_sal";
+            salLark.salary.monthly = 21000m;
+            var salNoSnap = SalaryCalc.Compute(salLark, null, new DateTime(2026, 11, 17, 10, 0, 0));
+            Check("27.21 飞书没快照时工资沿用旧口径（不把班次当打卡）", salNoSnap.clockedIn.ToString(), "False");
 
             string dir = NewTempDir();
             try

@@ -2391,9 +2391,16 @@ class Check
 
                     // 展开后滚到底再收起：scroll 必须按新内容高度 clamp
                     Call(m, "RunHit", "changelog:1");
-                    for (int i = 0; i < 40; i++)
+                    // 滚到不能再滚为止（条目数量会随版本增加，别写死次数）
+                    int lastScroll = -1;
+                    for (int i = 0; i < 500; i++)
+                    {
                         Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
                             view.Left + s(6), view.Top + s(10), -120));
+                        int nowScroll = (int)Get(m, "changelogScroll");
+                        if (nowScroll == lastScroll) break;
+                        lastScroll = nowScroll;
+                    }
                     int atBottom = (int)Get(m, "changelogScroll");
                     int maxExpanded = (int)Call(m, "ChangelogMaxScroll", view);
                     Call(m, "RunHit", "changelog:1");
