@@ -6,9 +6,36 @@
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
 
-## 当前版本：v3.8.1
+## 当前版本：v4.0.0
 
 已装机（FileVersion 3.8.1.0）；日常改动**不升版本号、不出 zip、不动一图说明书**，改动全部追加在下面；用户说「发版」才走下面的发版流程。
+
+### 2026-11-16 20:30 · v4.0.0 深模块重构收尾 + 检查更新页变更记录
+
+用户要求：检查更新页展示变更记录，**每个大版本迭代都要记录**；同时准备 4.0.0 发版内容（打包 / 发布由 Lead 执行，本次没有跑 `package.ps1` / `tools\release.ps1`）。
+
+**① 深模块重构（工单 #2–#6）**
+- 提醒决策集中到 `src/ReminderEngine.cs`：`Advance(settings, snapshot, now, signals)` 接收显式时间与业务输入、返回有序决定，`Dismiss` 只改模块状态；窗口只把决定映射成展示（`Widget.ApplyReminderDecision`），不再自己拼「这条提醒会不会响」。
+- 同步生命周期与日历缓存集中到 `src/SyncEngine.cs`：每份日历独立缓存，请求按 `attendance` / `lark-calendar` / `outlook` 三个范围各自维护代次，过期结果不发布；只改一个范围的配置不再取消其它范围的在途结果（#5 AC3）。
+- 配置保存结果可见（#4）：`SettingsStore.Save` 返回成功 / 失败，`SettingsCommitCoordinator` 只在保存成功后应用变化；保存失败保留旧配置与待修改内容，界面显示失败原因。原子提交改用同卷 `MoveFileEx`，兼容便携盘。
+- 按配置实际变化应用设置（#5）：`SettingsChangePlanner` 纯比较，`SettingsApplyCoordinator` 只调用有变化的副作用；相同配置重复应用零副作用，外观 / 字体 / 面板 / 同步各自隔离。
+- 深模块归属整理（#6）：删除 8 处确认的浅接口 / 转发（`ReminderFeedback`、`SyncSnapshot.AttendanceError`、`OutlookSettings.CachedCount` 等），新增 `NoteRelay.AcceptPublish` seam，9 条旧提醒断言改由 `ReminderEngine.Advance` 覆盖；倒计时 / 午休 / 调休 / 工资样例输出整理前后逐字节一致。
+
+**② 检查更新页新增「更新记录」（`src/UpdateChangelog.cs`（新）/ `src/BubbleMenuForm.cs` / `build.ps1`）**
+- `UpdateChangelog.Entries` 按大版本从新到旧记录 4.0.0 / 3.8 / 3.7 / 3.6 / 3.5 / 3.4 / 3.3 / 3.2；同一大版本下的补丁版本（3.3.1 / 3.3.2 / 3.8.1 等）并入所属大版本，不单列；`Latest` 恒为当前版本。
+- 「检查更新」面板底部新增「更新记录」：版本号 + 日期 + 一句话标题，最新一条用主题强调色；一屏 5 行、滚轮看更早，新增独立的 `changelogScroll`（和主题列表滚动互不影响），滚动夹在 `0..max`。
+- 面板长开高度 216 → **330 DIP**（整颗 40 + 330 = 370）：按钮 / 发布页链接与列表不重叠，下载进度条和七种状态（检查中 / 下载中 / 已最新 / 有新版 / 下载完成 / 失败等）的文案与行为不变。
+- 新增测试：`test/Test.cs` +10 条（非空、从新到旧、版本唯一、Latest、标题 / 要点 / 日期 / 版本号格式、4.0.0 与 3.2–3.8 齐全、4.0.0 内容）；`test/Check.cs` +5 条（卡片高度、默认 5 行、滚轮 ±1、clamp、离屏像素换行），并把旧几何断言 216 / 256 更新为 330 / 370。
+
+**③ 测试 / 构建 / 探针**
+- `.	estuild-tests.ps1`：**Test 566 / Check 355 全绿**（重构基线 556 / 350，本轮 +10 / +5）。
+- `.uild.ps1` 通过；`dist\WorkCountdown.exe` 的 FileVersion = **4.0.0.0**（`(Get-Item dist\WorkCountdown.exe).VersionInfo.FileVersion` 实测）。
+- `.	estuild-probes.ps1`：**72 个入口 / 72 OK / 0 FAIL**（与重构基线一致）。
+
+**④ 版本 / 文档 / 兼容**
+- 版本 3.8.1 → **4.0.0**：`src/Models.cs`（`AppInfo.Version`）、`src/AssemblyInfo.cs`（4.0.0.0）、`package.ps1` 默认 `-Version`、`tools/release.ps1` 默认 `-Version`、`README.md` 当前版本 / 在线更新 / 发版示例；本文件新增本小节。
+- **兼容约定未变**：`WorkCountdown.exe` 文件名、`%APPDATA%\WorkCountdown` 配置目录、`%LOCALAPPDATA%\Programs\WorkCountdown` 安装目录、注册表 Run 项名、命名空间 / 类名、`work-countdown` 目录名全部保持原样；老配置 / 老快捷方式不受影响。
+- 本轮只准备发版内容：**没有打包、没有发布、没有 push**；zip / 一图说明书仍由 Lead 在发版时重出。
 
 ### 2026-11-16 15:40 · v3.8.1 群聊历史最后一行被裁 + 未读左上角每 5 秒快闪两下
 
