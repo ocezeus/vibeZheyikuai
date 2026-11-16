@@ -2417,6 +2417,126 @@ class Check
                 }
             }
 
+            // ---- v4.0.0 检查更新：下载读条留在气泡里，点下载不关气泡 ----
+            {
+                var ds = new Settings();
+                ds.lark.enabled = false;
+                ds.calendarEnabled = false;
+                ds.ui.theme = "midnight";
+                ds.ui.alwaysOnTop = true;
+                var card3 = new Rectangle(0, 300, 224, 68);
+                int applyCalls = 0;
+                using (var m = new BubbleMenuForm(ds, Themes.Get("midnight"), card3, true, null, null, null, null, null,
+                    null, null, null, delegate { applyCalls++; }))
+                {
+                    Call(m, "OpenItem", (int)BubbleAction.Update);
+                    int extra = (int)Call(m, "S", (float)BubbleMenuForm.ExtraHDip(BubbleAction.Update));
+                    Set(m, "animating", false);
+                    Set(m, "openExtra", (double)extra);
+                    Set(m, "openTo", (double)extra);
+                    Set(m, "closeExtra", 0.0);
+                    Set(m, "closeTo", 0.0);
+                    Call(m, "LayoutWindow");
+                    Set(m, "openedAt", Environment.TickCount - 5000);
+                    float sc = (float)Get(m, "scale");
+                    Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                    var item = (Rectangle)Call(m, "ItemRect", (int)BubbleAction.Update);
+                    var btn = (Rectangle)Call(m, "UpdatePrimaryRect", item);
+                    var bar = new Rectangle(btn.X, item.Y + s(100), btn.Width, s(8));
+
+                    m.SetUpdateState(UpdatePhase.Available, "4.0.1", "有新版本", "4.0.0", 0, true);
+                    Call(m, "RunHit", "update:apply");
+                    Ok("Available 点「立即更新（全量）」：开始下载但气泡不关",
+                        applyCalls == 1 && !m.IsDisposed && !m.IsClosing,
+                        "apply=" + applyCalls + " disposed=" + m.IsDisposed + " closing=" + m.IsClosing);
+
+                    m.SetUpdateState(UpdatePhase.Downloading, "4.0.1", "", "", 42, true);
+                    bool busyKey = false, noApplyHit = true;
+                    foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
+                    {
+                        string key = (string)h.GetType().GetField("key").GetValue(h);
+                        if (key == "update:busy") busyKey = true;
+                        if (key == "update:apply" || key == "update:check") noApplyHit = false;
+                    }
+                    Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1,
+                        btn.Left + btn.Width / 2, btn.Top + btn.Height / 2, 0));
+                    Ok("Downloading：主按钮显示下载中、命中区吞掉点击、不重复下载也不关气泡",
+                        (int)Get(m, "updatePercent") == 42 && busyKey && noApplyHit
+                        && applyCalls == 1 && !m.IsDisposed && !m.IsClosing,
+                        "percent=" + Get(m, "updatePercent") + " busy=" + busyKey + " applyHit=" + !noApplyHit
+                        + " apply=" + applyCalls + " disposed=" + m.IsDisposed);
+
+                    Color accent = Themes.Get("midnight").accent;
+                    Color bar42, bar0;
+                    using (var bmp = RenderForm(m, m.Width, m.Height))
+                        bar42 = bmp.GetPixel(bar.X + bar.Width / 4, bar.Y + bar.Height / 2);
+                    m.SetUpdateState(UpdatePhase.Downloading, "4.0.1", "", "", 0, true);
+                    using (var bmp = RenderForm(m, m.Width, m.Height))
+                        bar0 = bmp.GetPixel(bar.X + bar.Width / 4, bar.Y + bar.Height / 2);
+                    Ok("下载中气泡内画进度条，填充比例跟着 updatePercent",
+                        Distance(bar42, accent) + 24 < Distance(bar0, accent),
+                        "42% " + fmt(bar42) + " / 0% " + fmt(bar0) + " / 主题色 " + fmt(accent));
+
+                    m.SetUpdateState(UpdatePhase.Downloading, "4.0.1", "", "", 42, true);
+                    int textDiff = 0;
+                    using (var b42 = RenderForm(m, m.Width, m.Height))
+                    {
+                        m.SetUpdateState(UpdatePhase.Downloading, "4.0.1", "", "", 87, true);
+                        using (var b87 = RenderForm(m, m.Width, m.Height))
+                        {
+                            int top = item.Y + s(68), bottom = item.Y + s(92);
+                            for (int y = top; y < bottom; y++)
+                                for (int x = btn.X; x < btn.Right; x++)
+                                    if (b42.GetPixel(x, y) != b87.GetPixel(x, y)) textDiff++;
+                        }
+                    }
+                    Ok("下载百分比文案随 updatePercent 同步（42% → 87%）",
+                        textDiff > 30, textDiff + " 个像素不同");
+
+                    m.SetUpdateState(UpdatePhase.Error, "", "下载失败：网络不通", "", 0, false);
+                    bool errHit = false;
+                    foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
+                    {
+                        string key = (string)h.GetType().GetField("key").GetValue(h);
+                        if (key == "update:check") errHit = true;
+                    }
+                    Ok("下载失败在页面显示错误状态与原因（按钮回到检查更新）",
+                        m.CurrentUpdatePhase == UpdatePhase.Error && errHit
+                        && (string)Get(m, "updateDetail") == "下载失败：网络不通",
+                        "phase=" + m.CurrentUpdatePhase + " detail=" + Get(m, "updateDetail") + " checkHit=" + errHit);
+
+                    m.SetUpdateState(UpdatePhase.Ready, "4.0.1", "", "", 100, true);
+                    Call(m, "RunHit", "update:apply");
+                    Ok("Ready 点按钮才关闭气泡并执行替换重启",
+                        applyCalls == 2 && m.IsDisposed, "apply=" + applyCalls + " disposed=" + m.IsDisposed);
+                }
+
+                // Checking：只显示「正在检查…」，点主按钮也不关气泡、不重复检查
+                int checkCalls = 0, apply2 = 0;
+                using (var m = new BubbleMenuForm(ds, Themes.Get("midnight"), card3, true, null, null, null, null, null,
+                    null, null, delegate { checkCalls++; }, delegate { apply2++; }))
+                {
+                    Call(m, "OpenItem", (int)BubbleAction.Update);
+                    int firstCheck = checkCalls;
+                    m.SetUpdateState(UpdatePhase.Checking, "", "正在检查", "", 0, false);
+                    int extra = (int)Call(m, "S", (float)BubbleMenuForm.ExtraHDip(BubbleAction.Update));
+                    Set(m, "animating", false);
+                    Set(m, "openExtra", (double)extra);
+                    Set(m, "openTo", (double)extra);
+                    Set(m, "closeExtra", 0.0);
+                    Set(m, "closeTo", 0.0);
+                    Call(m, "LayoutWindow");
+                    var item = (Rectangle)Call(m, "ItemRect", (int)BubbleAction.Update);
+                    var btn = (Rectangle)Call(m, "UpdatePrimaryRect", item);
+                    Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1,
+                        btn.Left + btn.Width / 2, btn.Top + btn.Height / 2, 0));
+                    Ok("Checking：显示「正在检查…」，点主按钮不关气泡也不重复检查",
+                        firstCheck == 1 && checkCalls == 1 && apply2 == 0
+                        && !m.IsDisposed && !m.IsClosing,
+                        "检查=" + checkCalls + " apply=" + apply2 + " disposed=" + m.IsDisposed);
+                }
+            }
+
             // 浅色主题：胶囊也跟着变浅（主题统一）
             var ls = new Settings();
             ls.lark.enabled = false;

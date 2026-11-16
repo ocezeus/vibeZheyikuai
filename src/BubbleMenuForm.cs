@@ -761,10 +761,20 @@ namespace WorkCountdown
                     onUpdateCheck();
                 return;
             }
+            if (key == "update:busy") return;   // 检查 / 下载中：按钮只是状态显示
             if (key == "update:apply")
             {
-                // 先让菜单淡出，再重启更新（新进程要等本进程退出）
-                CloseMenu(delegate { if (onUpdateApply != null) onUpdateApply(); });
+                // 还没下载：气泡不关，让后台开始下载并就地显示进度；
+                // 下载完成（Ready）才让菜单淡出、替换并重启（新进程要等本进程退出）。
+                if (updatePhase == UpdatePhase.Available && onUpdateApply != null)
+                {
+                    onUpdateApply();
+                    return;
+                }
+                if (updatePhase == UpdatePhase.Ready)
+                {
+                    CloseMenu(delegate { if (onUpdateApply != null) onUpdateApply(); });
+                }
                 return;
             }
             if (key.StartsWith("changelog:", StringComparison.Ordinal))
@@ -984,7 +994,9 @@ namespace WorkCountdown
             {
                 if (updatePhase == UpdatePhase.Available || updatePhase == UpdatePhase.Ready)
                     hits.Add(new Hit(UpdatePrimaryRect(item), updateHasAsset ? "update:apply" : "update:page"));
-                else if (updatePhase != UpdatePhase.Downloading && updatePhase != UpdatePhase.Checking)
+                else if (updatePhase == UpdatePhase.Checking || updatePhase == UpdatePhase.Downloading)
+                    hits.Add(new Hit(UpdatePrimaryRect(item), "update:busy"));   // 只显示状态，点它别关气泡
+                else
                     hits.Add(new Hit(UpdatePrimaryRect(item), "update:check"));
                 hits.Add(new Hit(UpdateLinkRect(item), "update:page"));
 
