@@ -3356,8 +3356,13 @@ internal static class Test
                 }
                 Check("26.2 版本从新到旧", ordered.ToString(), "True");
                 Check("26.3 版本唯一", unique.ToString(), "True");
-                Check("26.4 Latest 就是当前版本", UpdateChangelog.Latest == null ? "" : UpdateChangelog.Latest.Version,
-                    AppInfo.Version);
+                // 补丁版本并入大版本条目（4.0.1 仍归 4.0.0 / 4.0 那条），所以这里只要求 Latest
+                // 覆盖当前版本的「主.次」；换大版本（4.1.0）时必须新加一条，否则这里会红。
+                int[] cur = parts(AppInfo.Version);
+                int[] latestParts = UpdateChangelog.Latest == null ? new int[0] : parts(UpdateChangelog.Latest.Version);
+                bool covers = latestParts.Length >= 2 && cur.Length >= 2
+                    && latestParts[0] == cur[0] && latestParts[1] == cur[1];
+                Check("26.4 Latest 覆盖当前版本（补丁并入大版本）", covers.ToString(), "True");
 
                 bool allTitled = true, allBullets = true, allDates = true, allFormats = true;
                 for (int i = 0; i < entries.Count; i++)
