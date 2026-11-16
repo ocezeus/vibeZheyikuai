@@ -48,11 +48,18 @@ namespace WorkCountdown
         public const int ClockExtraDip = 130;
         public const int ScheduleExtraDip = 222;
         public const int PreviewExtraDip = 208;
-        public const int UpdateExtraDip = 330;
+        // 4.0.0：更新记录改成「一句话摘要 + 展开完整要点」，视口比原来的 5 行固定列表高一些；
+        // 再高会超过 150% 缩放下 1080p 的工作区（LayoutWindow 会整体上移但底部会被裁）。
+        public const int UpdateExtraDip = 378;
 
-        // 检查更新页底部的「更新记录」：一屏 5 行，多了用滚轮翻
-        public const int UpdateLogRowHDip = 22;
-        public const int UpdateLogViewHDip = 110;
+        // 检查更新页底部的「更新记录」：可滚动的可展开列表
+        public const int UpdateLogRowHDip = 22;    // 版本 + 日期那一行（也用作滚轮步长）
+        public const int UpdateLogViewHDip = 152;
+        public const int UpdateLogIndentDip = 8;   // 摘要 / 要点缩进（版本号下面）
+        public const int UpdateLogHeadHDip = 22;
+        public const int UpdateLogLineHDip = 14;   // 摘要 / 要点折行后的行距
+        public const int UpdateLogPadDip = 5;
+        public const int UpdateLogBulletGapDip = 3;
 
         // 主题色卡：4 列 × 3 行 = 一屏 12 张，再多用滚轮滚
         public const int ThemeCols = 4;
@@ -133,6 +140,10 @@ namespace WorkCountdown
         private string selectedTheme;
         private int themeScroll;           // 主题列表滚动量（物理像素）
         private int changelogScroll;       // 更新记录滚动量（物理像素），和主题列表各自独立
+        private int changelogOpen = 0;     // 展开完整要点的版本下标；-1 = 全部收起（默认展开最新一条）
+        private int[] changelogRowH;       // 每行高度缓存（展开状态变了就丢掉重算）
+        private Graphics measureG;         // 折行 / 行高测量用的离屏 Graphics（DPI 与 frame 一致）
+        private Bitmap measureBmp;         // measureG 的宿主位图（一并释放）
         private bool pinned;
         private string eventTitle = "临时日程";
         private string eventPlace = "";
@@ -539,7 +550,12 @@ namespace WorkCountdown
             animating = true;
             hoverKind = 0; hoverIndex = -1;
             if (index == (int)BubbleAction.Theme) ScrollThemeToSelected();
-            if (index == (int)BubbleAction.Update) changelogScroll = 0;
+            if (index == (int)BubbleAction.Update)
+            {
+                changelogScroll = 0;
+                changelogOpen = 0;       // 每次打开默认展开最新一条
+                changelogRowH = null;
+            }
             // 更新面板一展开就去查一次（已经查过 / 正在下载就不重复查）
             if (index == (int)BubbleAction.Update && updatePhase == UpdatePhase.Idle && onUpdateCheck != null)
                 onUpdateCheck();
@@ -690,6 +706,7 @@ namespace WorkCountdown
                 int next = Math.Max(0, Math.Min(max, changelogScroll - e.Delta * step / 120));
                 if (next == changelogScroll) return;
                 changelogScroll = next;
+                BuildHits();   // 行命中区跟着滚动量走
                 Invalidate();
             }
         }
@@ -748,6 +765,12 @@ namespace WorkCountdown
             {
                 // 先让菜单淡出，再重启更新（新进程要等本进程退出）
                 CloseMenu(delegate { if (onUpdateApply != null) onUpdateApply(); });
+                return;
+            }
+            if (key.StartsWith("changelog:", StringComparison.Ordinal))
+            {
+                int row;
+                if (int.TryParse(key.Substring(10), out row)) ToggleChangelogRow(row);
                 return;
             }
             if (key == "update:page")
@@ -964,6 +987,21 @@ namespace WorkCountdown
                 else if (updatePhase != UpdatePhase.Downloading && updatePhase != UpdatePhase.Checking)
                     hits.Add(new Hit(UpdatePrimaryRect(item), "update:check"));
                 hits.Add(new Hit(UpdateLinkRect(item), "update:page"));
+
+                // 更新记录：每一行（含展开的要点）都是可点的整块区域，只取视口内的部分
+                Rectangle logView = ChangelogView(item);
+                int rowY = logView.Y - changelogScroll;
+                for (int i = 0; i < UpdateChangelog.Entries.Count; i++)
+                {
+                    int rowH = ChangelogRowHeight(i);
+                    if (rowY + rowH > logView.Top && rowY < logView.Bottom)
+                    {
+                        Rectangle hit = Rectangle.Intersect(
+                            new Rectangle(logView.X, rowY, logView.Width, rowH), logView);
+                        if (hit.Width > 0 && hit.Height > 0) hits.Add(new Hit(hit, "changelog:" + i));
+                    }
+                    rowY += rowH;
+                }
             }
         }
 
@@ -1273,8 +1311,147 @@ namespace WorkCountdown
 
         private int ChangelogMaxScroll(Rectangle view)
         {
-            int total = UpdateChangelog.Entries.Count * S(UpdateLogRowHDip);
+            int total = ChangelogContentHeight();
             return Math.Max(0, total - view.Height);
+        }
+
+        /// <summary>更新记录全部行的总高（含展开的要点，随 changelogOpen 变化）。</summary>
+        private int ChangelogContentHeight()
+        {
+            int total = 0;
+            for (int i = 0; i < UpdateChangelog.Entries.Count; i++) total += ChangelogRowHeight(i);
+            return total;
+        }
+
+        /// <summary>列表里摘要 / 要点的可用宽度（物理像素）。</summary>
+        private int ChangelogTextWidth()
+        {
+            return S(PanelWDip) - S(24) - S(UpdateLogIndentDip) - S(16);
+        }
+
+        /// <summary>第 i 行的行高（未展开 = 版本 + 日期 + 一句话摘要；展开再加完整要点）。</summary>
+        private int ChangelogRowHeight(int i)
+        {
+            if (changelogRowH == null || changelogRowH.Length != UpdateChangelog.Entries.Count)
+            {
+                var heights = new int[UpdateChangelog.Entries.Count];
+                Graphics g = MeasureGraphics();
+                int textW = ChangelogTextWidth();
+                int lineH = S(UpdateLogLineHDip);
+                for (int k = 0; k < heights.Length; k++)
+                {
+                    ChangelogEntry e = UpdateChangelog.Entries[k];
+                    int summaryLines = Math.Max(1, WrapLines(g, e.Summary, fRowSub, textW).Count);
+                    int h = S(UpdateLogPadDip) * 2 + S(UpdateLogHeadHDip) + summaryLines * lineH;
+                    if (k == changelogOpen)
+                    {
+                        for (int b = 0; b < e.Bullets.Length; b++)
+                        {
+                            int bulletLines = Math.Max(1, WrapLines(g, e.Bullets[b], fRowSub, textW - S(10)).Count);
+                            h += S(UpdateLogBulletGapDip) + bulletLines * lineH;
+                        }
+                        h += S(UpdateLogPadDip);
+                    }
+                    heights[k] = h;
+                }
+                changelogRowH = heights;
+            }
+            if (i < 0 || i >= changelogRowH.Length) return 0;
+            return changelogRowH[i];
+        }
+
+        /// <summary>点更新记录某一行：展开 / 收起该版本的完整要点（同时只展开一条）。</summary>
+        private void ToggleChangelogRow(int i)
+        {
+            if (i < 0 || i >= UpdateChangelog.Entries.Count) return;
+            changelogOpen = i == changelogOpen ? -1 : i;
+            changelogRowH = null;   // 行高随展开状态变化，重算
+            if (activeIndex == (int)BubbleAction.Update)
+            {
+                Rectangle view = ChangelogView(ItemRectFinal(activeIndex));
+                int max = ChangelogMaxScroll(view);
+                if (changelogScroll > max) changelogScroll = max;
+                if (changelogScroll < 0) changelogScroll = 0;
+            }
+            BuildHits();
+            Invalidate();
+        }
+
+        /// <summary>折行用的离屏 Graphics：DPI 跟绘制用的 frame 一致（96 × scale）。</summary>
+        private Graphics MeasureGraphics()
+        {
+            if (measureG == null)
+            {
+                measureBmp = new Bitmap(2, 2);
+                measureBmp.SetResolution(96f * scale, 96f * scale);
+                measureG = Graphics.FromImage(measureBmp);
+                measureG.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            }
+            return measureG;
+        }
+
+        /// <summary>按像素宽度折行：中文逐字断，英文 / 数字尽量整块不拆，优先在标点后断。</summary>
+        private static List<string> WrapLines(Graphics g, string text, Font f, int maxW)
+        {
+            var lines = new List<string>();
+            if (string.IsNullOrEmpty(text)) return lines;
+            if (maxW <= 1) { lines.Add(text); return lines; }
+            string[] paras = text.Replace("\r", "").Split('\n');
+            for (int p = 0; p < paras.Length; p++)
+            {
+                string s = paras[p];
+                if (s.Length == 0) { lines.Add(""); continue; }
+                int start = 0;
+                while (start < s.Length)
+                {
+                    int len = 1;
+                    while (start + len <= s.Length && Measure(g, s.Substring(start, len), f) <= maxW) len++;
+                    len--;
+                    if (len < 1) len = 1;
+                    if (start + len < s.Length)
+                    {
+                        int cut = -1;
+                        for (int i = start + len - 1; i > start; i--)
+                        {
+                            char c = s[i];
+                            if (c == ' ' || c == '，' || c == '、' || c == '；' || c == '。' || c == '：' || c == '！' || c == '？')
+                            {
+                                if (i + 1 - start >= len - len / 3) cut = i + 1;
+                                break;
+                            }
+                        }
+                        if (cut > start) len = cut - start;
+                        else
+                        {
+                            // 避免把 "1.8 DIP" / "566/355" 这类 ASCII 串拆成两半
+                            int tokenStart = start + len;
+                            while (tokenStart > start && IsAsciiToken(s[tokenStart - 1])) tokenStart--;
+                            if (tokenStart > start && tokenStart < start + len && IsAsciiToken(s[start + len]))
+                                len = tokenStart - start;
+                        }
+                    }
+                    lines.Add(s.Substring(start, len));
+                    start += len;
+                }
+            }
+            return lines;
+        }
+
+        private static bool IsAsciiToken(char c)
+        {
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                || c == '.' || c == '/' || c == '+' || c == '-';
+        }
+
+        /// <summary>更新记录列表右边的滚动条，只在装不下时画。</summary>
+        private void DrawChangelogScrollHint(Graphics g, Rectangle view, int a)
+        {
+            int max = ChangelogMaxScroll(view);
+            if (max <= 0) return;
+            int h = Math.Max(S(18), view.Height * view.Height / (view.Height + max));
+            int y = view.Top + (int)Math.Round((view.Height - h) * (changelogScroll / (double)max));
+            using (var b = new SolidBrush(Alpha(theme.textMuted, (int)Math.Round(a * 0.5))))
+                g.FillRectangle(b, view.Right + S(3), y, Math.Max(2, S(2)), h);
         }
 
         private Rectangle UpdatePrimaryRect(Rectangle item)
@@ -1380,30 +1557,64 @@ namespace WorkCountdown
             }
             DrawText(g, "打开发布页 →", fLink, Alpha(Accent, a), x, r.Y + S(213));
 
-            // 更新记录：按大版本从新到旧，一屏 5 行，滚轮看更早；最新一条用强调色
+            // 更新记录：版本 + 日期 + 一句话摘要；点某一行展开 / 收起完整要点，最新一条用强调色
             DrawText(g, "更新记录", fRowSub, Alpha(Dim, a), x, r.Y + S(238));
             Rectangle logView = ChangelogView(r);
             GraphicsState logState = g.Save();
             g.SetClip(logView, CombineMode.Intersect);
+            int rowTop = logView.Y - changelogScroll;
             for (int i = 0; i < UpdateChangelog.Entries.Count; i++)
             {
                 ChangelogEntry entry = UpdateChangelog.Entries[i];
-                int rowTop = logView.Y + i * S(UpdateLogRowHDip) - changelogScroll;
+                int rowH = ChangelogRowHeight(i);
                 bool isLatest = i == 0;
-                if (i < UpdateChangelog.Entries.Count - 1)
+                bool open = i == changelogOpen;
+                if (rowTop + rowH > logView.Top && rowTop < logView.Bottom)
                 {
-                    using (var pen = new Pen(Alpha(theme.edge, (int)(a * 0.30)), Math.Max(1f, scale * 0.6f)))
-                        g.DrawLine(pen, logView.X, rowTop + S(UpdateLogRowHDip) - 1,
-                            logView.Right, rowTop + S(UpdateLogRowHDip) - 1);
+                    if (i < UpdateChangelog.Entries.Count - 1)
+                    {
+                        using (var pen = new Pen(Alpha(theme.edge, (int)(a * 0.30)), Math.Max(1f, scale * 0.6f)))
+                            g.DrawLine(pen, logView.X, rowTop + rowH - 1, logView.Right, rowTop + rowH - 1);
+                    }
+                    float cy = rowTop + S(UpdateLogPadDip) + S(UpdateLogHeadHDip) / 2f;
+                    DrawTextMid(g, "v" + entry.Version, fChip, Alpha(isLatest ? Accent : Muted, a),
+                        logView.X, cy, S(48));
+                    DrawTextMid(g, entry.Date, fRowSub, Alpha(Dim, a), logView.X + S(50), cy, S(62));
+                    DrawTextMid(g, open ? "▾" : "▸", fChipSub, Alpha(isLatest ? Accent : Muted, a),
+                        logView.Right - S(16), cy, S(14));
+
+                    int lineH = S(UpdateLogLineHDip);
+                    int textX = logView.X + S(UpdateLogIndentDip);
+                    int textW = logView.Width - S(UpdateLogIndentDip) - S(16);
+                    int textY = rowTop + S(UpdateLogPadDip) + S(UpdateLogHeadHDip);
+                    List<string> summary = WrapLines(g, entry.Summary, fRowSub, textW);
+                    Color summaryColor = isLatest ? Ink : Muted;
+                    for (int li = 0; li < summary.Count; li++)
+                    {
+                        DrawText(g, summary[li], fRowSub, Alpha(summaryColor, a), textX, textY + S(11));
+                        textY += lineH;
+                    }
+                    if (open)
+                    {
+                        int bulletX = textX + S(10);
+                        int bulletW = textW - S(10);
+                        for (int b = 0; b < entry.Bullets.Length; b++)
+                        {
+                            textY += S(UpdateLogBulletGapDip);
+                            List<string> lines = WrapLines(g, entry.Bullets[b], fRowSub, bulletW);
+                            DrawText(g, "·", fRowSub, Alpha(Accent, a), textX, textY + S(11));
+                            for (int li = 0; li < lines.Count; li++)
+                            {
+                                DrawText(g, lines[li], fRowSub, Alpha(Ink, a), bulletX, textY + S(11));
+                                textY += lineH;
+                            }
+                        }
+                    }
                 }
-                float cy = rowTop + S(UpdateLogRowHDip) / 2f;
-                DrawTextMid(g, "v" + entry.Version, fChip, Alpha(isLatest ? Accent : Muted, a),
-                    logView.X, cy, S(48));
-                DrawTextMid(g, entry.Date, fRowSub, Alpha(Dim, a), logView.X + S(50), cy, S(62));
-                DrawTextMid(g, entry.Title, fRowSub, Alpha(isLatest ? Accent : Ink, a),
-                    logView.X + S(114), cy, logView.Width - S(114));
+                rowTop += rowH;
             }
             g.Restore(logState);
+            DrawChangelogScrollHint(g, logView, a);
         }
 
         /// <summary>在浏览器里打开发布页（兜底：拿不到自动下载时用）。</summary>
@@ -1800,6 +2011,8 @@ namespace WorkCountdown
             foreach (var f in new Font[] { fPill, fTitle, fSub, fChip, fChipSub, fRow, fRowSub, fLink, fField, fFieldLabel, fKbd })
                 if (f != null) f.Dispose();
             if (frame != null) { frame.Dispose(); frame = null; }
+            if (measureG != null) { measureG.Dispose(); measureG = null; }
+            if (measureBmp != null) { measureBmp.Dispose(); measureBmp = null; }
             base.OnFormClosed(e);
         }
 

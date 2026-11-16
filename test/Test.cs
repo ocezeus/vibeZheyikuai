@@ -397,11 +397,11 @@ internal static class Test
             Check("长开额外高度 Theme/Clock/Schedule/Preview/Update",
                 BubbleMenuForm.ExtraHDip(BubbleAction.Theme) + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Clock)
                 + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Schedule) + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Preview)
-                + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Update), "168/130/222/208/330");
+                + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Update), "168/130/222/208/378");
             Check("长开后整颗高度 = 40 + 额外",
                 BubbleMenuForm.ItemHDip(BubbleAction.Theme) + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Clock)
                 + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Schedule) + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Preview)
-                + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Update), "208/170/262/248/370");
+                + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Update), "208/170/262/248/418");
 
             Check("预览通知 6 类 key", string.Join("/", BubbleMenuForm.PreviewKeys), "fixed/lunch/lark/outlook/local/off");
             Check("预览通知 名字 / 副标题 与 key 一一对应",
@@ -3399,6 +3399,43 @@ internal static class Test
                     && text4.IndexOf("SyncEngine", StringComparison.Ordinal) >= 0
                     && text4.IndexOf("更新记录", StringComparison.Ordinal) >= 0).ToString(),
                     "True");
+
+                // v4.0.0：每条都要有一句话摘要，且覆盖自己全部要点的关键词
+                string[] summaryVersions = new string[] { "4.0.0", "3.8", "3.7", "3.6", "3.5", "3.4", "3.3", "3.2" };
+                string[][] summaryKeys = new string[][] {
+                    new string[] { "ReminderEngine", "SyncEngine", "配置", "更新记录", "测试" },
+                    new string[] { "16 条", "8 条", "淡入", "输入框", "快闪" },
+                    new string[] { "六套", "设置窗口", "胶囊", "39 套" },
+                    new string[] { "磨砂玻璃", "昵称", "预览通知", "检查更新", "发版" },
+                    new string[] { "工作日", "迁移", "昵称" },
+                    new string[] { "对话码", "1.8 DIP", "滚动", "删除", "图标" },
+                    new string[] { "抽屉", "双栏", "MQTT", "DIP", "更名" },
+                    new string[] { "双击", "细边", "投影", "淡出" }
+                };
+                bool summaryShape = true;
+                string summaryBad = "";
+                for (int i = 0; i < summaryVersions.Length; i++)
+                {
+                    ChangelogEntry e = entries.Find(delegate(ChangelogEntry x) { return x.Version == summaryVersions[i]; });
+                    string sum = e == null ? null : e.Summary;
+                    if (string.IsNullOrEmpty(sum) || sum.Length < 24 || sum.Length > 180)
+                    {
+                        summaryShape = false;
+                        summaryBad += " / " + summaryVersions[i] + "=" + (sum == null ? "null" : sum.Length.ToString(CultureInfo.InvariantCulture) + "字");
+                    }
+                }
+                Check("26.11 每条都有覆盖全部变化的一句话摘要（24-180 字）", summaryShape.ToString(), summaryShape ? "True" : summaryBad);
+                for (int i = 0; i < summaryVersions.Length; i++)
+                {
+                    ChangelogEntry e = entries.Find(delegate(ChangelogEntry x) { return x.Version == summaryVersions[i]; });
+                    string sum = e == null || e.Summary == null ? "" : e.Summary;
+                    string missing = "";
+                    for (int k = 0; k < summaryKeys[i].Length; k++)
+                        if (sum.IndexOf(summaryKeys[i][k], StringComparison.Ordinal) < 0)
+                            missing += (missing.Length == 0 ? "" : "、") + summaryKeys[i][k];
+                    Check("26." + (12 + i) + " v" + summaryVersions[i] + " 摘要覆盖全部要点",
+                        (missing.Length == 0).ToString(), "True" + (missing.Length == 0 ? "" : ("（缺 " + missing + "）")));
+                }
             }
 
         Console.WriteLine();

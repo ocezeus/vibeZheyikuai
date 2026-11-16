@@ -2078,14 +2078,14 @@ class Check
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Clock) == 130
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Schedule) == 222
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Preview) == 208
-                && BubbleMenuForm.ExtraHDip(BubbleAction.Update) == 330
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Update) == 378
                 && BubbleMenuForm.ItemHDip(BubbleAction.Theme) == 208
                 && BubbleMenuForm.ItemHDip(BubbleAction.Clock) == 170
                 && BubbleMenuForm.ItemHDip(BubbleAction.Schedule) == 262
                 && BubbleMenuForm.ItemHDip(BubbleAction.Preview) == 248
-                && BubbleMenuForm.ItemHDip(BubbleAction.Update) == 370,
+                && BubbleMenuForm.ItemHDip(BubbleAction.Update) == 418,
                 BubbleMenuForm.PillWDip + "x" + BubbleMenuForm.PillHDip + " 列高 " + BubbleMenuForm.ColumnHDip
-                + " 长开 168/130/222/208/330（+40 头 = 208/170/262/248/370）");
+                + " 长开 168/130/222/208/378（+40 头 = 208/170/262/248/418）");
 
             var bs = new Settings();
             bs.lark.enabled = false;
@@ -2261,18 +2261,19 @@ class Check
                     var logView = (Rectangle)Call(m, "ChangelogView", uItem);
                     int logMax = (int)Call(m, "ChangelogMaxScroll", logView);
                     int logRows = BubbleMenuForm.UpdateLogViewHDip / BubbleMenuForm.UpdateLogRowHDip;
-                    Ok("检查更新卡片长高到能放下变更记录区（216 → 330）",
+                    Ok("检查更新卡片长高到能放下可展开的变更记录区（216 → 418）",
                         BubbleMenuForm.ExtraHDip(BubbleAction.Update) > 216
                         && uItem.Height == s(BubbleMenuForm.PillHDip + BubbleMenuForm.ExtraHDip(BubbleAction.Update))
                         && uItem.Bottom <= m.Height,
                         "extra=" + BubbleMenuForm.ExtraHDip(BubbleAction.Update)
                         + " item=" + uItem.Width + "x" + uItem.Height + " window=" + m.Height);
-                    Ok("变更记录默认显示最近 5 行，按钮 / 链接都不压列表",
-                        logRows == 5 && UpdateChangelog.Entries.Count > logRows
+                    Ok("变更记录是可滚动列表（默认展开最新一条），按钮 / 链接都不压列表",
+                        logRows >= 5 && UpdateChangelog.Entries.Count > logRows
                         && logView.Top >= ((Rectangle)Call(m, "UpdateLinkRect", uItem)).Bottom
-                        && logView.Bottom <= uItem.Bottom && logMax > 0,
+                        && logView.Bottom <= uItem.Bottom && logMax > 0
+                        && (int)Call(m, "ChangelogContentHeight") > logView.Height,
                         logRows + " 行 / 条目 " + UpdateChangelog.Entries.Count + " / view=" + logView
-                        + " / max=" + logMax);
+                        + " / max=" + logMax + " / 内容=" + Call(m, "ChangelogContentHeight"));
 
                     int log0 = (int)Get(m, "changelogScroll");
                     Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
@@ -2282,11 +2283,11 @@ class Check
                         log1 == log0 + s(BubbleMenuForm.UpdateLogRowHDip) && log1 > 0,
                         log0 + " → " + log1 + "（期望 +" + s(BubbleMenuForm.UpdateLogRowHDip) + "）");
 
-                    for (int i = 0; i < 30; i++)
+                    for (int i = 0; i < 80; i++)
                         Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
                             logView.Left + s(6), logView.Top + s(10), -120));
                     int logBottom = (int)Get(m, "changelogScroll");
-                    for (int i = 0; i < 30; i++)
+                    for (int i = 0; i < 80; i++)
                         Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
                             logView.Left + s(6), logView.Top + s(10), 120));
                     int logTop = (int)Get(m, "changelogScroll");
@@ -2312,6 +2313,108 @@ class Check
                     }
                 }
                 m.CloseMenu();
+            }
+
+            // ---- v4.0.0 更新记录：一句话摘要 + 点行展开完整要点 ----
+            {
+                var cs = new Settings();
+                cs.lark.enabled = false;
+                cs.calendarEnabled = false;
+                cs.ui.theme = "midnight";
+                cs.ui.alwaysOnTop = true;
+                var card2 = new Rectangle(0, 300, 224, 68);
+                using (var m = new BubbleMenuForm(cs, Themes.Get("midnight"), card2, true, null, null, null, null, null))
+                {
+                    Call(m, "OpenItem", (int)BubbleAction.Update);
+                    int extra = (int)Call(m, "S", (float)BubbleMenuForm.ExtraHDip(BubbleAction.Update));
+                    Set(m, "animating", false);
+                    Set(m, "openExtra", (double)extra);
+                    Set(m, "openTo", (double)extra);
+                    Set(m, "closeExtra", 0.0);
+                    Set(m, "closeTo", 0.0);
+                    Call(m, "LayoutWindow");
+                    Set(m, "openedAt", Environment.TickCount - 5000);
+                    float sc = (float)Get(m, "scale");
+                    Func<float, int> s = delegate(float d) { return (int)Math.Round(d * sc); };
+                    var item = (Rectangle)Call(m, "ItemRect", (int)BubbleAction.Update);
+                    var view = (Rectangle)Call(m, "ChangelogView", item);
+                    int open0 = (int)Get(m, "changelogOpen");
+                    int h0open = (int)Call(m, "ChangelogRowHeight", 0);
+                    int h1closed = (int)Call(m, "ChangelogRowHeight", 1);
+                    int contentOpen = (int)Call(m, "ChangelogContentHeight");
+                    int maxOpen = (int)Call(m, "ChangelogMaxScroll", view);
+                    Ok("更新记录默认展开最新一条，展开行比收起行高",
+                        open0 == 0 && h0open > h1closed && h1closed > 0 && contentOpen > view.Height,
+                        "open=" + open0 + " 行高0=" + h0open + " 行高1=" + h1closed
+                        + " 内容=" + contentOpen + " 视口=" + view.Height);
+
+                    Call(m, "RunHit", "changelog:0");
+                    int openC = (int)Get(m, "changelogOpen");
+                    int h0closed = (int)Call(m, "ChangelogRowHeight", 0);
+                    int contentClosed = (int)Call(m, "ChangelogContentHeight");
+                    int maxClosed = (int)Call(m, "ChangelogMaxScroll", view);
+                    Ok("点已展开的行收起，行高与滚动范围同步变小",
+                        openC == -1 && h0closed < h0open && contentClosed < contentOpen && maxClosed < maxOpen,
+                        "open=" + openC + " 行高 " + h0open + "→" + h0closed + " 内容 "
+                        + contentOpen + "→" + contentClosed + " max " + maxOpen + "→" + maxClosed);
+
+                    Call(m, "RunHit", "changelog:0");
+                    int openE = (int)Get(m, "changelogOpen");
+                    int h0again = (int)Call(m, "ChangelogRowHeight", 0);
+                    Ok("再点一次重新展开，行高回到展开态",
+                        openE == 0 && h0again == h0open
+                        && (int)Call(m, "ChangelogContentHeight") == contentOpen,
+                        "open=" + openE + " 行高=" + h0again);
+
+                    Call(m, "RunHit", "changelog:1");
+                    int open1 = (int)Get(m, "changelogOpen");
+                    int h0when1 = (int)Call(m, "ChangelogRowHeight", 0);
+                    int h1open = (int)Call(m, "ChangelogRowHeight", 1);
+                    bool rowHitKeys = false;
+                    foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
+                    {
+                        string key = (string)h.GetType().GetField("key").GetValue(h);
+                        if (key == "changelog:0" || key == "changelog:1") rowHitKeys = true;
+                    }
+                    Ok("点另一行改成展开它（同时只展开一条），行命中区存在",
+                        open1 == 1 && h0when1 == h0closed && h1open > h1closed && rowHitKeys,
+                        "open=" + open1 + " 行高0=" + h0when1 + " 行高1=" + h1open + " hits=" + rowHitKeys);
+
+                    Call(m, "RunHit", "changelog:1");
+                    Ok("再点已展开的行就全部收起",
+                        (int)Get(m, "changelogOpen") == -1, "open=" + Get(m, "changelogOpen"));
+
+                    // 展开后滚到底再收起：scroll 必须按新内容高度 clamp
+                    Call(m, "RunHit", "changelog:1");
+                    for (int i = 0; i < 40; i++)
+                        Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
+                            view.Left + s(6), view.Top + s(10), -120));
+                    int atBottom = (int)Get(m, "changelogScroll");
+                    int maxExpanded = (int)Call(m, "ChangelogMaxScroll", view);
+                    Call(m, "RunHit", "changelog:1");
+                    int afterCollapse = (int)Get(m, "changelogScroll");
+                    int maxCollapsed2 = (int)Call(m, "ChangelogMaxScroll", view);
+                    Ok("展开 / 收起后滚动范围重算，滚轮位置 clamp 在新范围内",
+                        atBottom == maxExpanded && afterCollapse <= maxCollapsed2 && maxCollapsed2 < maxExpanded,
+                        "滚到底=" + atBottom + "/" + maxExpanded + " 收起后=" + afterCollapse + "/" + maxCollapsed2);
+
+                    // 完整要点真的画出来：收起 / 展开同一区域像素明显不同
+                    Set(m, "changelogOpen", -1);
+                    Call(m, "BuildHits");
+                    int diffPx = 0;
+                    using (var closedBmp = RenderForm(m, m.Width, m.Height))
+                    {
+                        Call(m, "RunHit", "changelog:0");
+                        using (var openBmp = RenderForm(m, m.Width, m.Height))
+                        {
+                            for (int y = view.Top; y < view.Bottom; y++)
+                                for (int x = view.Left; x < view.Right; x++)
+                                    if (closedBmp.GetPixel(x, y) != openBmp.GetPixel(x, y)) diffPx++;
+                        }
+                    }
+                    Ok("展开后完整要点在可视区里画出来（收起 / 展开像素不同）",
+                        diffPx > 300, diffPx + " 个像素不同");
+                }
             }
 
             // 浅色主题：胶囊也跟着变浅（主题统一）
