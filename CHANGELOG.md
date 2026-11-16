@@ -1,7 +1,7 @@
 # 变更记录（CHANGELOG）
 
 > **记录约定（2026-11-12 定）**：以后每次改动都往这里追加一条，写清日期、改了哪些文件、怎么验证的、装机状态。
-> - **平时不升版本号**：`src/Models.cs` 的 `AppInfo.Version` / `src/AssemblyInfo.cs` 停在 `v3.3.2`（2026-11-13 发版时从 3.3.1 升上来）；只有用户说「发版」时才 +1。
+> - **平时不升版本号**：`src/Models.cs` 的 `AppInfo.Version` / `src/AssemblyInfo.cs` 停在 `v3.7.0`（2026-11-13 发版时从 3.3.1 升上来）；只有用户说「发版」时才 +1。
 > - **平时不打包、不改一图说明书**：`dist\下班倒计时-*.zip` 和 `manual-poster.png` 只在发版时重出。
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
@@ -43,7 +43,13 @@
 - `UiSettings.skin` 归一化：老配置 / 手改配置里为空、未知、大小写错、带空白的 `skin` 值，会在 `Settings.Normalize()` 里规范成合法的小写 id（`Skins.Get` 先 `Trim()` 再忽略大小写匹配，未命中回退 `default`），避免坏值落盘；断言覆盖 null / 空串 / 未知 / 大小写错 / 首尾空格 / 六个合法 id 往返。
 
 **⑥ 打包 / 发布 / 装机**
-- 已打包并发 GitHub Release（lead 补）。
+- **打包**：`dist\上班工具箱-v3.7.0.zip`（4,158,566 B / 4061.1 KB）：`WorkCountdown.exe`（452,608 B / FileVersion 3.7.0.0）、`一图说明书.png`（2400×11386）、`使用说明.txt`、`install.ps1` / `uninstall.ps1`、`安装.cmd` / `卸载.cmd`、`fonts\`。
+- **发布**：commit `e6f773b`（50 文件，+6318/−377）→ push `origin main` + tag `v3.7.0` → GitHub Release **https://github.com/ocezeus/vibeZheyikuai/releases/tag/v3.7.0**（id 446683706），两个资产：`WorkCountdown-v3.7.0.zip`（4061.1 KB）+ `WorkCountdown.exe`（442 KB）。
+- **装机**：`.\tools\install-dev.ps1` → **FileVersion 3.7.0.0，PID 9528（14:27）**；装机后把配置里 `ui.skin` 依次改成 paper / neon / instrument 重启并真机截图（`test\visual\real\v370-*-expanded.png`），确认五套皮肤在真分层窗上生效；随后已把配置还原成发版前那份（无 `skin` 字段 → 默认皮肤）。
+- **更新链路实测**：新增 `test/UpdateProbe.cs`（发布后跑）→ `UpdateService.Check()` 拿到最新 `v3.7.0` / `WorkCountdown.exe`（452,608 B）/ 直链正确，`IsNewer("3.7.0","3.7.0") = false`（已经是最新）。「检查更新」全链路可用。
+- **发版脚本两个坑（本轮踩到并修掉）**：
+  1. `tools\release.ps1` 的 `Invoke-Git` 直接 `& git ...`，git 的 warning（如 `LF will be replaced by CRLF`）在 `$ErrorActionPreference='Stop'` 下被当成异常，发布在 `git add -A` 一步假失败（改动已 stage、没 commit）。修法：git 调用统一 `2>&1 | ForEach-Object { "$_" }` 并临时 `Continue`，退出码仍由 `$LASTEXITCODE` 检查。
+  2. `package.ps1` 里 `& powershell ... release.ps1` 同样会被子进程 stderr 打断：改成临时 `Continue` + 只认 `$exitCode`；`.gitignore` 行尾统一 CRLF（消除那条 warning 源头）；`package.ps1` 补回 UTF-8 **BOM**（`write` 工具会掉 BOM 的历史坑）。
 
 ### 2026-11-16 13:15 · 主题方向稿：5 套整体界面皮肤（设计稿，源码 0 改动）
 
