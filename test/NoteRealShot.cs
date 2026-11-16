@@ -34,20 +34,35 @@ class NoteRealShot
         {
         Settings s;
         string id = want;
-        bool synth = (args != null && args.Length > 2 && args[2] == "synth");
+        bool synth = (args != null && args.Length > 2 && (args[2] == "synth" || args[2] == "synthroom"));
+        bool synthRoom = (args != null && args.Length > 2 && args[2] == "synthroom");
         if (synth)
         {
             s = new Settings();
             s.lark.enabled = false;
             s.calendarEnabled = false;
             s.note.id = "48372";
-            s.note.AddContact("11111", "压测群");
-            for (int i = 0; i < 16; i++)
+            if (synthRoom)
             {
-                bool inc = i % 2 == 0;
-                s.note.Append(new NoteMessage(inc ? "11111" : "48372", inc ? "48372" : "11111", "消息" + i + " 压测滚动", 1731400000 + i * 60), inc);
+                s.note.AddConversation("MIKFU", "压测群");
+                for (int i = 0; i < 16; i++)
+                {
+                    string from = (i % 2 == 0) ? "93183" : "10825";
+                    s.note.Append(new NoteMessage(from, "MIKFU", "群消息" + i + " 压测滚动", 1731400000 + i * 60,
+                        (i % 2 == 0) ? "阿哲" : "小满"), true);
+                }
+                id = "MIKFU";
             }
-            id = "11111";
+            else
+            {
+                s.note.AddContact("11111", "压测群");
+                for (int i = 0; i < 16; i++)
+                {
+                    bool inc = i % 2 == 0;
+                    s.note.Append(new NoteMessage(inc ? "11111" : "48372", inc ? "48372" : "11111", "消息" + i + " 压测滚动", 1731400000 + i * 60), inc);
+                }
+                id = "11111";
+            }
         }
         else
         {

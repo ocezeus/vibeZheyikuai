@@ -160,6 +160,8 @@ namespace WorkCountdown
         private NotePanelForm notePanel;
         private NoteRelay noteRelay;
         private int noteFlashAt;
+        private int noteBlinkAt;                  // 未读左上角快闪：这一轮两次快闪的起点（0 = 没在闪）
+        private int noteBlinkLast;                // 上一次快闪的起点（每 5 秒一次）
         private CardGlowForm cardGlow;
         private NotifyIcon tray;
 
@@ -261,6 +263,7 @@ namespace WorkCountdown
                 CheckSticky();
                 CheckReminders();
                 if (drawer != null) drawer.RefreshText();
+                MaybeBlinkUnread();
             };
 
             poll = new System.Windows.Forms.Timer();
@@ -2167,6 +2170,7 @@ namespace WorkCountdown
                     DrawCardBorder(g, path, skin);
                     if (skin.screws) DrawScrews(g);
                     DrawNoteRim(g, path);
+                    DrawNoteCorner(g, path);
                 }
             }
         }
@@ -4057,6 +4061,8 @@ namespace WorkCountdown
                     if (!string.IsNullOrEmpty(msg.nick)) note.SetContactNick(msg.from, msg.nick);
                     store.Save(settings);
                     noteFlashAt = Environment.TickCount;
+                    noteBlinkLast = Environment.TickCount;
+                    noteBlinkAt = Environment.TickCount;
                     if (notePanel != null)
                     {
                         if (notePanel.SelectedId == key)
@@ -4093,7 +4099,7 @@ namespace WorkCountdown
             return 0;
         }
 
-        /// <summary>贴边闪光：收到时沿圆角边框亮两次；未读时每 5 秒轻闪一次。</summary>
+        /// <summary>收到时的整圈贴边闪光（亮两次，1300ms）；未读的每 5 秒快闪改到左上角（DrawNoteCorner）。</summary>
         private double NoteRimAlpha()
         {
             int now = Environment.TickCount;
@@ -4103,15 +4109,83 @@ namespace WorkCountdown
                 int el = now - noteFlashAt;
                 if (el >= 0 && el < 1300) a = RimKeyframes(el / 1300.0);
             }
-            if (a < 0.02 && NoteUnread && !settings.ui.reducedMotion && !SystemInformation.HighContrast)
-            {
-                double ph = (now % 5000) / 5000.0;
-                if (ph >= 0.86 && ph < 0.98) a = 0.5 * Math.Sin((ph - 0.86) / 0.12 * Math.PI);
-            }
             return Math.Max(0, Math.Min(1, a));
         }
 
-        private bool NoteRimActive() { return NoteRimAlpha() > 0.02; }
+        // ---------------- 未读：左上角每 5 秒快闪两下 ----------------
+        internal const int NoteBlinkIntervalMs = 5000;   // 每 5 秒
+        internal const int NoteBlinkSpanMs = 420;        // 一轮两次快闪共占 ~420ms
+
+        /// <summary>快闪包络：elapsedMs 处的亮度（0 = 不亮）。两下：0-150ms、250-400ms，中间有暗隙。</summary>
+        internal static double CornerFlashAlpha(int elapsedMs)
+        {
+            if (elapsedMs < 0 || elapsedMs >= NoteBlinkSpanMs) return 0;
+            return Math.Max(FlashPulse(elapsedMs, 0, 150), FlashPulse(elapsedMs, 250, 150));
+        }
+
+        private static double FlashPulse(int elapsedMs, int startMs, int durMs)
+        {
+            double u = (elapsedMs - startMs) / (double)Math.Max(1, durMs);
+            if (u <= 0 || u >= 1) return 0;
+            return Math.Sin(u * Math.PI);            // 快进快出，像闪两下
+        }
+
+        /// <summary>当前角落快闪的强度（0..1）；减少动态效果 / 高对比度 / 没有未读时为 0。</summary>
+        private double NoteCornerAlpha()
+        {
+            if (!NoteUnread || settings.ui.reducedMotion || SystemInformation.HighContrast) return 0;
+            if (noteBlinkAt == 0) return 0;
+            return CornerFlashAlpha(Environment.TickCount - noteBlinkAt);
+        }
+
+        /// <summary>每 5 秒安排一次左上角快闪（1 秒的 tick 里调用；不用额外定时器）。</summary>
+        private void MaybeBlinkUnread()
+        {
+            if (!NoteUnread || settings.ui.reducedMotion || SystemInformation.HighContrast) return;
+            int now = Environment.TickCount;
+            if (noteBlinkLast == 0 || now - noteBlinkLast >= NoteBlinkIntervalMs)
+            {
+                noteBlinkLast = now;
+                noteBlinkAt = now;
+                Invalidate();                         // flowT 会因为 NoteRimActive() 在闪的这 420ms 里持续重画
+            }
+        }
+
+        /// <summary>
+        /// 左上角快闪：沿圆角左上角画一段亮带（顶部 + 左侧各延伸一小段），加一团柔光。
+        /// 收起态 / 展开态共用，圆角跟着卡片走；只画在卡片里面，不会超出窗口。
+        /// </summary>
+        private void DrawNoteCorner(Graphics g, GraphicsPath cardPath)
+        {
+            double a = NoteCornerAlpha();
+            if (a < 0.02) return;
+            var saved = g.Save();
+            g.SetClip(cardPath, CombineMode.Intersect);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            int inset = S(1);
+            int r = S(Skin.IsDefault ? (collapsed ? 13 : 17) : Math.Max(2, CardRadiusDip - 1));
+            float ext = (float)Math.Min((double)S(20), (double)(Width * 0.14f));
+            using (var gp = new GraphicsPath())
+            {
+                gp.AddArc(new Rectangle(inset, inset, r * 2, r * 2), 180, 90);
+                gp.StartFigure();
+                gp.AddLine(inset, inset + r, inset, (int)(inset + r + ext));
+                gp.StartFigure();
+                gp.AddLine(inset + r, inset, (int)(inset + r + ext), inset);
+                for (int i = 3; i >= 1; i--)
+                    using (var pen = new Pen(Color.FromArgb((int)(a * 26 / i), theme.accent), Math.Max(2f, S(2) * i)))
+                    { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, gp); }
+                using (var pen = new Pen(Color.FromArgb((int)(a * 235), theme.accent), Math.Max(1.6f, S(2.2f))))
+                { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, gp); }
+                using (var pen = new Pen(Color.FromArgb((int)(a * 140), Color.White), Math.Max(1f, S(1))))
+                { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, gp); }
+            }
+            // 角上一团柔光，让「闪两下」在深色/浅色主题上都看得见
+            DrawGlowEllipse(g, new RectangleF(-S(12), -S(12), S(64), S(64)), new PointF(S(2), S(2)), theme.accent, 0.40 * a);
+            g.Restore(saved);
+        }
+
+        private bool NoteRimActive() { return NoteRimAlpha() > 0.02 || NoteCornerAlpha() > 0.02; }
 
         private void DrawNoteRim(Graphics g, GraphicsPath cardPath)
         {
