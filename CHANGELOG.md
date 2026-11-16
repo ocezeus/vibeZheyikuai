@@ -28,9 +28,9 @@
 - 新增测试：`test/Test.cs` +10 条（非空、从新到旧、版本唯一、Latest、标题 / 要点 / 日期 / 版本号格式、4.0.0 与 3.2–3.8 齐全、4.0.0 内容）；`test/Check.cs` +5 条（卡片高度、默认 5 行、滚轮 ±1、clamp、离屏像素换行），并把旧几何断言 216 / 256 更新为 330 / 370。
 
 **③ 测试 / 构建 / 探针**
-- `.	estuild-tests.ps1`：**Test 566 / Check 355 全绿**（重构基线 556 / 350，本轮 +10 / +5）。
-- `.uild.ps1` 通过；`dist\WorkCountdown.exe` 的 FileVersion = **4.0.0.0**（`(Get-Item dist\WorkCountdown.exe).VersionInfo.FileVersion` 实测）。
-- `.	estuild-probes.ps1`：**72 个入口 / 72 OK / 0 FAIL**（与重构基线一致）。
+- `.\test\build-tests.ps1`：**Test 566 / Check 355 全绿**（重构基线 556 / 350，本轮 +10 / +5）。
+- `.\build.ps1` 通过；`dist\WorkCountdown.exe` 的 FileVersion = **4.0.0.0**（`(Get-Item dist\WorkCountdown.exe).VersionInfo.FileVersion` 实测）。
+- `.\test\build-probes.ps1`：**72 个入口 / 72 OK / 0 FAIL**（与重构基线一致）。
 
 **④ 版本 / 文档 / 兼容**
 - 版本 3.8.1 → **4.0.0**：`src/Models.cs`（`AppInfo.Version`）、`src/AssemblyInfo.cs`（4.0.0.0）、`package.ps1` 默认 `-Version`、`tools/release.ps1` 默认 `-Version`、`README.md` 当前版本 / 在线更新 / 发版示例；本文件新增本小节。
