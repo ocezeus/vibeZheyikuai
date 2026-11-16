@@ -11,6 +11,7 @@ namespace WorkCountdown
         public const string FixedStart = "fixed-start";         // 固定日程开始
         public const string FixedEnd = "fixed-end";             // 固定日程结束
         public const string FixedResume = "fixed-resume";       // 中途启动，正处在固定日程里
+        public const string FixedRepeat = "fixed-repeat";       // 上班期间按间隔循环的固定日程
         public const string OffWorkStart = "offwork-start";     // 常驻下班提醒开始
         public const string OffWorkResume = "offwork-resume";   // 被别的提醒打断后恢复
         public const string OffWorkRepeat = "offwork-repeat";   // 每 5 分钟重播
@@ -140,7 +141,7 @@ namespace WorkCountdown
                 outcome.Decisions.Add(new ReminderDecision
                 {
                     Reason = ReminderReasons.OffWorkStart,
-                    Event = BuildOffWorkEvent(signals, now)
+                    Event = BuildOffWorkEvent(settings, signals, now)
                 });
             }
             else if (!signals.Showing)
@@ -149,7 +150,7 @@ namespace WorkCountdown
                 outcome.Decisions.Add(new ReminderDecision
                 {
                     Reason = ReminderReasons.OffWorkResume,
-                    Event = BuildOffWorkEvent(signals, now)
+                    Event = BuildOffWorkEvent(settings, signals, now)
                 });
             }
             else if (now >= offWorkNext)
@@ -159,12 +160,13 @@ namespace WorkCountdown
                 outcome.Decisions.Add(new ReminderDecision
                 {
                     Reason = ReminderReasons.OffWorkRepeat,
-                    Event = BuildOffWorkEvent(signals, now)
+                    Event = BuildOffWorkEvent(settings, signals, now)
                 });
             }
 
-            // 2. 固定日程：先开始、再结束、最后「中途启动」；一次推进最多起一条，优先于普通日程
-            if (Policy.Build(settings, now).isWorkday && settings.schedules != null)
+            // 2. 固定日程：先开始、再结束、再「中途启动」、最后循环；一次推进最多起一条，优先于普通日程
+            DayPlan dayPlan = Policy.Build(settings, now);
+            if (dayPlan.isWorkday && settings.schedules != null)
             {
                 bool fixedFired = false;
                 foreach (var f in settings.schedules)
@@ -175,6 +177,9 @@ namespace WorkCountdown
                 if (!fixedFired)
                     foreach (var f in settings.schedules)
                         if (FixedEligible(f, now) && TryFixedResume(f, now, outcome)) { fixedFired = true; break; }
+                if (!fixedFired)
+                    foreach (var f in settings.schedules)
+                        if (FixedEligible(f, now) && TryRepeat(f, dayPlan, now, outcome)) { fixedFired = true; break; }
                 if (fixedFired) return outcome;
             }
 
@@ -255,6 +260,7 @@ namespace WorkCountdown
         /// <summary>固定日程开始（ending=false）/ 结束（ending=true）提醒，每天各一次。</summary>
         private bool TryFixed(FixedSchedule f, DateTime now, bool ending, ReminderOutcome outcome)
         {
+            if (f.IsRecurring) return false;      // 循环日程没有开始/结束语义
             if (ending && (!f.endNotify || string.IsNullOrWhiteSpace(f.end))) return false;
             DateTime at = ending ? f.EndAt(now) : f.StartAt(now);
             if (at == DateTime.MinValue) return false;
@@ -284,6 +290,7 @@ namespace WorkCountdown
         /// <summary>中途启动（刚开机 / 重启）时正处在某个固定日程里：直接立起「xx中」。</summary>
         private bool TryFixedResume(FixedSchedule f, DateTime now, ReminderOutcome outcome)
         {
+            if (f.IsRecurring) return false;      // 循环日程没有「中途启动恢复」语义
             DateTime start = f.StartAt(now), end = f.EndAt(now);
             if (start == DateTime.MinValue || end == DateTime.MinValue) return false;
             if (end <= start) return false;
@@ -302,6 +309,40 @@ namespace WorkCountdown
             e.end = Reminders.FormatStart(end);
             outcome.Decisions.Add(new ReminderDecision { Reason = ReminderReasons.FixedResume, Event = e });
             return true;
+        }
+
+        /// <summary>
+        /// 循环日程：只在上班窗口内、按 30/60/120 分钟的发生点各响一次。
+        /// 去重键带日期 + 发生点，连续 Advance / 同一 tick 重入都不会重复。
+        /// </summary>
+        private bool TryRepeat(FixedSchedule f, DayPlan plan, DateTime now, ReminderOutcome outcome)
+        {
+            if (!f.IsRecurring) return false;
+            foreach (DateTime at in f.RepeatTimes(plan))
+            {
+                if (now.Year != at.Year || now.Month != at.Month || now.Day != at.Day
+                    || now.Hour != at.Hour || now.Minute != at.Minute) continue;
+                string key = "fix:" + f.id + ":rep@"
+                    + at.ToString("yyyyMMddHHmm", System.Globalization.CultureInfo.InvariantCulture);
+                if (notified.ContainsKey(key)) return false;
+                Remember(key, now.Date.AddDays(1));
+
+                var e = new ReminderEvent();
+                e.id = "fix:" + f.id;          // 与开始提醒同 id：FixedOf 才能取到这条日程的配色
+                e.title = f.name + "时间到";
+                e.detail = f.RepeatDetail;
+                e.place = "";
+                e.source = "break";
+                e.start = Reminders.FormatStart(at);
+                e.end = "";
+                outcome.Decisions.Add(new ReminderDecision
+                {
+                    Reason = ReminderReasons.FixedRepeat,
+                    Event = e
+                });
+                return true;
+            }
+            return false;
         }
 
         /// <summary>合并后的日程视图：来源过滤、无效项过滤与开始时间排序都在这里，调用方不用先排序。</summary>
@@ -363,13 +404,15 @@ namespace WorkCountdown
             foreach (var key in expired) notified.Remove(key);
         }
 
-        private ReminderEvent BuildOffWorkEvent(ReminderSignals signals, DateTime now)
+        private ReminderEvent BuildOffWorkEvent(Settings settings, ReminderSignals signals, DateTime now)
         {
             var e = new ReminderEvent();
             e.id = "alert:offwork";
             e.source = "alert";
             e.title = "该下班啦";
-            e.detail = "在飞书发「2」打卡后自动消失";
+            e.detail = ManualClock.ShouldUseLark(settings)
+                ? "在飞书发「2」打卡后自动消失"
+                : "右键「下班」记录本地打卡后自动消失";
             e.place = "";
             DateTime t;
             if (!string.IsNullOrEmpty(signals.OffWorkTarget) && DateTime.TryParse(signals.OffWorkTarget, out t))

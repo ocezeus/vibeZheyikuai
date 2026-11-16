@@ -3552,6 +3552,175 @@ internal static class Test
             finally { DeleteTempDir(dir); }
         }
 
+        // 28. 固定日程「每 30 分钟 / 每小时 / 每 2 小时」循环（功能 B）
+        {
+            var f30 = FixedSchedule.Make("loop30", "custom", "活动", "10:00", "", "theme");
+            f30.repeat = "every30";
+            Check("28.1 每 30 分钟间隔", f30.RepeatMinutes.ToString(), "30");
+            Check("28.2 循环日程判定", f30.IsRecurring.ToString(), "True");
+            Check("28.3 每 30 分钟文案", f30.RepeatLabel, "每 30 分钟（上班期间）");
+            f30.repeat = "hourly";
+            Check("28.4 每小时间隔", f30.RepeatMinutes.ToString(), "60");
+            Check("28.5 每小时文案", f30.RepeatLabel, "每小时（上班期间）");
+            f30.repeat = "every2h";
+            Check("28.6 每 2 小时间隔", f30.RepeatMinutes.ToString(), "120");
+            Check("28.7 每 2 小时文案", f30.RepeatLabel, "每 2 小时（上班期间）");
+            f30.until = "2026-12-31";
+            Check("28.8 循环文案带截止日", f30.RepeatLabel, "每 2 小时（上班期间），至 2026-12-31");
+
+            var s28 = new Settings();
+            s28.mode = "fixed";
+            s28.startTime = "09:00";
+            s28.endTime = "18:00";
+            s28.workdays = new bool[] { false, true, true, true, true, true, false };
+            s28.NormalizeSchedules();
+            var loop = FixedSchedule.Make("loop", "custom", "活动", "10:00", "", "theme");
+            loop.repeat = "every30";
+            s28.schedules.Add(loop);
+            s28.NormalizeSchedules();
+            Check("28.9 Normalize 接受 every30", loop.repeat, "every30");
+
+            var plan28 = Policy.Build(s28, new DateTime(2026, 11, 17));
+            var times = loop.RepeatTimes(plan28);
+            string first = times.Count > 0 ? times[0].ToString("HH:mm") : "-";
+            string last = times.Count > 0 ? times[times.Count - 1].ToString("HH:mm") : "-";
+            Check("28.10 30 分钟第一个发生点", first, "09:30");
+            Check("28.11 30 分钟窗口尾", last, "17:30");
+            Check("28.12 30 分钟共 17 个发生点", times.Count.ToString(), "17");
+            Check("28.13 窗口起点本身不触发", times.Contains(plan28.suggestStart).ToString(), "False");
+            Check("28.14 窗口终点不触发", times.Contains(plan28.fixedEnd).ToString(), "False");
+
+            loop.repeat = "hourly";
+            times = loop.RepeatTimes(plan28);
+            Check("28.15 每小时 8 个发生点", times.Count.ToString(), "8");
+            Check("28.16 每小时第一个 10:00", times[0].ToString("HH:mm"), "10:00");
+            Check("28.17 每小时窗口尾 17:00", times[times.Count - 1].ToString("HH:mm"), "17:00");
+            loop.repeat = "every2h";
+            times = loop.RepeatTimes(plan28);
+            string every2 = "";
+            for (int i = 0; i < times.Count; i++) every2 += (i == 0 ? "" : "/") + times[i].ToString("HH:mm");
+            Check("28.18 每 2 小时 4 个发生点", times.Count.ToString(), "4");
+            Check("28.19 每 2 小时时刻", every2, "11:00/13:00/15:00/17:00");
+
+            var flex = new Settings();
+            flex.mode = "flex";
+            flex.startTime = "09:00";
+            flex.flexMinutes = 480;
+            flex.lunchDeduct = true;
+            flex.lunchStart = "12:00";
+            flex.lunchEnd = "13:00";
+            var flexPlan = Policy.Build(flex, new DateTime(2026, 11, 17));
+            Check("28.20 弹性班次按应勤推算窗口尾",
+                flexPlan.TargetEnd(flexPlan.suggestStart).ToString("HH:mm"), "18:00");
+
+            var restPlan = Policy.Build(s28, new DateTime(2026, 11, 15));
+            Check("28.21 休息日没有发生点", loop.RepeatTimes(restPlan).Count.ToString(), "0");
+
+            var badRepeat = FixedSchedule.Make("bad", "custom", "坏值", "10:00", "", "theme");
+            badRepeat.repeat = "weird";
+            s28.schedules.Add(badRepeat);
+            s28.NormalizeSchedules();
+            Check("28.22 非法 repeat 回退 daily", badRepeat.repeat, "daily");
+
+            var lunch = s28.ScheduleOf("lunch");
+            lunch.repeat = "hourly";
+            s28.NormalizeSchedules();
+            Check("28.23 内置午休不走循环", lunch.repeat, "daily");
+            var off = s28.ScheduleOf("offwork");
+            off.repeat = "every30";
+            s28.NormalizeSchedules();
+            Check("28.24 内置下班不走循环", off.repeat, "daily");
+
+            var eng = new Settings();
+            eng.mode = "fixed";
+            eng.startTime = "09:00";
+            eng.endTime = "18:00";
+            eng.workdays = new bool[] { true, true, true, true, true, true, true };
+            eng.Normalize();
+            foreach (var x in eng.schedules) if (!x.IsOffWork) { x.enabled = false; x.notify = false; }
+            var loopEng = FixedSchedule.Make("eng-loop", "custom", "活动", "10:00", "", "theme");
+            loopEng.repeat = "every30";
+            eng.schedules.Add(loopEng);
+            var engine = new ReminderEngine();
+            var noSnap = new ReminderScheduleSnapshot();
+            var outcome = engine.Advance(eng, noSnap, new DateTime(2026, 11, 17, 9, 30, 5), new ReminderSignals());
+            Check("28.25 09:30 触发循环",
+                outcome.Started + "/" + outcome.Decisions.Count + "/"
+                + (outcome.Decisions.Count > 0 ? outcome.Decisions[0].Reason : "-"),
+                "True/1/fixed-repeat");
+            var evt = outcome.Decisions.Count > 0 ? outcome.Decisions[0].Event : null;
+            Check("28.26 循环提醒标题与内容",
+                evt == null ? "-" : evt.title + "/" + evt.detail + "/" + evt.source + "/" + evt.id,
+                "活动时间到/每 30 分钟提醒 · 上班期间/break/fix:eng-loop");
+            var again = engine.Advance(eng, noSnap, new DateTime(2026, 11, 17, 9, 30, 25), new ReminderSignals());
+            Check("28.27 同一发生点只响一次", again.Started + "/" + again.Decisions.Count, "False/0");
+            var next = engine.Advance(eng, noSnap, new DateTime(2026, 11, 17, 10, 0, 0), new ReminderSignals());
+            Check("28.28 下一个发生点照常", next.Started.ToString(), "True");
+
+            var startEngine = new ReminderEngine();
+            var atStart = startEngine.Advance(eng, noSnap, new DateTime(2026, 11, 17, 9, 0, 0), new ReminderSignals());
+            Check("28.29 窗口起点不触发", atStart.Started.ToString(), "False");
+            var atEnd = startEngine.Advance(eng, noSnap, new DateTime(2026, 11, 17, 18, 0, 0), new ReminderSignals());
+            Check("28.30 窗口终点不触发", atEnd.Started.ToString(), "False");
+            var restEngine = new ReminderEngine();
+            var rest = restEngine.Advance(s28, noSnap, new DateTime(2026, 11, 15, 10, 0, 0), new ReminderSignals());
+            Check("28.31 休息日不触发", rest.Started.ToString(), "False");
+
+            var normal = new ReminderEvent();
+            normal.id = "local:same";
+            normal.source = "local";
+            normal.title = "普通日程";
+            normal.start = "2026-11-17 10:00";
+            eng.events.Add(normal);
+            var sameTickEngine = new ReminderEngine();
+            var same = sameTickEngine.Advance(eng, noSnap, new DateTime(2026, 11, 17, 10, 0, 0), new ReminderSignals());
+            Check("28.32 同刻只起一条且固定循环优先",
+                same.Decisions.Count + "/" + (same.Decisions.Count > 0 ? same.Decisions[0].Event.id : "-"),
+                "1/fix:eng-loop");
+            var after = sameTickEngine.Advance(eng, noSnap, new DateTime(2026, 11, 17, 10, 0, 30), new ReminderSignals());
+            Check("28.33 同刻普通日程下一 tick 再起",
+                after.Decisions.Count + "/" + (after.Decisions.Count > 0 ? after.Decisions[0].Event.id : "-"),
+                "1/local:same");
+
+            var prio = new Settings();
+            prio.mode = "fixed";
+            prio.startTime = "09:00";
+            prio.endTime = "18:00";
+            prio.workdays = new bool[] { true, true, true, true, true, true, true };
+            prio.Normalize();
+            foreach (var x in prio.schedules) if (!x.IsOffWork) { x.enabled = false; x.notify = false; }
+            var daily = FixedSchedule.Make("daily-10", "custom", "站会", "10:00", "", "theme");
+            daily.repeat = "daily";
+            var loopPrio = FixedSchedule.Make("loop-prio", "custom", "活动", "10:00", "", "theme");
+            loopPrio.repeat = "every30";
+            prio.schedules.Add(daily);
+            prio.schedules.Add(loopPrio);
+            var prioEngine = new ReminderEngine();
+            var prioOut = prioEngine.Advance(prio, noSnap, new DateTime(2026, 11, 17, 10, 0, 0), new ReminderSignals());
+            Check("28.34 既有固定开始仍优先于循环",
+                (prioOut.Decisions.Count > 0 ? prioOut.Decisions[0].Reason : "-") + "/"
+                + (prioOut.Decisions.Count > 0 ? prioOut.Decisions[0].Event.id : "-"),
+                "fixed-start/fix:daily-10");
+
+            var skip = new Settings();
+            skip.mode = "fixed";
+            skip.startTime = "09:00";
+            skip.endTime = "18:00";
+            skip.workdays = new bool[] { true, true, true, true, true, true, true };
+            skip.Normalize();
+            foreach (var x in skip.schedules) if (!x.IsOffWork) { x.enabled = false; x.notify = false; }
+            var stretch = FixedSchedule.Make("loop-end", "custom", "拉伸", "09:00", "10:00", "theme");
+            stretch.repeat = "hourly";
+            stretch.endNotify = true;
+            skip.schedules.Add(stretch);
+            var skipEngine = new ReminderEngine();
+            var resume = skipEngine.Advance(skip, noSnap, new DateTime(2026, 11, 17, 9, 30, 0), new ReminderSignals());
+            Check("28.35 循环日程没有中途启动恢复", resume.Started.ToString(), "False");
+            var endOut = skipEngine.Advance(skip, noSnap, new DateTime(2026, 11, 17, 10, 0, 0), new ReminderSignals());
+            Check("28.36 循环日程没有结束提醒",
+                endOut.Decisions.Count > 0 ? endOut.Decisions[0].Event.title : "-", "拉伸时间到");
+        }
+
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURES");
         Environment.Exit(failures == 0 ? 0 : 1);

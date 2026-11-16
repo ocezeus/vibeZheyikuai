@@ -14,7 +14,10 @@ namespace WorkCountdown
     public class SettingsForm : Form
     {
         // 颜色全部放在 Ui（可变 static，由 ApplySkin() 按当前皮肤刷新）；以前这里是 readonly 写死的浅色。
-        private static readonly string[] RepeatIds = new string[] { "daily", "odd", "even" };
+        private static readonly string[] RepeatIds = new string[] { "daily", "odd", "even", "every30", "hourly", "every2h" };
+        private static readonly string[] RepeatBaseIds = new string[] { "daily", "odd", "even" };
+        // 当前下拉对应的值（内置三条只给基础三项，自定义日程才给循环三项）
+        private string[] repeatIdsNow = RepeatBaseIds;
 
         /// <summary>左栏导航宽（DIP）。</summary>
         private const int RailW = 148;
@@ -793,22 +796,20 @@ var e = CardBox(page, "这一条", 8, 224, 492, 214);
             e.Controls.Add(Lbl("重复", 14, 58, 34, 24));
             cmbRepeat = new ComboBox();
             cmbRepeat.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbRepeat.Items.Add("每天");
-            cmbRepeat.Items.Add("单数周");
-            cmbRepeat.Items.Add("双数周");
-            cmbRepeat.SelectedIndex = 0;
-            cmbRepeat.SetBounds(52, 58, 84, 24);
+            cmbRepeat.SelectedIndexChanged += delegate { if (!loadingSched) UpdateSchedState(); };
+            cmbRepeat.SetBounds(52, 58, 160, 24);
+            cmbRepeat.DropDownWidth = 220;      // 循环文案较长，下拉里完整显示
             e.Controls.Add(cmbRepeat);
 
-            e.Controls.Add(Lbl("重复至", 146, 58, 50, 24));
+            e.Controls.Add(Lbl("重复至", 224, 58, 50, 24));
             dpUntil = new DateTimePicker();
             dpUntil.Format = DateTimePickerFormat.Custom;
             dpUntil.CustomFormat = "yyyy-MM-dd";
-            dpUntil.SetBounds(198, 58, 108, 24);
+            dpUntil.SetBounds(276, 58, 108, 24);
             e.Controls.Add(dpUntil);
             cbForever = new CheckBox();
             cbForever.Text = "永久";
-            cbForever.SetBounds(314, 58, 60, 22);
+            cbForever.SetBounds(392, 58, 60, 22);
             cbForever.CheckedChanged += delegate { UpdateSchedState(); };
             e.Controls.Add(cbForever);
 
@@ -882,7 +883,9 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             tbSchedName.Text = on ? f.name : "";
             tbSchedStart.Text = on ? f.start : "";
             tbSchedEnd.Text = on ? f.end : "";
-            cmbRepeat.SelectedIndex = on ? Math.Max(0, Array.IndexOf(RepeatIds, f.repeat)) : 0;
+            FillRepeatCombo(f);
+            int repeatIndex = on ? Array.IndexOf(repeatIdsNow, f.repeat) : 0;
+            cmbRepeat.SelectedIndex = repeatIndex < 0 ? 0 : repeatIndex;
             bool forever = !on || string.IsNullOrWhiteSpace(f.until);
             cbForever.Checked = forever;
             DateTime untilDate = DateTime.Today.AddMonths(3);
@@ -897,24 +900,54 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             string want = on ? f.styleId : "theme";
             for (int i = 0; i < ReminderStyles.Ids.Length; i++)
                 if (ReminderStyles.Ids[i] == want) { cmbSchedStyle.SelectedIndex = i; break; }
-            bool off = on && f.IsOffWork;
-            tbSchedStart.Enabled = on && !off;
-            tbSchedEnd.Enabled = on && !off;
             tbSchedName.Enabled = on;
             cbSchedDeduct.Enabled = on;
-            lblSchedHint.Text = off
-                ? "「下班」按班次算时间（今天 " + OffWorkText() + "），不用填开始；重复规则决定哪天弹「该下班啦」。"
-                : "时间格式 HH:mm。结束留空就只响一次；有结束时间时会一直盖到结束。只在工作日触发。";
             loadingSched = false;
             UpdateSchedState();
         }
 
+        /// <summary>内置三条只给每天/单双周；自定义日程才提供「上班期间循环」三项。</summary>
+        private void FillRepeatCombo(FixedSchedule f)
+        {
+            repeatIdsNow = f != null && f.role == "custom" ? RepeatIds : RepeatBaseIds;
+            cmbRepeat.BeginUpdate();
+            try
+            {
+                cmbRepeat.Items.Clear();
+                for (int i = 0; i < repeatIdsNow.Length; i++)
+                    cmbRepeat.Items.Add(FixedSchedule.RepeatName(repeatIdsNow[i]));
+            }
+            finally { cmbRepeat.EndUpdate(); }
+        }
+
+        private string SelectedRepeatId()
+        {
+            if (cmbRepeat == null || repeatIdsNow == null || cmbRepeat.SelectedIndex < 0
+                || cmbRepeat.SelectedIndex >= repeatIdsNow.Length) return "";
+            return repeatIdsNow[cmbRepeat.SelectedIndex];
+        }
+
         private void UpdateSchedState()
         {
+            if (loadingSched) return;
             bool on = schedIndex >= 0 && schedIndex < s.schedules.Count;
+            FixedSchedule f = on ? s.schedules[schedIndex] : null;
+            bool off = f != null && f.IsOffWork;
+            bool rec = FixedSchedule.RepeatMinutesOf(SelectedRepeatId()) > 0;
             if (dpUntil != null) dpUntil.Enabled = on && !cbForever.Checked;
-            if (cbSchedEndNotify != null && on)
-                cbSchedEndNotify.Enabled = !s.schedules[schedIndex].IsOffWork;
+            if (tbSchedStart != null) tbSchedStart.Enabled = on && !off && !rec;
+            if (tbSchedEnd != null) tbSchedEnd.Enabled = on && !off && !rec;
+            if (cbSchedEndNotify != null) cbSchedEndNotify.Enabled = on && !off && !rec;
+            if (lblSchedHint != null)
+            {
+                if (!on) lblSchedHint.Text = "";
+                else if (off) lblSchedHint.Text = "「下班」按班次算时间（今天 " + OffWorkText()
+                    + "），不用填开始；重复规则决定哪天弹「该下班啦」。";
+                else if (rec) lblSchedHint.Text = "只在工作日、上班期间按间隔提醒（第一次在上班后 "
+                    + Policy.Hm(FixedSchedule.RepeatMinutesOf(SelectedRepeatId()))
+                    + "）；开始/结束时间和结束提醒不参与。";
+                else lblSchedHint.Text = "时间格式 HH:mm。结束留空就只响一次；有结束时间时会一直盖到结束。只在工作日触发。";
+            }
         }
 
         private void StoreSchedEditor()
@@ -928,7 +961,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 f.start = tbSchedStart.Text.Trim();
                 f.end = tbSchedEnd.Text.Trim();
             }
-            f.repeat = RepeatIds[Math.Max(0, cmbRepeat.SelectedIndex)];
+            string repeatId = SelectedRepeatId();
+            f.repeat = repeatId.Length > 0 ? repeatId : "daily";
             f.until = cbForever.Checked ? "" : dpUntil.Value.ToString("yyyy-MM-dd");
             f.enabled = cbSchedOn.Checked;
             f.notify = cbSchedNotify.Checked;
@@ -3843,6 +3877,20 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 return new Rectangle(0, i * Pitch + scroll, w, RowH);
             }
 
+            /// <summary>一行的副标题：列表绘制和验收共用，循环日程只显示 RepeatLabel。</summary>
+            public string SubTextOf(int i)
+            {
+                if (i < 0 || i >= items.Count) return "";
+                FixedSchedule f = items[i];
+                if (f == null) return "";
+                string sub;
+                if (f.IsOffWork) sub = "按班次下班时间 · " + f.RepeatLabel;
+                else if (f.IsRecurring) sub = f.RepeatLabel;
+                else sub = f.start + (string.IsNullOrWhiteSpace(f.end) ? "" : "–" + f.end) + " · " + f.RepeatLabel;
+                if (!f.notify) sub += " · 不提醒";
+                return sub;
+            }
+
             private Rectangle ThumbRect()
             {
                 int h = Height * Height / Math.Max(1, ContentH);
@@ -3888,10 +3936,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                         if (!f.enabled) title += "  · 已停用";
                         using (var br = new SolidBrush(f.enabled ? Ui.RowText : Ui.Dim))
                             g.DrawString(title, fName, br, tx, r.Y + (int)Math.Round(4 * k));
-                        string sub = f.IsOffWork
-                            ? "按班次下班时间 · " + f.RepeatLabel
-                            : f.start + (string.IsNullOrWhiteSpace(f.end) ? "" : "–" + f.end) + " · " + f.RepeatLabel;
-                        if (!f.notify) sub += " · 不提醒";
+                        string sub = SubTextOf(i);
                         using (var br = new SolidBrush(Ui.RowSub))
                             g.DrawString(sub, fSub, br, tx, r.Y + (int)Math.Round(24 * k));
                     }

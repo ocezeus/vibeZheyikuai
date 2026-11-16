@@ -1259,9 +1259,14 @@ class Check
                     draft.schedules[index].name + " " + draft.schedules[index].start);
 
                 var cmbRepeat = (ComboBox)Get(dlg, "cmbRepeat");
-                Ok("重复下拉是每天/单数周/双数周",
-                    cmbRepeat.Items.Count == 3 && cmbRepeat.Items[1].ToString() == "单数周",
-                    string.Join("/", new string[] { cmbRepeat.Items[0].ToString(), cmbRepeat.Items[1].ToString(), cmbRepeat.Items[2].ToString() }));
+                Ok("重复下拉是每天/单数周/双数周 + 三种上班期间循环",
+                    cmbRepeat.Items.Count == 6 && cmbRepeat.Items[1].ToString() == "单数周"
+                    && cmbRepeat.Items[3].ToString() == "每 30 分钟（上班期间）"
+                    && cmbRepeat.Items[4].ToString() == "每小时（上班期间）"
+                    && cmbRepeat.Items[5].ToString() == "每 2 小时（上班期间）",
+                    string.Join("/", new string[] { cmbRepeat.Items[0].ToString(), cmbRepeat.Items[1].ToString(),
+                        cmbRepeat.Items[2].ToString(), cmbRepeat.Items[3].ToString(), cmbRepeat.Items[4].ToString(),
+                        cmbRepeat.Items[5].ToString() }));
 
                 var tabs = (TabControl)Get(dlg, "tabs");
                 Ok("七个页签", tabs.TabPages.Count == 7,
@@ -4427,6 +4432,97 @@ class Check
                     live.clockOutLocal);
                 Ok("本地下班后卡片进入已下班", st != null && st.state.ToString() == "Done",
                     st == null ? "status=null" : st.state.ToString());
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+        // ---- 固定日程循环：设置页选项 / 列表文案 / 引擎推进后卡片出现提醒 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.mode = "fixed";
+            s.startTime = "09:00";
+            s.endTime = "18:00";
+            s.workdays = new bool[] { true, true, true, true, true, true, true };
+            s.NormalizeSchedules();
+            var loop = FixedSchedule.Make("check-loop", "custom", "活动", "10:00", "", "theme");
+            loop.repeat = "every30";
+            s.schedules.Add(loop);
+
+            using (var dlg = new SettingsForm(new SettingsStore(), s))
+            {
+                var draft = (Settings)Get(dlg, "s");
+                var list = (ScheduleList)Get(dlg, "listSched");
+                var cmb = (ComboBox)Get(dlg, "cmbRepeat");
+                int idx = -1;
+                for (int i = 0; i < draft.schedules.Count; i++) if (draft.schedules[i].id == "check-loop") idx = i;
+                Call(dlg, "SelectSched", idx);
+                Ok("自定义固定日程的重复下拉能选到三种循环",
+                    cmb.Items.Count == 6 && cmb.SelectedItem.ToString() == "每 30 分钟（上班期间）",
+                    "items=" + cmb.Items.Count + " selected=" + cmb.SelectedItem);
+                Ok("列表行用 RepeatLabel 显示循环",
+                    list.SubTextOf(idx).Contains("每 30 分钟（上班期间）"), list.SubTextOf(idx));
+                Ok("循环模式下开始/结束/结束提醒禁用",
+                    !((TextBox)Get(dlg, "tbSchedStart")).Enabled
+                    && !((TextBox)Get(dlg, "tbSchedEnd")).Enabled
+                    && !((CheckBox)Get(dlg, "cbSchedEndNotify")).Enabled,
+                    "start=" + ((TextBox)Get(dlg, "tbSchedStart")).Enabled
+                    + " end=" + ((TextBox)Get(dlg, "tbSchedEnd")).Enabled
+                    + " endNotify=" + ((CheckBox)Get(dlg, "cbSchedEndNotify")).Enabled);
+
+                cmb.SelectedIndex = 4;      // 每小时
+                Call(dlg, "StoreSchedEditor");
+                Ok("选每小时写回草稿", draft.schedules[idx].repeat == "hourly",
+                    draft.schedules[idx].repeat);
+                Ok("循环提示说明只在上班期间",
+                    ((Label)Get(dlg, "lblSchedHint")).Text.IndexOf("上班期间", StringComparison.Ordinal) >= 0,
+                    ((Label)Get(dlg, "lblSchedHint")).Text);
+
+                Call(dlg, "SelectSched", 0);   // 内置午休
+                Ok("内置午休不提供循环选项",
+                    cmb.Items.Count == 3 && cmb.Items.IndexOf("每 30 分钟（上班期间）") < 0,
+                    "items=" + cmb.Items.Count);
+                Call(dlg, "SelectSched", idx);
+                cmb.SelectedIndex = 0;         // 改回每天
+                Ok("改回每天后开始/结束控件恢复",
+                    ((TextBox)Get(dlg, "tbSchedStart")).Enabled && ((TextBox)Get(dlg, "tbSchedEnd")).Enabled,
+                    "start=" + ((TextBox)Get(dlg, "tbSchedStart")).Enabled
+                    + " end=" + ((TextBox)Get(dlg, "tbSchedEnd")).Enabled);
+            }
+
+            var eng = new Settings();
+            eng.lark.enabled = false;
+            eng.calendarEnabled = false;
+            eng.mode = "fixed";
+            eng.startTime = "09:00";
+            eng.endTime = "18:00";
+            eng.workdays = new bool[] { true, true, true, true, true, true, true };
+            eng.ui.edge = "free";
+            eng.ui.reducedMotion = true;
+            eng.Normalize();
+            foreach (var f in eng.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
+            var uiLoop = FixedSchedule.Make("ui-loop", "custom", "活动", "10:00", "", "theme");
+            uiLoop.repeat = "every30";
+            eng.schedules.Add(uiLoop);
+            using (var form = new WidgetForm(new SettingsStore(), eng))
+            {
+                Set(form, "status", null);
+                Set(form, "reminding", false);
+                DateTime at = DateTime.Today.AddHours(9).AddMinutes(30).AddSeconds(5);
+                object moved = Call(form, "AdvanceReminders", at);
+                var ev = (ReminderEvent)Get(form, "remindEvent");
+                Ok("引擎推进后卡片出现循环提醒",
+                    (bool)moved && ev != null && ev.title == "活动时间到" && ev.source == "break",
+                    "moved=" + moved + " title=" + (ev == null ? "null" : ev.title));
+                var schedOf = ev == null ? null : (FixedSchedule)Call(form, "FixedOf", ev);
+                Ok("循环提醒沿用这条日程的配色",
+                    schedOf != null && schedOf.styleId == "theme",
+                    schedOf == null ? "找不到日程" : schedOf.styleId);
+
+                Set(form, "reminding", false);
+                object again = Call(form, "AdvanceReminders", at.AddSeconds(20));
+                Ok("同一发生点不重复弹出", !(bool)again, "again=" + again);
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
         }

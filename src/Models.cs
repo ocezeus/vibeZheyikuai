@@ -1231,7 +1231,7 @@ namespace WorkCountdown
         public string role { get; set; }        // lunch | evening | offwork | custom
         public string start { get; set; }       // "11:50"；下班为空（按班次算）
         public string end { get; set; }         // "13:30"；空 = 只响一次
-        public string repeat { get; set; }      // daily | odd | even
+        public string repeat { get; set; }      // daily | odd | even | every30 | hourly | every2h
         public string until { get; set; }       // "2026-12-31"；空 = 一直重复
         public bool enabled { get; set; }
         public bool notify { get; set; }        // 到点弹提醒
@@ -1261,14 +1261,60 @@ namespace WorkCountdown
         [ScriptIgnore]      // 算出来的，不进 JSON
         public bool IsOffWork { get { return role == "offwork"; } }
 
+        /// <summary>循环间隔（分钟）：30 / 60 / 120；0 表示不是循环日程。</summary>
+        public static int RepeatMinutesOf(string repeat)
+        {
+            if (repeat == "every30") return 30;
+            if (repeat == "hourly") return 60;
+            if (repeat == "every2h") return 120;
+            return 0;
+        }
+
+        [ScriptIgnore]
+        public int RepeatMinutes
+        {
+            get { return RepeatMinutesOf(repeat); }
+        }
+
+        /// <summary>是不是「上班期间按间隔提醒」的循环日程。</summary>
+        [ScriptIgnore]
+        public bool IsRecurring
+        {
+            get { return RepeatMinutes > 0; }
+        }
+
+        /// <summary>重复规则的人话（不含截止日期），设置页下拉和列表共用。</summary>
+        public static string RepeatName(string repeat)
+        {
+            if (repeat == "odd") return "单数周";
+            if (repeat == "even") return "双数周";
+            if (repeat == "every30") return "每 30 分钟（上班期间）";
+            if (repeat == "hourly") return "每小时（上班期间）";
+            if (repeat == "every2h") return "每 2 小时（上班期间）";
+            return "每天";
+        }
+
         [ScriptIgnore]
         public string RepeatLabel
         {
             get
             {
-                string r = repeat == "odd" ? "单数周" : repeat == "even" ? "双数周" : "每天";
+                string r = RepeatName(repeat);
                 if (!string.IsNullOrWhiteSpace(until)) r += "，至 " + until;
                 return r;
+            }
+        }
+
+        /// <summary>循环提醒的正文；普通日程返回空串。</summary>
+        [ScriptIgnore]
+        public string RepeatDetail
+        {
+            get
+            {
+                if (repeat == "every30") return "每 30 分钟提醒 · 上班期间";
+                if (repeat == "hourly") return "每小时提醒 · 上班期间";
+                if (repeat == "every2h") return "每 2 小时提醒 · 上班期间";
+                return "";
             }
         }
 
@@ -1303,6 +1349,28 @@ namespace WorkCountdown
             int m;
             if (!SettingsExtensions.TryParseTime(end, out m)) return DateTime.MinValue;
             return day.Date.AddMinutes(m);
+        }
+
+        /// <summary>
+        /// 循环日程在「上班窗口」里的发生点：从 DayPlan.suggestStart 到
+        /// DayPlan.TargetEnd(suggestStart)，起点本身不算，终点也不含。
+        /// 固定班次窗口就是班次起止；弹性班次按上班时间 + 应勤时长推算。
+        /// 休息日返回空列表。
+        /// </summary>
+        public List<DateTime> RepeatTimes(DayPlan plan)
+        {
+            var list = new List<DateTime>();
+            int step = RepeatMinutes;
+            if (step <= 0 || plan == null || !plan.isWorkday) return list;
+            DateTime start = plan.suggestStart;
+            DateTime end = plan.TargetEnd(start);
+            if (end <= start) return list;
+            for (DateTime t = start.AddMinutes(step); t < end; t = t.AddMinutes(step))
+            {
+                list.Add(t);
+                if (list.Count > 5000) break;      // 防御坏配置，正常一天最多几十个
+            }
+            return list;
         }
 
         public FixedSchedule Clone()
@@ -1550,7 +1618,10 @@ namespace WorkCountdown
                 seen.Add(f.id);
                 if (f.role != "lunch" && f.role != "evening" && f.role != "offwork") f.role = "custom";
                 if (string.IsNullOrWhiteSpace(f.name)) f.name = f.role == "lunch" ? "午休" : f.role == "evening" ? "晚休" : f.role == "offwork" ? "下班" : "固定日程";
-                if (f.repeat != "daily" && f.repeat != "odd" && f.repeat != "even") f.repeat = "daily";
+                if (f.repeat != "daily" && f.repeat != "odd" && f.repeat != "even"
+                    && f.repeat != "every30" && f.repeat != "hourly" && f.repeat != "every2h") f.repeat = "daily";
+                // 午休 / 晚休 / 下班是内置语义，不参与「上班期间循环」，旧配置里混进来的循环值一律拉回每天
+                if (f.IsRecurring && f.role != "custom") f.repeat = "daily";
                 if (f.until == null) f.until = "";
                 f.styleId = ReminderStyles.Normalize(f.styleId, "theme");
                 if (f.role == "offwork") { f.start = ""; f.end = ""; }
