@@ -1,4 +1,4 @@
-param(
+﻿param(
 [string]$Version = '4.1.0',
 [switch]$NoPublish
 )

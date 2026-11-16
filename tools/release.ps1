@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     上班工具箱：把 dist 里打好的 zip / exe 提交、推送到 GitHub，并发布成 Release。
 
