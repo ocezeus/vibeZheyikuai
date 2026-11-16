@@ -1,0 +1,370 @@
+/* ==========================================================================
+   上班工具箱 · 五套主题（皮肤）令牌
+   切主题 = 给 <body> 设 data-theme：quiet / mica / paper / instrument / neon
+   每个块里的变量覆盖 packs.css 的通用结构，另加少量该主题特有的画法。
+   ========================================================================== */
+
+:root{
+  --grainImg:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  --fUI:"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+  --fNum:"Consolas","SFMono-Regular",monospace;
+  --fDisplay:var(--fUI);
+}
+
+/* ========================================================================
+   01 · 无垠 Quiet —— 近黑、细线、等宽数字、无光效：去装饰，只留层次
+   ======================================================================== */
+[data-theme="quiet"]{
+  --wall:
+    radial-gradient(95% 70% at 82% 2%,#161C28 0%,#0D1016 44%,#080A0D 100%),
+    radial-gradient(58% 46% at 8% 96%,rgba(120,135,170,.10),transparent 62%),
+    linear-gradient(180deg,#0B0D12,#08090C);
+  --grain:.10; --vig:rgba(0,0,0,.55);
+  --wallTx:rgba(235,240,248,.42); --wallTx2:rgba(235,240,248,.70);
+
+  --bg1:#12151A; --bg2:#171B21;
+  --tx:#E9ECF1; --mu:#929AA7; --dm:#666E7B;
+  --ac:#96A9FF; --ac2:#CFD6E4; --acSoft:rgba(150,169,255,.13); --acTx:#0A0C12;
+  --trk:rgba(255,255,255,.09);
+  --line:rgba(255,255,255,.085); --line2:rgba(255,255,255,.055); --hover:rgba(255,255,255,.05);
+
+  --cardBorder:1px solid rgba(255,255,255,.075);
+  --cardSheen:linear-gradient(180deg,rgba(255,255,255,.045),transparent 34%);
+  --shCard:0 20px 46px rgba(0,0,0,.52),inset 0 1px 0 rgba(255,255,255,.045);
+  --dotGlow:0 0 8px rgba(150,169,255,.55);
+  --numColor:#F1F3F7; --numShadow:none; --numW:700; --numLs:.4px;
+  --progH:2px; --progR:2px; --progFill:#D9DEE7; --progGlow:none;
+  --flow:rgba(255,255,255,.9); --flowA:0; --cprogH:2px;
+
+  --remBorder:1px solid rgba(255,255,255,.08);
+  --remA:linear-gradient(180deg,#232936,#1B212C); --remB:#161B24;
+  --remTx:#F0F3F8; --remTx2:#9BA4B1; --remStrong:#E9ECF1;
+  --remEyebrow:rgba(150,169,255,.72); --remX:rgba(240,243,248,.45); --remSub:#AEB6C4; --remSubStrong:#E9ECF1;
+
+  --rCard:10px; --rWin:14px; --rCard2:10px; --rBtn:7px; --rPill:8px; --rPanel:12px; --rTile:6px; --rBub:8px; --rInput:8px;
+
+  --setBg:#101318; --setBorder:1px solid rgba(255,255,255,.08);
+  --setSheen:none; --shWin:0 34px 90px rgba(0,0,0,.60),inset 0 1px 0 rgba(255,255,255,.05);
+  --railBg:transparent; --cardBg:rgba(255,255,255,.022); --scBorder:1px solid rgba(255,255,255,.055);
+  --sealA:0; --sealBg:transparent; --sealTx:transparent; --footBg:transparent;
+  --segBg:rgba(255,255,255,.04); --segOn:rgba(255,255,255,.10); --segOnTx:#E9ECF1; --segShadow:none;
+  --inputBg:rgba(255,255,255,.03);
+  --knob:#E9ECF1; --knobBorder:none; --knobShadow:0 1px 3px rgba(0,0,0,.5);
+  --swOff:rgba(255,255,255,.10); --swBorder:none; --swKnob:#8E97A5; --swKnobShadow:none;
+  --chipBg:rgba(255,255,255,.03); --iconGlow:none;
+
+  --noteBg:#111419; --noteBorder:1px solid rgba(255,255,255,.08);
+  --pillBg:transparent; --conBg:transparent; --conBorder:1px solid rgba(255,255,255,.07);
+  --bubIn:transparent; --bubInBorder:1px solid rgba(255,255,255,.10);
+  --bubOut:rgba(255,255,255,.10); --bubOutTx:#E9ECF1; --bubOutBorder:none;
+  --inBg:transparent; --inBorder:1px solid rgba(255,255,255,.10); --sendGlow:none;
+
+  --surf:#101318; --bubBorder:1px solid rgba(255,255,255,.09);
+  --bubShadow:0 16px 34px rgba(0,0,0,.50); --bubShadowOn:0 18px 38px rgba(0,0,0,.55);
+}
+[data-theme="quiet"] .lb{letter-spacing:.14em}
+[data-theme="quiet"] .set-head h3{font-weight:600;letter-spacing:.02em}
+[data-theme="quiet"] .ri.on{background:rgba(255,255,255,.055)}
+[data-theme="quiet"] .ri.on::before{width:1.5px;opacity:.8}
+[data-theme="quiet"] .sc{background:transparent;border:none;border-top:1px solid var(--line2);border-radius:0;padding:12px 2px 4px;margin-bottom:7px}
+[data-theme="quiet"] .sc:first-child{border-top:none;padding-top:2px}
+[data-theme="quiet"] .sc h4{color:var(--mu);font-size:10.5px;letter-spacing:.06em}
+[data-theme="quiet"] .tile{border-radius:5px}
+[data-theme="quiet"] .bp{border-radius:8px}
+[data-theme="quiet"] .num{font-feature-settings:"tnum"}
+[data-theme="quiet"] .card::after{opacity:.8}
+
+/* ========================================================================
+   02 · 云母 Mica —— 半透明磨砂玻璃：桌面从卡片后面透进来
+   ======================================================================== */
+[data-theme="mica"]{
+  --wall:
+    radial-gradient(52% 42% at 15% 4%,rgba(74,124,255,.42),transparent 62%),
+    radial-gradient(46% 38% at 88% 84%,rgba(255,88,180,.30),transparent 64%),
+    radial-gradient(62% 46% at 52% 110%,rgba(40,210,220,.22),transparent 66%),
+    linear-gradient(115deg,transparent 42%,rgba(255,255,255,.07) 49%,transparent 57%),
+    linear-gradient(160deg,#0B1222 0%,#0C0C1B 56%,#150B1E 100%);
+  --grain:.16; --vig:rgba(2,4,10,.48);
+  --wallTx:rgba(240,246,255,.45); --wallTx2:rgba(240,246,255,.78);
+
+  --bg1:rgba(22,29,44,.60); --bg2:rgba(16,21,33,.60);
+  --tx:#F3F7FF; --mu:#AAB8D0; --dm:#7E8DA6;
+  --ac:#6EA8FE; --ac2:#9BD1FF; --acSoft:rgba(110,168,254,.16); --acTx:#06101F;
+  --trk:rgba(255,255,255,.14);
+  --line:rgba(255,255,255,.16); --line2:rgba(255,255,255,.09); --hover:rgba(255,255,255,.08);
+
+  --cardBorder:1px solid rgba(255,255,255,.16);
+  --cardSheen:linear-gradient(180deg,rgba(255,255,255,.15),rgba(255,255,255,.02) 30%,transparent 52%);
+  --shCard:0 26px 60px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.18);
+  --dotGlow:0 0 10px rgba(110,168,254,.8);
+  --numColor:#FBFDFF; --numShadow:0 0 22px rgba(120,170,255,.26); --numW:700; --numLs:.5px;
+  --progH:5px; --progR:3px;
+  --progFill:linear-gradient(90deg,#4E8CFF,#8CC8FF); --progGlow:0 0 14px rgba(110,168,254,.6);
+  --flow:rgba(255,255,255,.75); --flowA:.55; --cprogH:3px;
+
+  --remBorder:1px solid rgba(255,255,255,.18);
+  --remA:linear-gradient(180deg,rgba(58,96,180,.55),rgba(38,64,128,.55)); --remB:rgba(18,24,38,.55);
+  --remTx:#F4F8FF; --remTx2:#AAB8D0; --remStrong:#FFFFFF;
+  --remEyebrow:rgba(255,255,255,.72); --remX:rgba(255,255,255,.7); --remSub:#C6D4E8; --remSubStrong:#FFFFFF;
+
+  --rCard:18px; --rWin:20px; --rCard2:14px; --rBtn:8px; --rPill:17px; --rPanel:16px; --rTile:8px; --rBub:13px; --rInput:11px;
+
+  --setBg:rgba(18,24,38,.55); --setBorder:1px solid rgba(255,255,255,.16);
+  --setSheen:linear-gradient(180deg,rgba(255,255,255,.10),transparent 32%);
+  --shWin:0 40px 100px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.16);
+  --railBg:rgba(10,14,24,.22); --cardBg:rgba(255,255,255,.045); --scBorder:1px solid rgba(255,255,255,.10);
+  --sealA:0; --sealBg:transparent; --sealTx:transparent; --footBg:rgba(255,255,255,.028);
+  --segBg:rgba(255,255,255,.06); --segOn:rgba(255,255,255,.15); --segOnTx:#F3F7FF;
+  --segShadow:inset 0 1px 0 rgba(255,255,255,.16);
+  --inputBg:rgba(255,255,255,.05);
+  --knob:#FFFFFF; --knobBorder:none; --knobShadow:0 1px 4px rgba(0,0,0,.4);
+  --swOff:rgba(255,255,255,.18); --swBorder:none; --swKnob:#C8D6EC; --swKnobShadow:none;
+  --chipBg:rgba(255,255,255,.05); --iconGlow:0 0 8px rgba(110,168,254,.5);
+
+  --noteBg:rgba(18,24,38,.55); --noteBorder:1px solid rgba(255,255,255,.16);
+  --pillBg:rgba(255,255,255,.06); --conBg:rgba(255,255,255,.06); --conBorder:1px solid rgba(255,255,255,.10);
+  --bubIn:rgba(255,255,255,.08); --bubInBorder:1px solid rgba(255,255,255,.10);
+  --bubOut:linear-gradient(135deg,#4E8CFF,#7FB4FF); --bubOutTx:#06101F; --bubOutBorder:none;
+  --inBg:rgba(255,255,255,.05); --inBorder:1px solid rgba(255,255,255,.14); --sendGlow:0 0 14px rgba(110,168,254,.5);
+
+  --surf:rgba(22,28,42,.72); --bubBorder:1px solid rgba(255,255,255,.16);
+  --bubShadow:0 18px 40px rgba(0,0,0,.45);
+  --bubShadowOn:0 18px 44px rgba(0,0,0,.5),0 0 0 1px rgba(110,168,254,.35);
+}
+[data-theme="mica"] .card,
+[data-theme="mica"] .cbar,
+[data-theme="mica"] .sal,
+[data-theme="mica"] .set,
+[data-theme="mica"] .note,
+[data-theme="mica"] .bp,
+[data-theme="mica"] .bpanel{
+  -webkit-backdrop-filter:blur(22px) saturate(1.45);
+  backdrop-filter:blur(22px) saturate(1.45);
+}
+[data-theme="mica"] .rem .a{-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+[data-theme="mica"] .set::before{opacity:.9}
+
+/* ========================================================================
+   03 · 宣纸 Ink —— 浅色宣纸 + 墨色字 + 朱砂一点：白天最舒服
+   ======================================================================== */
+[data-theme="paper"]{
+  --wall:
+    radial-gradient(72% 56% at 12% 0%,#F9F4E8 0%,#EFE6D4 54%,#E8DCC6 100%),
+    radial-gradient(52% 40% at 92% 98%,rgba(118,102,76,.24),transparent 62%),
+    linear-gradient(115deg,rgba(255,255,255,.45) 0 28%,transparent 62%);
+  --grain:.20; --vig:rgba(120,100,70,.18);
+  --wallTx:rgba(72,60,44,.50); --wallTx2:rgba(72,60,44,.78);
+
+  --bg1:#FDFAF2; --bg2:#F6EFE0;
+  --tx:#2F2A24; --mu:#7C6F5D; --dm:#A4967F;
+  --ac:#B23A2C; --ac2:#35544F; --acSoft:rgba(178,58,44,.09); --acTx:#FFF9F0;
+  --trk:#E4D9C3;
+  --line:#E2D7C2; --line2:#EAE1CF; --hover:rgba(120,95,55,.06);
+
+  --cardBorder:1px solid #E0D5BF;
+  --cardSheen:linear-gradient(180deg,rgba(255,255,255,.72),transparent 42%);
+  --shCard:0 18px 34px rgba(96,76,44,.16),inset 0 1px 0 #FFFFFF;
+  --dotGlow:0 0 0 3px rgba(178,58,44,.10);
+  --numColor:#2C2721; --numShadow:none; --numW:700; --numLs:.4px;
+  --progH:3px; --progR:2px;
+  --progFill:linear-gradient(90deg,#C4523F,#B23A2C); --progGlow:none;
+  --flow:rgba(255,255,255,.7); --flowA:0; --cprogH:2.5px;
+
+  --remBorder:1px solid #E0D5BF;
+  --remA:linear-gradient(180deg,#3E5F56,#35544C); --remB:#EFE5D1;
+  --remTx:#F6F1E4; --remTx2:#5E5344; --remStrong:#3A3128;
+  --remEyebrow:rgba(246,241,228,.75); --remX:rgba(246,241,228,.8); --remSub:rgba(246,241,228,.78); --remSubStrong:#FFF9EE;
+
+  --rCard:5px; --rWin:8px; --rCard2:7px; --rBtn:5px; --rPill:13px; --rPanel:10px; --rTile:5px; --rBub:10px; --rInput:9px;
+
+  --setBg:#FAF5EA; --setBorder:1px solid #E2D7C2;
+  --setSheen:linear-gradient(180deg,rgba(255,255,255,.5),transparent 34%);
+  --shWin:0 34px 70px rgba(96,76,44,.22),inset 0 1px 0 #FFFFFF;
+  --railBg:#F4EDDD; --cardBg:rgba(255,255,255,.55); --scBorder:1px solid #E7DDC9;
+  --sealA:1; --sealBg:#B23A2C; --sealTx:#FFF6EC; --footBg:rgba(255,255,255,.35);
+  --segBg:rgba(120,95,55,.07); --segOn:#FFFFFF; --segOnTx:#2F2A24;
+  --segShadow:0 1px 2px rgba(96,76,44,.14);
+  --inputBg:rgba(255,255,255,.6);
+  --knob:#B23A2C; --knobBorder:none; --knobShadow:0 1px 2px rgba(96,76,44,.3);
+  --swOff:rgba(120,95,55,.18); --swBorder:1px solid #D9CCB4; --swKnob:#FFFFFF; --swKnobShadow:0 1px 2px rgba(0,0,0,.22);
+  --chipBg:rgba(255,255,255,.5); --iconGlow:none;
+
+  --noteBg:#FBF6EA; --noteBorder:1px solid #E2D7C2;
+  --pillBg:rgba(255,255,255,.55); --conBg:rgba(120,95,55,.06); --conBorder:1px solid #E3D8C2;
+  --bubIn:#F2E9D6; --bubInBorder:1px solid #E3D8C2;
+  --bubOut:#B23A2C; --bubOutTx:#FFF6EC; --bubOutBorder:none;
+  --inBg:rgba(255,255,255,.6); --inBorder:1px solid #E0D5BF; --sendGlow:none;
+
+  --surf:#FBF6EA; --bubBorder:1px solid #E0D5BF;
+  --bubShadow:0 14px 30px rgba(96,76,44,.20);
+  --bubShadowOn:0 14px 30px rgba(96,76,44,.24),0 0 0 1px rgba(178,58,44,.35);
+
+  --fDisplay:"Noto Serif SC","Songti SC","SimSun",serif;
+}
+[data-theme="paper"] .set-head h3,
+[data-theme="paper"] .sc h4,
+[data-theme="paper"] .nh .tt b{font-family:var(--fDisplay);font-weight:600;letter-spacing:.04em}
+[data-theme="paper"] .set-head h3{font-size:18px}
+[data-theme="paper"] .num{font-family:"Consolas",monospace}
+[data-theme="paper"] .card::after,
+[data-theme="paper"] .cbar::after,
+[data-theme="paper"] .sal::after{opacity:.9}
+[data-theme="paper"] .sc:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:repeating-linear-gradient(90deg,#E7DDC9 0 3px,transparent 3px 6px);opacity:.5}
+[data-theme="paper"] .sc{overflow:hidden}
+[data-theme="paper"] .ri.on{background:rgba(178,58,44,.08)}
+[data-theme="paper"] .ri.on::before{border-radius:0;width:3px}
+[data-theme="paper"] .btn.primary{box-shadow:0 1px 0 rgba(255,255,255,.25) inset,0 2px 6px rgba(178,58,44,.22)}
+
+/* ========================================================================
+   04 · 仪表 Instrument —— 金属壳 + 琥珀数码 + 分刻刻度：像一台倒计时装置
+   ======================================================================== */
+[data-theme="instrument"]{
+  --wall:
+    radial-gradient(80% 60% at 50% -6%,#23251F 0%,#151613 48%,#0C0D0B 100%),
+    radial-gradient(54% 42% at 20% 0%,rgba(255,176,46,.07),transparent 62%),
+    repeating-linear-gradient(0deg,rgba(255,255,255,.016) 0 1px,transparent 1px 4px);
+  --grain:.18; --vig:rgba(0,0,0,.62);
+  --wallTx:rgba(232,226,206,.42); --wallTx2:rgba(232,226,206,.78);
+
+  --bg1:#1E1F1A; --bg2:#232420;
+  --tx:#EDE7D6; --mu:#ACA48E; --dm:#7A735E;
+  --ac:#FFB02E; --ac2:#8FD3A5; --acSoft:rgba(255,176,46,.13); --acTx:#241A05;
+  --trk:repeating-linear-gradient(90deg,rgba(255,255,255,.11) 0 6px,transparent 6px 9px);
+  --line:#45463A; --line2:#35362C; --hover:rgba(255,255,255,.05);
+
+  --cardBorder:1px solid #3E3F35;
+  --cardSheen:linear-gradient(180deg,rgba(255,255,255,.07),transparent 24%,rgba(0,0,0,.18) 100%);
+  --shCard:0 18px 36px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.08),inset 0 -1px 0 rgba(0,0,0,.6);
+  --dotGlow:0 0 10px rgba(255,176,46,.8);
+  --numColor:#FFC24A; --numShadow:0 0 16px rgba(255,176,46,.45); --numW:700; --numLs:1.5px;
+  --progH:8px; --progR:1px;
+  --progFill:repeating-linear-gradient(90deg,#FFB02E 0 6px,rgba(255,176,46,.14) 6px 9px);
+  --progGlow:0 0 10px rgba(255,176,46,.28);
+  --flow:rgba(255,224,150,.8); --flowA:0; --cprogH:5px;
+
+  --remBorder:1px solid #3E3F35;
+  --remA:linear-gradient(180deg,#D99A1F,#C18612); --remB:#26271F;
+  --remTx:#2A1E04; --remTx2:#C6BFA8; --remStrong:#FFCE5C;
+  --remEyebrow:rgba(42,30,4,.72); --remX:rgba(42,30,4,.7); --remSub:rgba(42,30,4,.70); --remSubStrong:#2A1E04;
+
+  --rCard:6px; --rWin:10px; --rCard2:6px; --rBtn:4px; --rPill:4px; --rPanel:6px; --rTile:4px; --rBub:6px; --rInput:5px;
+
+  --setBg:#1A1B17; --setBorder:1px solid #3A3B30;
+  --setSheen:linear-gradient(180deg,rgba(255,255,255,.05),transparent 28%);
+  --shWin:0 34px 80px rgba(0,0,0,.60),inset 0 1px 0 rgba(255,255,255,.06);
+  --railBg:#161713; --cardBg:rgba(255,255,255,.022); --scBorder:1px solid #34352B;
+  --sealA:0; --sealBg:transparent; --sealTx:transparent; --footBg:#161713;
+  --segBg:rgba(255,255,255,.05); --segOn:rgba(255,176,46,.16); --segOnTx:#FFD98A;
+  --segShadow:inset 0 0 0 1px rgba(255,176,46,.35);
+  --inputBg:rgba(0,0,0,.25);
+  --knob:#FFB02E; --knobBorder:none; --knobShadow:0 0 8px rgba(255,176,46,.6);
+  --swOff:rgba(255,255,255,.10); --swBorder:1px solid #3E3F35; --swKnob:#C9C2AC; --swKnobShadow:none;
+  --chipBg:rgba(255,255,255,.03); --iconGlow:none;
+
+  --noteBg:#1A1B17; --noteBorder:1px solid #3A3B30;
+  --pillBg:rgba(255,255,255,.03); --conBg:rgba(255,255,255,.04); --conBorder:1px solid #35362C;
+  --bubIn:#23241E; --bubInBorder:1px solid #3B3C31;
+  --bubOut:rgba(255,176,46,.14); --bubOutTx:#FFD98A; --bubOutBorder:1px solid rgba(255,176,46,.40);
+  --inBg:rgba(0,0,0,.25); --inBorder:1px solid #3E3F35; --sendGlow:0 0 12px rgba(255,176,46,.45);
+
+  --surf:rgba(26,27,23,.96); --bubBorder:1px solid #3B3C31;
+  --bubShadow:0 16px 34px rgba(0,0,0,.55);
+  --bubShadowOn:0 16px 34px rgba(0,0,0,.60),0 0 0 1px rgba(255,176,46,.35);
+
+  --fDisplay:"Bahnschrift","PingFang SC","Microsoft YaHei",sans-serif;
+}
+[data-theme="instrument"] .lb{letter-spacing:.18em}
+[data-theme="instrument"] .card::before,
+[data-theme="instrument"] .cbar::before,
+[data-theme="instrument"] .sal::before{
+  content:"";position:absolute;inset:5px;border-radius:inherit;pointer-events:none;opacity:.9;
+  background:
+    radial-gradient(circle 2.6px at 4px 4px,#5B5C4A 0 1.4px,#23241C 1.5px 2.5px,transparent 2.6px),
+    radial-gradient(circle 2.6px at calc(100% - 4px) 4px,#5B5C4A 0 1.4px,#23241C 1.5px 2.5px,transparent 2.6px),
+    radial-gradient(circle 2.6px at 4px calc(100% - 4px),#5B5C4A 0 1.4px,#23241C 1.5px 2.5px,transparent 2.6px),
+    radial-gradient(circle 2.6px at calc(100% - 4px) calc(100% - 4px),#5B5C4A 0 1.4px,#23241C 1.5px 2.5px,transparent 2.6px);
+}
+[data-theme="instrument"] .set-head h3,
+[data-theme="instrument"] .sc h4{letter-spacing:.06em;font-weight:600}
+[data-theme="instrument"] .sc h4{font-size:10.5px;color:var(--mu)}
+[data-theme="instrument"] .sc h4::before{content:"";width:4px;height:4px;border-radius:50%;background:var(--ac);box-shadow:0 0 6px rgba(255,176,46,.8)}
+[data-theme="instrument"] .set-head h3{font-size:18px}
+[data-theme="instrument"] .ri{letter-spacing:.04em}
+[data-theme="instrument"] .verchip{color:#FFD98A;border-color:#45463A}
+[data-theme="instrument"] .num{padding-left:2px}
+[data-theme="instrument"] .pbar{box-shadow:inset 0 1px 0 rgba(0,0,0,.5)}
+[data-theme="instrument"] .card .r2 .b{letter-spacing:.06em}
+[data-theme="instrument"] .tile{border-color:#4A4B3E}
+[data-theme="instrument"] .st{letter-spacing:.04em}
+[data-theme="instrument"] .sc .rowset .val{color:#FFD98A}
+
+/* ========================================================================
+   05 · 霓虹 Neon —— 深空紫黑 + 品红/青双色霓虹：夜班也不闷
+   ======================================================================== */
+[data-theme="neon"]{
+  --wall:
+    radial-gradient(46% 38% at 14% 6%,rgba(255,60,172,.30),transparent 62%),
+    radial-gradient(48% 40% at 88% 88%,rgba(56,232,255,.22),transparent 64%),
+    repeating-linear-gradient(0deg,rgba(140,110,255,.05) 0 1px,transparent 1px 46px),
+    repeating-linear-gradient(90deg,rgba(140,110,255,.05) 0 1px,transparent 1px 46px),
+    linear-gradient(160deg,#0B0718 0%,#080511 56%,#0D0619 100%);
+  --grain:.12; --vig:rgba(0,0,0,.52);
+  --wallTx:rgba(240,235,255,.42); --wallTx2:rgba(240,235,255,.78);
+
+  --bg1:#0D0A1A; --bg2:#130E28;
+  --tx:#F5EEFF; --mu:#ADA0CC; --dm:#7C6F9B;
+  --ac:#FF3CAC; --ac2:#38E8FF; --acSoft:rgba(255,60,172,.14); --acTx:#1A0512;
+  --trk:rgba(255,255,255,.12);
+  --line:rgba(190,120,255,.22); --line2:rgba(190,120,255,.12); --hover:rgba(255,60,172,.10);
+
+  --cardBorder:1px solid rgba(255,90,200,.38);
+  --cardSheen:linear-gradient(135deg,rgba(255,60,172,.10),transparent 42%,rgba(56,232,255,.08));
+  --shCard:0 0 22px rgba(255,60,172,.18),0 0 54px rgba(56,232,255,.10),0 20px 40px rgba(0,0,0,.50);
+  --dotGlow:0 0 10px rgba(255,60,172,.9);
+  --numColor:#FFFFFF; --numShadow:0 0 10px rgba(56,232,255,.55),0 0 28px rgba(255,60,172,.40); --numW:700; --numLs:.5px;
+  --progH:4px; --progR:2px;
+  --progFill:linear-gradient(90deg,#FF3CAC,#A855F7 55%,#38E8FF);
+  --progGlow:0 0 14px rgba(255,60,172,.55),0 0 22px rgba(56,232,255,.25);
+  --flow:rgba(255,255,255,.9); --flowA:.8; --cprogH:3px;
+
+  --remBorder:1px solid rgba(255,60,172,.35);
+  --remA:linear-gradient(180deg,rgba(255,60,172,.30),rgba(180,30,140,.22)); --remB:rgba(14,10,28,.9);
+  --remTx:#FFE6F6; --remTx2:#B9A6D8; --remStrong:#FFFFFF;
+  --remEyebrow:rgba(56,232,255,.75); --remX:rgba(255,230,246,.7); --remSub:#D3BFE8; --remSubStrong:#FFFFFF;
+
+  --rCard:14px; --rWin:16px; --rCard2:12px; --rBtn:7px; --rPill:12px; --rPanel:12px; --rTile:6px; --rBub:12px; --rInput:10px;
+
+  --setBg:rgba(14,10,28,.90); --setBorder:1px solid rgba(190,120,255,.20);
+  --setSheen:linear-gradient(180deg,rgba(120,80,255,.12),transparent 36%);
+  --shWin:0 30px 80px rgba(0,0,0,.65),0 0 40px rgba(120,60,255,.12);
+  --railBg:rgba(255,255,255,.02); --cardBg:rgba(255,255,255,.035); --scBorder:1px solid rgba(190,120,255,.14);
+  --sealA:0; --sealBg:transparent; --sealTx:transparent; --footBg:rgba(255,255,255,.02);
+  --segBg:rgba(255,255,255,.05); --segOn:rgba(255,60,172,.18); --segOnTx:#FFD9F0;
+  --segShadow:inset 0 0 12px rgba(255,60,172,.25);
+  --inputBg:rgba(255,255,255,.04);
+  --knob:#FF3CAC; --knobBorder:none; --knobShadow:0 0 10px rgba(255,60,172,.8);
+  --swOff:rgba(255,255,255,.10); --swBorder:1px solid rgba(190,120,255,.20); --swKnob:#E7D9FF; --swKnobShadow:none;
+  --chipBg:rgba(255,255,255,.04); --iconGlow:0 0 8px rgba(56,232,255,.6);
+
+  --noteBg:rgba(14,10,28,.90); --noteBorder:1px solid rgba(190,120,255,.22);
+  --pillBg:rgba(255,255,255,.04); --conBg:rgba(255,255,255,.04); --conBorder:1px solid rgba(190,120,255,.16);
+  --bubIn:rgba(56,232,255,.07); --bubInBorder:1px solid rgba(56,232,255,.22);
+  --bubOut:rgba(255,60,172,.16); --bubOutTx:#FFE6F6; --bubOutBorder:1px solid rgba(255,60,172,.45);
+  --inBg:rgba(255,255,255,.04); --inBorder:1px solid rgba(190,120,255,.22); --sendGlow:0 0 14px rgba(255,60,172,.55);
+
+  --surf:rgba(16,11,30,.95); --bubBorder:1px solid rgba(190,120,255,.22);
+  --bubShadow:0 16px 34px rgba(0,0,0,.55);
+  --bubShadowOn:0 0 0 1px rgba(255,60,172,.45),0 16px 34px rgba(0,0,0,.60);
+}
+[data-theme="neon"] .lb{letter-spacing:.16em}
+[data-theme="neon"] .set-bar{box-shadow:0 1px 0 rgba(255,60,172,.30)}
+[data-theme="neon"] .ri.on{background:linear-gradient(90deg,rgba(255,60,172,.16),rgba(56,232,255,.06))}
+[data-theme="neon"] .ri.on::before{width:3px;box-shadow:0 0 8px rgba(255,60,172,.9)}
+[data-theme="neon"] .set-head h3{letter-spacing:.03em}
+[data-theme="neon"] .sc h4{color:#F0E6FF}
+[data-theme="neon"] .sc h4::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(255,60,172,.35),rgba(56,232,255,.20),transparent)}
+[data-theme="neon"] .btn.primary{background:linear-gradient(135deg,#FF3CAC,#B14BFF);color:#FFF3FB;box-shadow:0 0 16px rgba(255,60,172,.35)}
+[data-theme="neon"] .tile.on{box-shadow:0 0 0 2px #FF3CAC,0 0 14px rgba(255,60,172,.55)}
+[data-theme="neon"] .nh .tt b{background:linear-gradient(90deg,#FFE6F6,#BFF4FF);-webkit-background-clip:text;background-clip:text;color:transparent}
+[data-theme="neon"] .card{border-image:none}
+[data-theme="neon"] .set{border-image:none}

@@ -69,7 +69,15 @@ $script:Headers = $null
 function Say([string]$text, [string]$color = 'Gray') { Write-Host $text -ForegroundColor $color }
 function Step([string]$text) { Write-Host ''; Write-Host $text -ForegroundColor Cyan }
 function Plan([string]$text) { Write-Host "  [DryRun] 将执行：$text" -ForegroundColor Yellow }
-function Invoke-Git { & git -C $root @args }
+function Invoke-Git {
+    # 原生命令的 stderr（git 的 warning / 进度）在 $ErrorActionPreference='Stop' 下会被当成异常，
+    # 让整条发布链在 `git add -A` / `git push` 这一步假失败。这里统一收成字符串；
+    # 退出码照旧由调用方用 $LASTEXITCODE 检查。
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & git -C $root @args 2>&1 | ForEach-Object { "$_" } }
+    finally { $ErrorActionPreference = $oldEap }
+}
 
 # ---------- token / API ----------
 function Get-GitHubToken {

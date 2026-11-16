@@ -17,3 +17,5 @@ test/visual/
 # 会话交接文档（agent 生成，不入库）
 .handoff/
 HANDOFF.md
+
+design/theme-packs/shots/

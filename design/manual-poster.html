@@ -124,10 +124,10 @@
 <header>
   <div class="lead">
     <h1>上班工具箱 · 一图说明书</h1>
-    <p class="sub">一个贴在屏幕边缘的 Windows 悬浮窗：看下班、看日程、看工资，还能用 5 位数字找同事、用 5 位字符开一个对话发两句「小纸条」。接不接飞书都能用；不联网时按班次推算。</p>
+    <p class="sub">一个贴在屏幕边缘的 Windows 悬浮窗：看下班、看日程、看工资，还能用 5 位数字找同事、用 5 位字符开一个对话发两句「小纸条」。接不接飞书都能用；不联网时按班次推算。v3.7.0 起可以整块换一套界面风格（六套）。</p>
   </div>
   <div class="version">
-    <div class="v">v3.6.0</div>
+    <div class="v">v3.7.0</div>
     <div class="build">Windows · 单实例 · 150% DPI · 离线可用</div>
   </div>
 </header>
@@ -150,7 +150,7 @@
         <figcaption>收起态：只留倒计时和下班时间</figcaption>
       </figure>
       <figure>
-        <img class="bigcard-shot" src="../test/visual/expanded-current.png" alt="展开卡片">
+        <img class="bigcard-shot" src="skins/expanded-current.png" alt="展开卡片">
         <figcaption>展开态：状态 / 倒计时 / 进度 / 午休 / 工时</figcaption>
       </figure>
     </div>
@@ -191,7 +191,7 @@
   </div>
   <div style="display:grid;grid-template-columns:360px 1fr;gap:30px;align-items:start">
     <figure style="margin:0">
-      <img src="../test/visual/salary-live-huang.png" style="width:340px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="工资面板">
+      <img src="skins/salary-live-huang.png" style="width:340px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="工资面板">
       <figcaption class="tiny" style="margin-top:7px;text-align:center">金色主题：整数位金色渐变 + 常驻柔光，小数位白色</figcaption>
     </figure>
     <div>
@@ -371,7 +371,7 @@
 <!-- 05 设置总表 -->
 <section class="section" data-n="05">
   <div class="section-head">
-    <h2><span class="pill purple">设置</span> 七个页签，所有开关</h2>
+    <h2><span class="pill purple">设置</span> 左栏七项，所有开关</h2>
     <span class="tag">点卡片右上角 ⚙ 打开</span>
   </div>
 
@@ -410,6 +410,7 @@
 
     <div class="tabcard">
       <h3><span class="idx" style="background:var(--gold)">4</span> 外观</h3>
+      <div class="li"><b>界面风格</b><span>v3.7.0：默认 + 无垠 / 云母 / 宣纸 / 仪表 / 霓虹</span></div>
       <div class="li"><b>主题</b><span>39 套内置 + 自建（背景 / 进度条 / 名字）</span></div>
       <div class="li"><b>不透明度</b><span>30–100%</span></div>
       <div class="li"><b>自动收起</b><span>0–120 秒，0 = 不自动</span></div>
@@ -478,8 +479,98 @@
   </div>
 </section>
 
-<!-- 06 交互 -->
+<!-- 06 界面风格 -->
 <section class="section" data-n="06">
+  <div class="section-head">
+    <h2><span class="pill gold">皮肤</span> 六套整体皮肤，整套界面一起换</h2>
+    <span class="tag">设置 → 外观 →「界面风格」· 点一下预览 · 点「保存」后悬浮窗立即换</span>
+  </div>
+
+  <figure style="margin:0">
+    <img src="../skins.png" style="width:100%;display:block" alt="六套皮肤卡片并排">
+    <figcaption class="tiny" style="margin-top:8px;text-align:center">六套卡片并排（展开态 280×188，150% 实拍）：默认 / 无垠 quiet / 云母 mica / 宣纸 paper / 仪表 instrument / 霓虹 neon</figcaption>
+  </figure>
+
+  <div class="rule"></div>
+
+  <table>
+    <tr><th style="width:150px">风格</th><th style="width:180px">定位</th><th>配色 / 质感</th><th style="width:205px">进度条</th><th style="width:245px">装饰 / 细节</th></tr>
+    <tr><td><b>默认 Default</b></td><td>原来的样子，一直可用</td><td>39 套配色主题任选 + 背景风格（纯色 / 磨砂玻璃）</td><td>原有发光进度条 + 流动光带</td><td>卡片外呼吸柔光 + 沿边流光（v3.6 全套）</td></tr>
+    <tr><td><b>无垠 Quiet</b></td><td>最安静的一档</td><td>近黑底 + 1px 细线描边，等宽数字</td><td>2 DIP 细线，不发光</td><td>无光晕 / 扫边；卡片不填底、只留顶线</td></tr>
+    <tr><td><b>云母 Mica</b></td><td>磨砂玻璃完整版</td><td>半透明磨砂 + 柔光雾气，桌面透出来</td><td>5 DIP 圆角渐变 + 柔光</td><td>玻璃边缘高光；小纸条 / 胶囊同款</td></tr>
+    <tr><td><b>宣纸 Ink</b></td><td>浅色纸感，中文味</td><td>米白纸底 + 宋体标题 + 朱砂强调</td><td>3 DIP 朱砂渐变</td><td>纸纤维颗粒 + 朱砂「班」印章</td></tr>
+    <tr><td><b>仪表 Instrument</b></td><td>金属仪表盘</td><td>深灰金属 + 琥珀数码读数</td><td>8 DIP，24 格分刻</td><td>卡片四角 4 颗小螺丝</td></tr>
+    <tr><td><b>霓虹 Neon</b></td><td>强对比赛博夜色</td><td>近黑底 + 品红 × 青双色辉光</td><td>4 DIP 品红→青 + 双层辉光</td><td>渐变描边、数字发光</td></tr>
+  </table>
+
+  <div class="note">默认皮肤保留 39 套主题 + 背景风格 + 背景光效 + 字体；切到其它五套后自带固定配色，「主题配色」色卡置灰并提示「该风格自带配色，切回《默认》可选 39 套」。皮肤存在 <span class="kbd">settings.json</span> 的 <span class="kbd">ui.skin</span>，老配置没有 → 按默认。</div>
+
+  <div class="rule"></div>
+
+  <h3>六套设置页（左栏导航 + 内容卡片，外观页最上面就是「界面风格」卡）</h3>
+  <div class="grid3" style="margin-top:10px">
+    <figure style="margin:0">
+      <img src="skins/settings-default.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="默认皮肤设置页">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">默认 · 39 套主题可用</figcaption>
+    </figure>
+    <figure style="margin:0">
+      <img src="skins/settings-quiet.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="无垠皮肤设置页">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">无垠 · 近黑细线</figcaption>
+    </figure>
+    <figure style="margin:0">
+      <img src="skins/settings-mica.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="云母皮肤设置页">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">云母 · 磨砂玻璃</figcaption>
+    </figure>
+  </div>
+  <div class="grid3" style="margin-top:14px">
+    <figure style="margin:0">
+      <img src="skins/settings-paper.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="宣纸皮肤设置页">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">宣纸 · 宋体朱砂</figcaption>
+    </figure>
+    <figure style="margin:0">
+      <img src="skins/settings-instrument.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="仪表皮肤设置页">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">仪表 · 金属琥珀</figcaption>
+    </figure>
+    <figure style="margin:0">
+      <img src="skins/settings-neon.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="霓虹皮肤设置页">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">霓虹 · 品红青辉光</figcaption>
+    </figure>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="grid3">
+    <div>
+      <h3>换的不只是卡片</h3>
+      <div class="small">卡片、设置窗口、小纸条、右键胶囊、提醒卡一起换；每套皮肤的圆角、描边、字体、进度条画法都是独立令牌。</div>
+    </div>
+    <div>
+      <h3>怎么切</h3>
+      <div class="small">设置 →「外观」→「界面风格」→ 点风格块立刻预览 → 点「保存」悬浮窗立即换，不用重启；切回默认，39 套色卡立刻恢复可用。</div>
+    </div>
+    <div>
+      <h3>也记在配置里</h3>
+      <div class="small">皮肤存在 <span class="kbd">settings.json</span> 的 <span class="kbd">ui.skin</span>；老配置没有这个字段按默认皮肤，升级不会突然换脸。</div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <h3>小纸条 / 右键胶囊也跟着换（截图压在假桌面上，看玻璃与辉光；六套并排）</h3>
+  <div class="grid2" style="margin-top:12px">
+    <figure style="margin:0">
+      <img src="skins/sheet-note-chat.png" style="width:100%;display:block;border-radius:10px" alt="小纸条六套皮肤">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">小纸条面板：default / quiet / mica / paper / instrument / neon</figcaption>
+    </figure>
+    <figure style="margin:0">
+      <img src="skins/sheet-bubble-theme.png" style="width:100%;display:block;border-radius:10px" alt="右键胶囊六套皮肤">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">右键胶囊「修改主题」：124×40 + 246 面板尺寸不变，只换配色 / 圆角 / 字体</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 07 交互 -->
+<section class="section" data-n="07">
   <div class="section-head">
     <h2><span class="pill orange">交互</span> 右键胶囊 + 托盘菜单</h2>
     <span class="tag">不用翻设置也能完成常用操作</span>
@@ -527,8 +618,8 @@
   </div>
 </section>
 
-<!-- 07 运行与数据 -->
-<section class="section" data-n="07">
+<!-- 08 运行与数据 -->
+<section class="section" data-n="08">
   <div class="section-head">
     <h2><span class="pill cyan">运行</span> 数据、文件与边界</h2>
     <span class="tag">出问题先看 widget.log</span>
@@ -568,7 +659,7 @@
 </section>
 
 <div class="footer">
-  <div><b>上班工具箱 v3.6.0</b> · 一图说明书 · 2026-11-13</div>
+  <div><b>上班工具箱 v3.7.0</b> · 一图说明书 · 2026-11-16</div>
   <div>设置入口：卡片右上角 ⚙ &nbsp;·&nbsp; 小纸条入口：右上角 ✈ &nbsp;·&nbsp; 工资入口：右上角 ¥ &nbsp;·&nbsp; 托盘：右键托盘图标</div>
 </div>
 

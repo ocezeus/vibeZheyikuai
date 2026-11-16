@@ -13,18 +13,37 @@ namespace WorkCountdown
 {
     public class SettingsForm : Form
     {
-        private static readonly Color AccentColor = Color.FromArgb(64, 124, 245);
-        private static readonly Color Ink = Color.FromArgb(38, 46, 64);
-        private static readonly Color Muted = Color.FromArgb(120, 128, 146);
-        private static readonly Color CardBg = Color.White;
-        private static readonly Color CardBorder = Color.FromArgb(230, 234, 242);
+        // 颜色全部放在 Ui（可变 static，由 ApplySkin() 按当前皮肤刷新）；以前这里是 readonly 写死的浅色。
         private static readonly string[] RepeatIds = new string[] { "daily", "odd", "even" };
+
+        /// <summary>左栏导航宽（DIP）。</summary>
+        private const int RailW = 148;
+        /// <summary>内容区标题条高（DIP）。</summary>
+        private const int HeadH = 44;
+        /// <summary>底部按钮条高（DIP）。</summary>
+        private const int FootH = 50;
+        /// <summary>页面宽（DIP）。和重构前一样是 508：页面里的卡片坐标一个都没动。</summary>
+        private const int PageW = 508;
 
         private readonly SettingsStore store;
         private Settings s;
         private readonly int initialTab;
 
+        // ---- 新骨架：左栏导航 + 内容区（TabControl 只用来装 7 个页，表头被裁掉）----
         private TabControl tabs;
+        private Panel tabClip;              // 把 TabControl 的表头裁到可视区外
+        private Panel contentHost;          // 右侧内容区，AutoScroll
+        private SettingsRail rail;          // 左栏导航（自绘）
+        private SettingsHead head;          // 内容区标题条（自绘，宣纸时画印章）
+        private Panel footerBar;            // 底部按钮条
+        private SkinPicker skinPicker;      // 外观页「界面风格」的 6 个块
+        private Label lblThemeLocked;       // 非默认皮肤时「主题配色」上的提示
+        private Button btnNewTheme;         // ＋ 新建主题（非默认皮肤时置灰）
+        private int curPage = 0;
+        private int tabChrome;              // 表头 + 边框占的高度
+        private int tabHeader;              // 表头高度（要裁掉这么多）
+        private int tabBorder;              // 底部边框高度
+        private int lastWheelTick;          // 同一条滚轮消息去重
 
         // ---- 考勤 ----
         private RadioButton rbFixed;
@@ -138,6 +157,9 @@ namespace WorkCountdown
             settings.NormalizeSchedules();          // 直接 new 出来的 Settings 也要有固定日程
             settings.NormalizeCustomThemes();
 
+            // 先按当前皮肤定色：下面创建控件时拿到的就是对的颜色（默认皮肤 = 原来的浅色）
+            Ui.Apply(settings.ui);
+
             Text = "上班工具箱 " + AppInfo.Version + " · 设置";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -145,71 +167,109 @@ namespace WorkCountdown
             StartPosition = FormStartPosition.CenterParent;
             AutoScaleDimensions = new SizeF(96f, 96f);   // 按 96 DPI 设计，运行时整体放大
             AutoScaleMode = AutoScaleMode.None;          // 建好后自己按 DPI 放大，字体和控件一起走
-            ClientSize = new Size(524, 640);
-            BackColor = Color.FromArgb(246, 248, 251);
+            // 148 左栏 + 542 内容区（508 页面 + 右侧滚动条余量）；高度 640 不超过用户 150% 时的屏幕
+            ClientSize = new Size(RailW + 542, 640);
+            BackColor = Ui.WindowBg;
             Font = UiFont.Make(9f, FontStyle.Regular);
             DoubleBuffered = true;
 
+            BuildChrome();
             BuildTabs();
+            tabs.SelectedIndexChanged += delegate { OnPageChanged(); };
             BuildFooter();
             LoadValues();
-            if (initialTab > 0 && initialTab < tabs.TabPages.Count) tabs.SelectedIndex = initialTab;
+            SelectPage(initialTab > 0 && initialTab < tabs.TabPages.Count ? initialTab : 0);
             ApplyDpi();
+            OnPageChanged();          // DPI 放大后重新量一遍页面高度
+            ApplySkin();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            OnPageChanged();          // 句柄建好后 TabControl 的表头高度才量得准
         }
 
         /// <summary>按系统 DPI 整体放大：字体按点数渲染，控件按比例放大才对得上。</summary>
         private void ApplyDpi()
         {
-            float k;
-            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiX / 96f;
+            float k = ScreenScale();
             if (Math.Abs(k - 1f) < 0.01f) return;
             SuspendLayout();
             Scale(new SizeF(k, k));
             ResumeLayout(true);
         }
 
-        // ---------------- 骨架 ----------------
+        private static float ScreenScale()
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero)) return g.DpiX / 96f;
+        }
+
+        // ---------------- 骨架：左栏导航 + 内容区 + 底部条 ----------------
+
+        private void BuildChrome()
+        {
+            int w = ClientSize.Width, h = ClientSize.Height;
+
+            rail = new SettingsRail();
+            rail.SetBounds(0, 0, RailW, h);
+            rail.PageChanged += delegate(int index) { SelectPage(index); };
+            Controls.Add(rail);
+
+            head = new SettingsHead();
+            head.SetBounds(RailW, 0, w - RailW, HeadH);
+            Controls.Add(head);
+
+            contentHost = new Panel();
+            contentHost.SetBounds(RailW, HeadH, w - RailW, h - HeadH - FootH);
+            contentHost.BackColor = Ui.WindowBg;
+            contentHost.AutoScroll = true;
+            contentHost.MouseWheel += ScrollContentWheel;
+            Controls.Add(contentHost);
+
+            // TabControl 的表头不用：把整个控件往上挪一个表头的高度，再用 tabClip 裁掉。
+            // 页面本身还是 508 宽，和重构前一样，页面里控件的坐标一个都没动。
+            tabClip = new Panel();
+            tabClip.SetBounds(8, 0, PageW, contentHost.Height);
+            tabClip.BackColor = Ui.WindowBg;
+            tabClip.MouseWheel += ScrollContentWheel;
+            contentHost.Controls.Add(tabClip);
+
+            tabs = new TabControl();
+            tabs.SetBounds(0, 0, PageW + 4, contentHost.Height);
+            tabs.Appearance = TabAppearance.FlatButtons;
+            tabs.SizeMode = TabSizeMode.Fixed;
+            tabs.ItemSize = new Size(0, 1);
+            tabs.Multiline = false;
+            tabs.BackColor = Ui.WindowBg;
+            tabClip.Controls.Add(tabs);
+
+            footerBar = new Panel();
+            footerBar.SetBounds(RailW, h - FootH, w - RailW, FootH);
+            footerBar.BackColor = Ui.FooterBg;
+            footerBar.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (var p = new Pen(Ui.WindowEdge, 1f))
+                    e.Graphics.DrawLine(p, 0, 0, footerBar.Width, 0);
+            };
+            Controls.Add(footerBar);
+        }
 
         private void BuildTabs()
         {
-            tabs = new TabControl();
-            tabs.SetBounds(8, 8, 508, 578);
-            tabs.ItemSize = new Size(64, 34);
-            tabs.SizeMode = TabSizeMode.Fixed;
-            tabs.DrawMode = TabDrawMode.OwnerDrawFixed;
-            tabs.DrawItem += delegate(object sender, DrawItemEventArgs e)
-            {
-                var page = tabs.TabPages[e.Index];
-                Rectangle r = e.Bounds;
-                bool sel = tabs.SelectedIndex == e.Index;
-                using (var b = new SolidBrush(sel ? Color.White : Color.FromArgb(240, 243, 249)))
-                    e.Graphics.FillRectangle(b, r);
-                if (sel)
-                {
-                    using (var b = new SolidBrush(AccentColor))
-                        e.Graphics.FillRectangle(b, r.X + 16, r.Bottom - 3, r.Width - 32, 3);
-                }
-                using (var f = UiFont.Make(9f, sel ? FontStyle.Bold : FontStyle.Regular))
-                using (var b = new SolidBrush(sel ? Ink : Muted))
-                {
-                    var sf = new StringFormat();
-                    sf.Alignment = StringAlignment.Center;
-                    sf.LineAlignment = StringAlignment.Center;
-                    e.Graphics.DrawString(page.Text, f, b, r, sf);
-                }
-            };
-
-            var p1 = new TabPage("考勤");
-            var p2 = new TabPage("固定");
-            var p3 = new TabPage("提醒");
-            var p4 = new TabPage("外观");
-            var p5 = new TabPage("日程");
-            var p6 = new TabPage("工资");
-            var p7 = new TabPage("纸条");
+            var p1 = new TabPage(SettingsHead.Titles[0]);
+            var p2 = new TabPage(SettingsHead.Titles[1]);
+            var p3 = new TabPage(SettingsHead.Titles[2]);
+            var p4 = new TabPage(SettingsHead.Titles[3]);
+            var p5 = new TabPage(SettingsHead.Titles[4]);
+            var p6 = new TabPage(SettingsHead.Titles[5]);
+            var p7 = new TabPage(SettingsHead.Titles[6]);
             foreach (var p in new TabPage[] { p1, p2, p3, p4, p5, p6, p7 })
             {
-                p.BackColor = Color.FromArgb(246, 248, 251);
+                p.BackColor = Ui.WindowBg;
                 p.Padding = new Padding(0);
+                p.AutoScroll = false;          // 滚动交给外面的 contentHost，页面只负责高度
+                p.MouseWheel += ScrollContentWheel;
             }
             tabs.TabPages.Add(p1);
             tabs.TabPages.Add(p2);
@@ -218,7 +278,6 @@ namespace WorkCountdown
             tabs.TabPages.Add(p5);
             tabs.TabPages.Add(p6);
             tabs.TabPages.Add(p7);
-            Controls.Add(tabs);
 
             BuildPolicy(p1);
             BuildDays(p1);
@@ -239,33 +298,280 @@ namespace WorkCountdown
             BuildBackup(p4);
         }
 
+        /// <summary>内容区滚轮：控件的滚轮消息会往上冒，统一在这里滚 contentHost（外观页/纸条页比可视高度长）。</summary>
+        private void ScrollContentWheel(object sender, MouseEventArgs e)
+        {
+            if (contentHost == null) return;
+            int range = contentHost.VerticalScroll.Maximum - contentHost.ClientSize.Height;
+            if (range <= 0) return;
+            int now = Environment.TickCount;
+            if (now - lastWheelTick < 25) return;      // 同一条滚轮消息不要滚两次
+            lastWheelTick = now;
+            int step = (int)Math.Round(48 * ScreenScale());
+            int y = -contentHost.AutoScrollPosition.Y - (e.Delta / 120) * step;
+            if (y < 0) y = 0;
+            if (y > range) y = range;
+            contentHost.AutoScrollPosition = new Point(0, y);
+            var handled = e as HandledMouseEventArgs;
+            if (handled != null) handled.Handled = true;    // 别让 AutoScroll 再滚一次
+        }
+
+        /// <summary>切到第 index 页（左栏、标题、页面高度一起走）。</summary>
+        private void SelectPage(int index)
+        {
+            if (tabs == null || tabs.TabPages.Count == 0) return;
+            if (index < 0 || index >= tabs.TabPages.Count) index = 0;
+            if (tabs.SelectedIndex != index) tabs.SelectedIndex = index;
+            else OnPageChanged();
+        }
+
+        /// <summary>页码变化：同步左栏高亮、标题条、页面高度和滚动位置。</summary>
+        private void OnPageChanged()
+        {
+            if (tabs == null) return;
+            int i = tabs.SelectedIndex;
+            if (i < 0) i = 0;
+            curPage = i;
+            if (rail != null) rail.SelectedIndex = i;
+            if (head != null) head.PageIndex = i;
+            ApplyPageHeight();
+            if (contentHost != null) contentHost.AutoScrollPosition = new Point(0, 0);
+            if (rail != null) rail.Invalidate();
+            if (head != null) head.Invalidate();
+        }
+
+        /// <summary>当前页内容高度：最后一张卡片的下边 + 14 DIP 留白（跟着 DPI 一起放大）。</summary>
+        private int MeasurePage(int index)
+        {
+            int bottom = 0;
+            if (tabs != null && index >= 0 && index < tabs.TabPages.Count)
+                foreach (Control c in tabs.TabPages[index].Controls)
+                    if (c.Bottom > bottom) bottom = c.Bottom;
+            if (bottom <= 0) bottom = 520;
+            return bottom + (int)Math.Round(14 * ScreenScale());
+        }
+
+        /// <summary>把当前页撑到内容高度；表头裁到 tabClip 外面，内容超出可视高度就出滚动条。</summary>
+        private void ApplyPageHeight()
+        {
+            if (tabs == null || tabClip == null) return;
+            if (!tabs.IsHandleCreated) return;      // 表头几何要等句柄建好才量得准（OnShown 里补一次）
+            int h = MeasurePage(curPage);
+
+            Rectangle dr = tabs.DisplayRectangle;
+            tabHeader = Math.Max(0, dr.Y);
+            tabBorder = Math.Max(0, tabs.Height - dr.Y - dr.Height);
+            tabChrome = tabHeader + tabBorder;
+
+            tabs.Height = h + tabChrome;
+            dr = tabs.DisplayRectangle;
+            tabHeader = Math.Max(0, dr.Y);
+            tabBorder = Math.Max(0, tabs.Height - dr.Y - dr.Height);
+            tabChrome = tabHeader + tabBorder;
+
+            tabs.Top = -tabHeader;
+            tabs.Left = -dr.X;
+            tabClip.Height = h + tabBorder;
+            float scale = ScreenScale();
+            tabClip.Left = (int)Math.Round(8 * scale);
+            tabClip.Width = (int)Math.Round(PageW * scale);
+            if (contentHost != null) contentHost.PerformLayout();
+        }
+
+        // ---------------- 皮肤 ----------------
+
+        /// <summary>
+        /// 换肤：所有颜色重新从当前皮肤的 SkinDef / ThemeDef 取一遍，然后整棵控件树刷色重画。
+        /// 默认皮肤走的是和 v3.6 一样的那套浅色，观感不变。
+        /// </summary>
+        private void ApplySkin()
+        {
+            Ui.Apply(s.ui);
+
+            BackColor = Ui.WindowBg;
+            if (contentHost != null) contentHost.BackColor = Ui.WindowBg;
+            if (tabClip != null) tabClip.BackColor = Ui.WindowBg;
+            if (tabs != null)
+            {
+                tabs.BackColor = Ui.WindowBg;
+                foreach (TabPage p in tabs.TabPages) p.BackColor = Ui.WindowBg;
+            }
+            if (footerBar != null) { footerBar.BackColor = Ui.FooterBg; footerBar.Invalidate(); }
+            if (picker != null) { picker.BackColor = Ui.Surface; picker.Invalidate(); }
+            if (skinPicker != null) { skinPicker.BackColor = Ui.Surface; skinPicker.Invalidate(); }
+            if (head != null) { head.Invalidate(); }
+            if (rail != null)
+            {
+                rail.FootLines = RailFootLines();
+                rail.Invalidate();
+            }
+            SkinTree(Controls);
+            UpdateSkinUi();
+            Invalidate(true);
+        }
+
+        private string[] RailFootLines()
+        {
+            string start = string.IsNullOrWhiteSpace(s.startTime) ? "09:00" : s.startTime;
+            string end = string.IsNullOrWhiteSpace(s.endTime) ? "18:00" : s.endTime;
+            return new string[] { store.Dir, "上班 " + start + " · 下班 " + end };
+        }
+
+        /// <summary>一次遍历控件树，把 Label / CheckBox / RadioButton / Button / 输入框的颜色刷成皮肤色。</summary>
+        private void SkinTree(Control.ControlCollection controls)
+        {
+            foreach (Control c in controls)
+            {
+                // 滚轮：谁有焦点谁收消息，所以每个控件都挂一份（列表/下拉自己吃滚轮，不挂）
+                if (c != contentHost && !OwnsWheel(c))
+                {
+                    c.MouseWheel -= ScrollContentWheel;
+                    c.MouseWheel += ScrollContentWheel;
+                }
+                var card = c as CardPanel;
+                if (card != null)
+                {
+                    card.BackColor = Color.Transparent;
+                    card.Invalidate();
+                }
+                else
+                {
+                    var lbl = c as Label;
+                    if (lbl != null)
+                    {
+                        lbl.ForeColor = (lbl.Tag as string) == "hint" ? Ui.Muted : Ui.Ink;
+                        lbl.BackColor = Color.Transparent;
+                    }
+                    else if (c is CheckBox || c is RadioButton)
+                    {
+                        c.ForeColor = Ui.Ink;
+                        c.BackColor = Color.Transparent;
+                    }
+                    else if (c is Button)
+                    {
+                        SkinButton((Button)c);
+                    }
+                    else if (c is TextBox || c is ListBox || c is CheckedListBox
+                        || c is ComboBox || c is NumericUpDown)
+                    {
+                        c.BackColor = Ui.InputBg;
+                        c.ForeColor = Ui.InputInk;
+                    }
+                    else if (c is TabPage || c is TabControl)
+                    {
+                        c.BackColor = Ui.WindowBg;
+                    }
+                    else if (c is ScheduleList || c is EventCardList || c is ThemePicker || c is SkinPicker)
+                    {
+                        c.BackColor = Ui.Surface;
+                        c.Invalidate();
+                    }
+                }
+                SkinTree(c.Controls);
+            }
+        }
+
+        /// <summary>自己处理滚轮的控件（列表 / 下拉 / 数字框），不让它们再把整页滚一遍。</summary>
+        private static bool OwnsWheel(Control c)
+        {
+            return c is ScheduleList || c is EventCardList
+                || c is ComboBox || c is NumericUpDown || c is DateTimePicker
+                || c is ListBox || c is CheckedListBox;
+        }
+
+        private static void SkinButton(Button b)
+        {
+            string tag = b.Tag as string;
+            b.FlatStyle = FlatStyle.Flat;
+            b.UseVisualStyleBackColor = false;
+            if (tag == "primary")
+            {
+                b.BackColor = Ui.Accent;
+                b.ForeColor = Ui.AccentInk;
+                b.FlatAppearance.BorderSize = 0;
+                b.FlatAppearance.MouseOverBackColor = Skins.Mix(Ui.Accent, Color.White, 0.12);
+                b.FlatAppearance.MouseDownBackColor = Skins.Mix(Ui.Accent, Color.Black, 0.16);
+            }
+            else if (tag == "accent" || tag == "accent-edit")
+            {
+                b.BackColor = Ui.Surface;
+                b.ForeColor = tag == "accent-edit" && b.Enabled ? Ui.Ink : Ui.Accent;
+                if (tag == "accent-edit" && !b.Enabled) b.ForeColor = Ui.Muted;
+                b.FlatAppearance.BorderSize = 1;
+                b.FlatAppearance.BorderColor = tag == "accent-edit" && !b.Enabled ? Ui.Edge : Ui.Accent;
+                b.FlatAppearance.MouseOverBackColor = Ui.Hover;
+                b.FlatAppearance.MouseDownBackColor = Ui.Surface;
+            }
+            else
+            {
+                b.BackColor = Ui.Surface;
+                b.ForeColor = Ui.Ink;
+                b.FlatAppearance.BorderSize = 1;
+                b.FlatAppearance.BorderColor = Ui.Edge;
+                b.FlatAppearance.MouseOverBackColor = Ui.Hover;
+                b.FlatAppearance.MouseDownBackColor = Ui.Surface;
+            }
+        }
+
+        /// <summary>皮肤相关的联动：风格块选中态、主题色卡能不能点、提示文字。</summary>
+        private void UpdateSkinUi()
+        {
+            var skin = Skins.Current(s.ui);
+            bool def = skin.IsDefault;
+            if (skinPicker != null) { skinPicker.SelectedId = skin.id; skinPicker.Invalidate(); }
+            if (picker != null)
+            {
+                picker.Locked = !def;
+                picker.Enabled = def;
+                picker.Invalidate();
+            }
+            if (lblThemeLocked != null)
+            {
+                lblThemeLocked.Visible = !def;
+                lblThemeLocked.ForeColor = Ui.Muted;
+            }
+            if (btnNewTheme != null)
+            {
+                btnNewTheme.Enabled = def;
+                btnNewTheme.ForeColor = def ? Ui.Accent : Ui.Muted;
+                btnNewTheme.FlatAppearance.BorderColor = def ? Ui.Accent : Ui.Edge;
+            }
+            UpdateThemeName();
+            if (rail != null) rail.Invalidate();
+            if (head != null) head.Invalidate();
+        }
+
         private void BuildFooter()
         {
             var footer = new Label();
             footer.Text = "配置存在 " + store.Dir;
-footer.SetBounds(16, 600, 258, 20);
+            footer.SetBounds(14, 17, footerBar.Width - 2 * 14 - 2 * 106 - 10 - 14, 18);
+            footer.Font = UiFont.Make(8f, FontStyle.Regular);
             footer.ForeColor = Ui.Muted;
+            footer.BackColor = Color.Transparent;
+            footer.Tag = "hint";
             footer.AutoEllipsis = true;
-            Controls.Add(footer);
+            footerBar.Controls.Add(footer);
 
             var btnCancel = new Button();
             btnCancel.Text = "取消";
-            btnCancel.SetBounds(286, 592, 106, 34);
+            btnCancel.SetBounds(footerBar.Width - 14 - 106 - 10 - 106, 8, 106, 34);
             btnCancel.FlatStyle = FlatStyle.Flat;
-            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-            btnCancel.BackColor = Color.White;
+            btnCancel.FlatAppearance.BorderColor = Ui.Edge;
+            btnCancel.BackColor = Ui.Surface;
             btnCancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
-            Controls.Add(btnCancel);
+            footerBar.Controls.Add(btnCancel);
 
             var btnOk = new Button();
             btnOk.Text = "保存";
-            btnOk.SetBounds(400, 592, 106, 34);
+            btnOk.Tag = "primary";
+            btnOk.SetBounds(footerBar.Width - 14 - 106, 8, 106, 34);
             btnOk.FlatStyle = FlatStyle.Flat;
             btnOk.FlatAppearance.BorderSize = 0;
-            btnOk.BackColor = AccentColor;
-            btnOk.ForeColor = Color.White;
+            btnOk.BackColor = Ui.Accent;
+            btnOk.ForeColor = Ui.AccentInk;
             btnOk.Click += delegate { Save(); };
-            Controls.Add(btnOk);
+            footerBar.Controls.Add(btnOk);
 
             CancelButton = btnCancel;
         }
@@ -501,9 +807,7 @@ var e = CardBox(page, "这一条", 8, 224, 492, 214);
             cbSchedDeduct.SetBounds(14, 122, 120, 22);
             e.Controls.Add(cbSchedDeduct);
 
-            var btnAdd = FlatButton("新建一条", 296, 120, 84, 26);
-            btnAdd.FlatAppearance.BorderColor = AccentColor;
-            btnAdd.ForeColor = AccentColor;
+            var btnAdd = AccentButton("新建一条", 296, 120, 84, 26);
             btnAdd.Click += delegate { AddSched(); };
             e.Controls.Add(btnAdd);
 
@@ -763,9 +1067,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             tbPlace.TextAlign = HorizontalAlignment.Left;
             d.Controls.Add(tbPlace);
 
-            var btnAdd = FlatButton("添加日程", 256, 264, 108, 28);
-            btnAdd.FlatAppearance.BorderColor = AccentColor;
-            btnAdd.ForeColor = AccentColor;
+            var btnAdd = AccentButton("添加日程", 256, 264, 108, 28);
             btnAdd.Click += delegate { AddEvent(); };
             d.Controls.Add(btnAdd);
 
@@ -1072,9 +1374,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             lstNoteContacts.BorderStyle = BorderStyle.FixedSingle;
             lstNoteContacts.Font = UiFont.Make(9f, FontStyle.Regular);
             ctCard.Controls.Add(lstNoteContacts);
-            var btnAddNote = FlatButton("＋ 新建对话", 14, 104, 96, 28);
-            btnAddNote.FlatAppearance.BorderColor = AccentColor;
-            btnAddNote.ForeColor = AccentColor;
+            var btnAddNote = AccentButton("＋ 新建对话", 14, 104, 96, 28);
             btnAddNote.Click += delegate { AddNoteContactDialog(); };
             ctCard.Controls.Add(btnAddNote);
             var btnRemark = FlatButton("改名字", 118, 104, 84, 28);
@@ -1222,7 +1522,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 ShowInTaskbar = false;
                 StartPosition = FormStartPosition.CenterParent;
                 ClientSize = new Size(380, 196);
-                BackColor = Color.White;
+                BackColor = Ui.WindowBg;
                 Font = UiFont.Make(9f, FontStyle.Regular);
                 AutoScaleMode = AutoScaleMode.None;
 
@@ -1250,7 +1550,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 ok.FlatStyle = FlatStyle.Flat;
                 ok.FlatAppearance.BorderSize = 0;
                 ok.BackColor = Ui.Accent;
-                ok.ForeColor = Color.White;
+                ok.ForeColor = Ui.AccentInk;
                 ok.DialogResult = DialogResult.OK;
                 Controls.Add(ok);
                 AcceptButton = ok;
@@ -1259,8 +1559,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 cancel.Text = "取消";
                 cancel.SetBounds(272, 142, 96, 34);
                 cancel.FlatStyle = FlatStyle.Flat;
-                cancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-                cancel.BackColor = Color.White;
+                cancel.FlatAppearance.BorderColor = Ui.Edge;
+                cancel.BackColor = Ui.Surface;
                 cancel.DialogResult = DialogResult.Cancel;
                 Controls.Add(cancel);
                 CancelButton = cancel;
@@ -1288,9 +1588,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             ol.Controls.Add(numOutlookLead);
             ol.Controls.Add(Lbl("分", 232, 28, 20, 22));
 
-            var btnAdd = FlatButton("＋ 添加", 286, 24, 88, 28);
-            btnAdd.FlatAppearance.BorderColor = AccentColor;
-            btnAdd.ForeColor = AccentColor;
+            var btnAdd = AccentButton("＋ 添加", 286, 24, 88, 28);
             btnAdd.Click += delegate { EditCalendar(null); };
             ol.Controls.Add(btnAdd);
 
@@ -1322,9 +1620,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnDelete.Click += delegate { DeleteCalendar(SelectedCalendar()); };
             ol.Controls.Add(btnDelete);
 
-            var btnSync = FlatButton("立即同步", 170, 178, 96, 28);
-            btnSync.FlatAppearance.BorderColor = AccentColor;
-            btnSync.ForeColor = AccentColor;
+            var btnSync = AccentButton("立即同步", 170, 178, 96, 28);
             btnSync.Click += delegate { SyncCalendarsNow(); };
             ol.Controls.Add(btnSync);
 
@@ -1580,26 +1876,37 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildThemes(TabPage page)
         {
-            var g = CardBox(page, "主题配色", 8, 8, 492, 232);
+            BuildSkinCard(page);
+
+            var g = CardBox(page, "主题配色", 8, 116, 492, 232);
+            lblThemeLocked = new Label();
+            lblThemeLocked.Text = "该风格自带配色，切回《默认》可选 " + Themes.All.Length + " 套";
+            lblThemeLocked.SetBounds(150, 5, 326, 18);
+            lblThemeLocked.TextAlign = ContentAlignment.MiddleRight;
+            lblThemeLocked.Font = UiFont.Make(8f, FontStyle.Regular);
+            lblThemeLocked.ForeColor = Ui.Muted;
+            lblThemeLocked.BackColor = Color.Transparent;
+            lblThemeLocked.Tag = "hint";
+            lblThemeLocked.Visible = false;
+            g.Controls.Add(lblThemeLocked);
+
             picker = new ThemePicker();
             picker.SetBounds(14, 30, 456, 122);
             picker.SelectedIdChanged += delegate { UpdateThemeName(); };
             g.Controls.Add(picker);
             lblThemeName = Lbl("", 14, 160, 210, 20);
             lblThemeName.ForeColor = Ui.Muted;
+            lblThemeName.Tag = "hint";
             g.Controls.Add(lblThemeName);
 
-            btnEditTheme = FlatButton("编辑", 240, 156, 70, 28);
-            btnEditTheme.FlatAppearance.BorderColor = AccentColor;
-            btnEditTheme.ForeColor = AccentColor;
+            btnEditTheme = AccentButton("编辑", 240, 156, 70, 28);
+            btnEditTheme.Tag = "accent-edit";
             btnEditTheme.Click += delegate { EditCustomTheme(); };
             g.Controls.Add(btnEditTheme);
 
-            var btnCustom = FlatButton("＋ 新建主题", 316, 156, 154, 28);
-            btnCustom.FlatAppearance.BorderColor = AccentColor;
-            btnCustom.ForeColor = AccentColor;
-            btnCustom.Click += delegate { NewCustomTheme(); };
-            g.Controls.Add(btnCustom);
+            btnNewTheme = AccentButton("＋ 新建主题", 316, 156, 154, 28);
+            btnNewTheme.Click += delegate { NewCustomTheme(); };
+            g.Controls.Add(btnNewTheme);
 
             // 背景风格：纯色 / 磨砂玻璃（作用于悬浮卡片、小纸条面板、右键胶囊气泡）
             g.Controls.Add(Lbl("背景风格", 14, 198, 62, 22));
@@ -1618,6 +1925,35 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             g.Controls.Add(Hint("磨砂玻璃：半透明 + 磨砂颗粒", 258, 198, 222, 20));
         }
 
+        /// <summary>「界面风格」卡片：6 个可点的风格块，点一下立刻预览，点「保存」才落盘。</summary>
+        private void BuildSkinCard(TabPage page)
+        {
+            var g = CardBox(page, "界面风格", 8, 8, 492, 100);
+
+            var tip = new Label();
+            tip.Text = "6 套 · 点一下立刻预览，点「保存」后悬浮窗跟着换";
+            tip.SetBounds(150, 5, 326, 18);
+            tip.TextAlign = ContentAlignment.MiddleRight;
+            tip.Font = UiFont.Make(8f, FontStyle.Regular);
+            tip.ForeColor = Ui.Muted;
+            tip.BackColor = Color.Transparent;
+            tip.Tag = "hint";
+            g.Controls.Add(tip);
+
+            skinPicker = new SkinPicker();
+            skinPicker.SetBounds(14, 26, 464, 60);
+            skinPicker.SelectedId = s.ui.skin;
+            skinPicker.SelectedIdChanged += delegate { SelectSkin(skinPicker.SelectedId); };
+            g.Controls.Add(skinPicker);
+        }
+
+        /// <summary>点一个风格块：只改内存里的 ui.skin，并立刻按新皮肤重画整个设置窗口。</summary>
+        private void SelectSkin(string id)
+        {
+            s.ui.skin = Skins.Get(id).id;
+            ApplySkin();
+        }
+
         private void UpdateThemeName()
         {
             if (lblThemeName == null || picker == null) return;
@@ -1625,10 +1961,11 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             lblThemeName.Text = "当前：" + (Themes.IsCustom(t.id) ? "我的主题 · " : "") + t.name;
             if (btnEditTheme != null)
             {
+                bool locked = !Skins.Current(s.ui).IsDefault;
                 bool custom = Themes.IsCustom(t.id);
-                btnEditTheme.Enabled = custom;
-                btnEditTheme.ForeColor = custom ? AccentColor : Muted;
-                btnEditTheme.FlatAppearance.BorderColor = custom ? AccentColor : Color.FromArgb(208, 213, 222);
+                btnEditTheme.Enabled = !locked && custom;
+                btnEditTheme.ForeColor = (!locked && custom) ? Ui.Accent : Ui.Muted;
+                btnEditTheme.FlatAppearance.BorderColor = (!locked && custom) ? Ui.Accent : Ui.Edge;
             }
         }
 
@@ -1694,7 +2031,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildLook(TabPage page)
         {
-            var g = CardBox(page, "外观与提醒", 8, 248, 492, 190);
+            var g = CardBox(page, "外观与提醒", 8, 356, 492, 190);
 
             g.Controls.Add(Lbl("不透明度", 14, 28, 58, 24));
             numOpacity = Num(94, 76, 28, 56, 30, 100);
@@ -1760,7 +2097,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildBackup(TabPage page)
         {
-            var g = CardBox(page, "配置备份", 8, 444, 492, 112);
+            var g = CardBox(page, "配置备份", 8, 554, 492, 112);
             g.Controls.Add(Hint("换电脑或给同事复用：导出一份，带过去再导入。", 14, 24, 466, 18));
 
             var btnExport = FlatButton("导出配置…", 14, 48, 108, 30);
@@ -1815,6 +2152,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 store.Save(s);
                 schedIndex = 0;
                 LoadValues();
+                ApplySkin();
                 MessageBox.Show(this, "配置已导入，重启悬浮窗后完全生效。", "导入完成",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -1831,6 +2169,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             store.Save(s);
             schedIndex = 0;
             LoadValues();
+            ApplySkin();
         }
 
         // ---------------- 载入 / 保存 ----------------
@@ -1892,6 +2231,11 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 picker.SelectedId = s.ui.theme;
                 picker.Invalidate();
             }
+            if (skinPicker != null)
+            {
+                skinPicker.SelectedId = s.ui.skin;
+                skinPicker.Invalidate();
+            }
             UpdateThemeName();
 
             if (lstCalendars != null)
@@ -1937,13 +2281,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             int startMin, endMin;
             if (!SettingsExtensions.TryParseTime(tbStart.Text, out startMin))
             {
-                tabs.SelectedIndex = 0;
+                SelectPage(0);
                 MessageBox.Show(this, "上班时间的格式应为 HH:mm，例如 09:00。", "时间格式有误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
             if (!SettingsExtensions.TryParseTime(tbEnd.Text, out endMin))
             {
-                tabs.SelectedIndex = 0;
+                SelectPage(0);
                 MessageBox.Show(this, "下班时间的格式应为 HH:mm，例如 18:00。", "时间格式有误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
@@ -1956,13 +2300,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 int probe;
                 if (!SettingsExtensions.TryParseTime(f.start, out probe))
                 {
-                    tabs.SelectedIndex = 1;
+                    SelectPage(1);
                     MessageBox.Show(this, "「" + f.name + "」的开始时间应为 HH:mm，例如 11:50。", "时间格式有误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
                 if (!string.IsNullOrWhiteSpace(f.end) && !SettingsExtensions.TryParseTime(f.end, out probe))
                 {
-                    tabs.SelectedIndex = 1;
+                    SelectPage(1);
                     MessageBox.Show(this, "「" + f.name + "」的结束时间应为 HH:mm，留空表示只响一次。", "时间格式有误", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return false;
                 }
@@ -1993,6 +2337,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.opacity = (int)numOpacity.Value;
             s.ui.autoCollapseSeconds = (int)numAutoCollapse.Value;
             s.ui.theme = Themes.Get(picker.SelectedId).id;
+            s.ui.skin = skinPicker != null ? Skins.Get(skinPicker.SelectedId).id : Skins.DefaultId;
             s.ui.alwaysOnTop = cbTopMost.Checked;
             s.ui.showLunch = cbShowLunch.Checked;
             s.ui.reducedMotion = cbReducedMotion.Checked;
@@ -2048,6 +2393,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
             Themes.SetCustom(s.customThemes);
             store.Save(s);
+            ApplySkin();            // 设置窗口自己立刻按新皮肤重画（不重启窗口；悬浮窗由 Widget 在 OK 后重建）
 
             if (closeAfter)
             {
@@ -2085,6 +2431,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             l.SetBounds(x, y, w, h);
             l.ForeColor = Ui.Muted;
             l.BackColor = Color.Transparent;
+            l.Tag = "hint";
             return l;
         }
 
@@ -2114,9 +2461,20 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             b.Text = text;
             b.SetBounds(x, y, w, h);
             b.FlatStyle = FlatStyle.Flat;
-            b.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-            b.BackColor = Color.White;
+            b.UseVisualStyleBackColor = false;
+            b.FlatAppearance.BorderColor = Ui.Edge;
+            b.BackColor = Ui.Surface;
             b.ForeColor = Ui.Ink;
+            return b;
+        }
+
+        /// <summary>强调色按钮（描边 + 强调色文字），换肤时由 ApplySkin 统一刷色。</summary>
+        private static Button AccentButton(string text, int x, int y, int w, int h)
+        {
+            var b = FlatButton(text, x, y, w, h);
+            b.Tag = "accent";
+            b.ForeColor = Ui.Accent;
+            b.FlatAppearance.BorderColor = Ui.Accent;
             return b;
         }
 
@@ -2134,13 +2492,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             c.DrawItem += delegate(object sender, DrawItemEventArgs e)
             {
                 if (e.Index < 0 || e.Index >= ReminderStyles.Ids.Length) return;
-                e.DrawBackground();
+                using (var bg = new SolidBrush(Ui.InputBg)) e.Graphics.FillRectangle(bg, e.Bounds);
                 Color a, b, ink;
                 ReminderStyles.Resolve(ReminderStyles.Ids[e.Index], seed, out a, out b, out ink);
                 var band = new Rectangle(e.Bounds.X + 4, e.Bounds.Y + 4, 26, e.Bounds.Height - 8);
                 using (var br = new SolidBrush(a)) e.Graphics.FillRectangle(br, band.X, band.Y, band.Width, band.Height / 2);
                 using (var br = new SolidBrush(b)) e.Graphics.FillRectangle(br, band.X, band.Y + band.Height / 2, band.Width, band.Height - band.Height / 2);
-                using (var br = new SolidBrush(Color.FromArgb(38, 46, 64)))
+                using (var br = new SolidBrush(Ui.Ink))
                     e.Graphics.DrawString(c.Items[e.Index].ToString(), e.Font, br, e.Bounds.X + 36, e.Bounds.Y + 3);
                 e.DrawFocusRectangle();
             };
@@ -2181,7 +2539,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(440, 286);
-            BackColor = Color.White;
+            BackColor = Ui.WindowBg;
             Font = UiFont.Make(9f, FontStyle.Regular);
             AutoScaleMode = AutoScaleMode.None;
 
@@ -2240,8 +2598,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnBrowse.Text = "选文件";
             btnBrowse.SetBounds(348, 88, 78, 28);
             btnBrowse.FlatStyle = FlatStyle.Flat;
-            btnBrowse.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-            btnBrowse.BackColor = Color.White;
+            btnBrowse.FlatAppearance.BorderColor = Ui.Edge;
+            btnBrowse.BackColor = Ui.Surface;
             btnBrowse.Click += delegate { BrowseFile(); };
             Controls.Add(btnBrowse);
 
@@ -2254,8 +2612,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnCancel.Text = "取消";
             btnCancel.SetBounds(224, 232, 96, 32);
             btnCancel.FlatStyle = FlatStyle.Flat;
-            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-            btnCancel.BackColor = Color.White;
+            btnCancel.FlatAppearance.BorderColor = Ui.Edge;
+            btnCancel.BackColor = Ui.Surface;
             btnCancel.DialogResult = DialogResult.Cancel;
             Controls.Add(btnCancel);
 
@@ -2265,7 +2623,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnOk.FlatStyle = FlatStyle.Flat;
             btnOk.FlatAppearance.BorderSize = 0;
             btnOk.BackColor = Ui.Accent;
-            btnOk.ForeColor = Color.White;
+            btnOk.ForeColor = Ui.AccentInk;
             btnOk.Click += delegate { Confirm(); };
             Controls.Add(btnOk);
             AcceptButton = btnOk;
@@ -2379,7 +2737,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 300);
-            BackColor = Color.White;
+            BackColor = Ui.WindowBg;
             Font = UiFont.Make(9f, FontStyle.Regular);
             AutoScaleMode = AutoScaleMode.None;
 
@@ -2415,7 +2773,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnLogin.FlatStyle = FlatStyle.Flat;
             btnLogin.FlatAppearance.BorderSize = 0;
             btnLogin.BackColor = Ui.Accent;
-            btnLogin.ForeColor = Color.White;
+            btnLogin.ForeColor = Ui.AccentInk;
             btnLogin.Click += delegate { ToggleLogin(); };
             Controls.Add(btnLogin);
 
@@ -2423,8 +2781,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnClose.Text = "关闭";
             btnClose.SetBounds(350, 218, 96, 34);
             btnClose.FlatStyle = FlatStyle.Flat;
-            btnClose.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-            btnClose.BackColor = Color.White;
+            btnClose.FlatAppearance.BorderColor = Ui.Edge;
+            btnClose.BackColor = Ui.Surface;
             btnClose.DialogResult = DialogResult.Cancel;
             Controls.Add(btnClose);
             CancelButton = btnClose;
@@ -2525,140 +2883,755 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         }
     }
 
-    /// <summary>设置窗口的共用色。</summary>
+    /// <summary>
+    /// 设置窗口 / 对话框的共用色。以前是一组 readonly 浅色，现在由 Apply(ui) 按当前皮肤刷新：
+    /// 默认皮肤算出来的值和 v3.6 完全一样，其它五套换成 SkinDef 里那套令牌。
+    /// </summary>
     internal static class Ui
     {
-        public static readonly Color Accent = Color.FromArgb(64, 124, 245);
-        public static readonly Color Ink = Color.FromArgb(38, 46, 64);
-        public static readonly Color Muted = Color.FromArgb(120, 128, 146);
-        public static readonly Color CardBg = Color.White;
-        public static readonly Color CardBorder = Color.FromArgb(230, 234, 242);
+        public static readonly Color AccentDefault = Color.FromArgb(64, 124, 245);
+
+        public static SkinDef Skin = Skins.Get(Skins.DefaultId);
+        public static ThemeDef Theme = Themes.Get("midnight");
+
+        public static Color Accent = AccentDefault;
+        public static Color AccentInk = Color.White;
+        public static Color Ink = Color.FromArgb(38, 46, 64);
+        public static Color Muted = Color.FromArgb(120, 128, 146);
+        public static Color Dim = Color.FromArgb(160, 168, 182);
+        public static Color WindowBg = Color.FromArgb(246, 248, 251);
+        public static Color WindowEdge = Color.FromArgb(226, 231, 239);
+        public static Color CardBg = Color.White;
+        public static Color CardBorder = Color.FromArgb(230, 234, 242);
+        public static Color Surface = Color.White;          // 卡片表面（无垠 = 窗口底：不填卡片底）
+        public static Color Edge = Color.FromArgb(214, 220, 232);
+        public static Color InputBg = Color.White;
+        public static Color InputInk = Color.Black;
+        public static Color Hover = Color.FromArgb(240, 243, 249);
+        public static Color FooterBg = Color.White;
+        public static Color RailBg = Color.FromArgb(238, 241, 246);
+        public static Color RailActive = Color.White;
+        public static Color RailHover = Color.FromArgb(244, 246, 250);
+        public static Color SealBg = Color.Transparent;
+        public static Color SealInk = Color.White;
+        // 自绘列表（固定日程 / 日程小卡片）里的行色
+        public static Color RowBg = Color.FromArgb(250, 251, 253);
+        public static Color RowActive = Color.FromArgb(240, 245, 255);
+        public static Color RowText = Color.FromArgb(38, 46, 64);
+        public static Color RowSub = Color.FromArgb(120, 128, 146);
+        public static Color RowBorder = Color.FromArgb(226, 231, 240);
+        public static Color Track = Color.FromArgb(238, 241, 246);
+        public static Color Thumb = Color.FromArgb(188, 196, 210);
+        public static ThemeDef RowTheme = Themes.Get("midnight");
+
+        public static int RadiusCard = 10;
+        public static int RadiusWindow = 12;
+        public static int RadiusPill = 20;
+        public static bool HairlineCards;
+        public static bool Screws;
+        public static bool NeonEdge;
+        public static bool Seal;
+        public static double Sheen;
+        public static string HeadingFont;
+
+        public static void Apply(UiSettings ui)
+        {
+            var skin = Skins.Current(ui);
+            var theme = Skins.ResolveTheme(ui);
+            Skin = skin;
+            Theme = theme;
+            bool def = skin.IsDefault;
+
+            Accent = def ? AccentDefault : theme.accent;
+            AccentInk = skin.accentInk;
+            Ink = skin.windowInk;
+            Muted = skin.windowMuted;
+            Dim = Skins.Mix(skin.windowMuted, skin.windowBg, 0.35);
+            WindowBg = skin.windowBg;
+            WindowEdge = skin.windowEdge;
+            CardBg = skin.cardBg;
+            CardBorder = skin.cardEdge;
+            Surface = skin.hairlineCards ? skin.windowBg : skin.cardBg;
+            Edge = def ? Color.FromArgb(214, 220, 232) : skin.windowEdge;
+            InputBg = def ? Color.White : Skins.Mix(skin.cardBg, skin.windowBg, 0.45);
+            InputInk = def ? Color.Black : skin.windowInk;
+            Hover = Skins.Mix(skin.windowBg, Accent, def ? 0.05 : 0.12);
+            FooterBg = skin.footerBg;
+            RailBg = skin.railBg;
+            RailActive = skin.railActiveBg;
+            RailHover = Skins.Mix(skin.railActiveBg, skin.railBg, 0.55);
+            SealBg = skin.seal ? (skin.colors != null ? skin.colors.accent : theme.accent) : Color.Transparent;
+            SealInk = skin.accentInk;
+
+            RowBg = def ? Color.FromArgb(250, 251, 253) : Skins.Mix(skin.cardBg, skin.windowInk, 0.05);
+            RowActive = def ? Color.FromArgb(240, 245, 255) : Skins.Mix(skin.cardBg, Accent, 0.14);
+            RowText = def ? Color.FromArgb(38, 46, 64) : skin.windowInk;
+            RowSub = def ? Color.FromArgb(120, 128, 146) : skin.windowMuted;
+            RowBorder = def ? Color.FromArgb(226, 231, 240) : skin.windowEdge;
+            Track = def ? Color.FromArgb(238, 241, 246) : Skins.Mix(skin.cardBg, skin.windowBg, 0.5);
+            Thumb = def ? Color.FromArgb(188, 196, 210) : Skins.Mix(skin.windowMuted, skin.cardBg, 0.4);
+            RowTheme = def ? Themes.Get("midnight") : theme;
+
+            RadiusCard = skin.radiusCard;
+            RadiusWindow = skin.radiusWindow;
+            RadiusPill = skin.radiusPill;
+            HairlineCards = skin.hairlineCards;
+            Screws = skin.screws;
+            NeonEdge = skin.neonEdge;
+            Seal = skin.seal;
+            Sheen = skin.sheenAlpha;
+            HeadingFont = skin.headingFont;
+        }
+
+        /// <summary>圆角矩形路径；半径 0 时退化成直角矩形。</summary>
+        public static GraphicsPath RoundPath(Rectangle r, int radius)
+        {
+            int max = Math.Max(0, Math.Min(r.Width, r.Height) / 2);
+            radius = Math.Max(0, Math.Min(radius, max));
+            var path = new GraphicsPath();
+            if (radius <= 0) { path.AddRectangle(r); path.CloseFigure(); return path; }
+            int d = radius * 2;
+            path.AddArc(r.X, r.Y, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
     }
 
-        public class CardPanel : GroupBox
+    /// <summary>
+    /// 设置页里的分组卡片。默认皮肤还是白底 + 1px 边 + 10 DIP 圆角；
+    /// 无垠只画一条顶部细线不填底，云母加顶部高光，仪表画四角螺丝，霓虹加品红辉光边。
+    /// </summary>
+    public class CardPanel : GroupBox
+    {
+        public CardPanel()
         {
-            public CardPanel()
-            {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
-                    | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-                BackColor = Color.Transparent;
-            }
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.Transparent;
+        }
 
-            protected override void OnPaint(PaintEventArgs e)
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;   // 白底上的小字用 ClearType 才实
+            float k = g.DpiX / 96f;
+            var r = new Rectangle(0, 0, Width - 1, Height - 1);
+            int radius = Math.Max(1, (int)Math.Round(Ui.RadiusCard * k));
+
+            using (var path = Ui.RoundPath(r, radius))
             {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;   // 白底上的小字用 ClearType 才实
-                var r = new Rectangle(0, 0, Width - 1, Height - 1);
-                using (var path = Round(r, 10))
+                if (Ui.HairlineCards)
+                {
+                    // 无垠：不填卡片底，只留一条 1px 分组线（和设计稿的 .sc 一样）
+                    using (var b = new SolidBrush(Ui.WindowBg)) g.FillPath(b, path);
+                    using (var p = new Pen(Ui.WindowEdge, Math.Max(1f, k)))
+                        g.DrawLine(p, r.X, 0.5f, r.Right, 0.5f);
+                }
+                else
                 {
                     using (var b = new SolidBrush(Ui.CardBg)) g.FillPath(b, path);
-                    using (var p = new Pen(Ui.CardBorder, 1f)) g.DrawPath(p, path);
-                }
-                using (var f = UiFont.Make(9.5f, FontStyle.Bold))
-                using (var b = new SolidBrush(Ui.Ink))
-                    g.DrawString(Text, f, b, 14, 6);
-                g.SmoothingMode = SmoothingMode.Default;
-            }
-
-            private static GraphicsPath Round(Rectangle r, int radius)
-            {
-                int d = radius * 2;
-                var path = new GraphicsPath();
-                path.AddArc(r.X, r.Y, d, d, 180, 90);
-                path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-                path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-                path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-                path.CloseFigure();
-                return path;
-            }
-        }
-
-        /// <summary>主题色卡：一格一套配色，底色为主、高亮色压一条底边。</summary>
-        public class ThemePicker : Control
-        {
-            private string selectedId = "";
-            public event EventHandler SelectedIdChanged;
-
-            public ThemePicker()
-            {
-                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
-                    | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-                BackColor = Color.White;
-            }
-
-            public string SelectedId
-            {
-                get { return selectedId; }
-                set { selectedId = value == null ? "" : value; Invalidate(); }
-            }
-
-            private Rectangle ChipRect(int index)
-            {
-                int n = Themes.All.Length;
-                if (n <= 0) return Rectangle.Empty;
-                int cols = 10;
-                int rows = (n + cols - 1) / cols;
-                int gap = 6, pad = 2;
-                int cw = Math.Max(8, (Width - pad * 2 - (cols - 1) * gap) / cols);
-                int ch = Math.Max(8, (Height - pad * 2 - (rows - 1) * gap) / rows);
-                int row = index / cols, col = index % cols;
-                return new Rectangle(pad + col * (cw + gap), pad + row * (ch + gap), cw, ch);
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                Graphics g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;   // 白底上的小字用 ClearType 才实
-                g.Clear(BackColor);
-                for (int i = 0; i < Themes.All.Length; i++)
-                {
-                    var t = Themes.All[i];
-                    Rectangle r = ChipRect(i);
-                    if (r.Bottom > Height) break;
-                    using (var path = Round(r, 5))
+                    if (Ui.Sheen > 0.001)
                     {
-                        using (var b = new LinearGradientBrush(r, t.bgTop, t.bgBottom, 90f)) g.FillPath(b, path);
-                        bool sel = t.id == selectedId;
-                        using (var p = new Pen(sel ? Color.FromArgb(64, 124, 245) : Ui.CardBorder, sel ? 2f : 1f))
-                            g.DrawPath(p, path);
+                        // 顶部高光：云母 / 宣纸的「质感」来源
+                        var sr = new Rectangle(0, 0, Width, Math.Max(2, (int)(Height * 0.45f)));
+                        var state = g.Save();
+                        g.SetClip(path, CombineMode.Intersect);
+                        using (var br = new LinearGradientBrush(sr,
+                            Skins.Alpha(Color.White, Ui.Sheen), Color.FromArgb(0, Color.White), 90f))
+                            g.FillRectangle(br, sr);
+                        g.Restore(state);
                     }
-                    int barH = Math.Max(3, r.Height / 5);
-                    using (var b = new SolidBrush(t.accent))
-                        g.FillRectangle(b, r.X + 2, r.Bottom - barH - 2, r.Width - 4, barH);
+                    using (var p = new Pen(Ui.CardBorder, Math.Max(1f, k))) g.DrawPath(p, path);
+                    if (Ui.NeonEdge)
+                    {
+                        using (var p = new Pen(Skins.Alpha(Ui.Theme.accent, 0.18), 3f * k)) g.DrawPath(p, path);
+                        using (var p = new Pen(Skins.Alpha(Ui.Theme.accent, 0.55), 1.4f * k)) g.DrawPath(p, path);
+                    }
                 }
             }
 
-            private static GraphicsPath Round(Rectangle r, int radius)
-            {
-                int d = radius * 2;
-                var path = new GraphicsPath();
-                path.AddArc(r.X, r.Y, d, d, 180, 90);
-                path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
-                path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
-                path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
-                path.CloseFigure();
-                return path;
-            }
+            if (Ui.Screws) PaintScrews(g, k);
 
-            protected override void OnMouseDown(MouseEventArgs e)
-            {
-                base.OnMouseDown(e);
-                int index = HitTest(e.Location);
-                if (index < 0) return;
-                SelectedId = Themes.All[index].id;
-                Invalidate();
-                if (SelectedIdChanged != null) SelectedIdChanged(this, EventArgs.Empty);
-            }
+            using (var f = UiFont.MakeFamily(Ui.HeadingFont, 9.5f, FontStyle.Bold))
+            using (var b = new SolidBrush(Ui.Ink))
+                g.DrawString(Text, f, b, 14, 6);
+            g.SmoothingMode = SmoothingMode.Default;
+        }
 
-            private int HitTest(Point p)
+        /// <summary>仪表皮肤：四角小螺丝。</summary>
+        private void PaintScrews(Graphics g, float k)
+        {
+            float rad = 2.1f * k;
+            float inset = 7f * k;
+            Color body = Skins.Mix(Ui.CardBg, Ui.Ink, 0.32);
+            Color slot = Skins.Mix(Ui.CardBg, Color.White, 0.55);
+            PointF[] pts = new PointF[]
             {
-                for (int i = 0; i < Themes.All.Length; i++)
-                    if (ChipRect(i).Contains(p)) return i;
-                return -1;
+                new PointF(inset, inset), new PointF(Width - inset, inset),
+                new PointF(inset, Height - inset), new PointF(Width - inset, Height - inset)
+            };
+            foreach (var p in pts)
+            {
+                using (var b = new SolidBrush(body))
+                    g.FillEllipse(b, p.X - rad, p.Y - rad, rad * 2, rad * 2);
+                using (var pen = new Pen(slot, Math.Max(1f, 0.9f * k)))
+                    g.DrawLine(pen, p.X - rad * 0.55f, p.Y, p.X + rad * 0.55f, p.Y);
             }
         }
+    }
+
+    /// <summary>主题色卡：一格一套配色，底色为主、高亮色压一条底边。非默认皮肤时置灰并可点。</summary>
+    public class ThemePicker : Control
+    {
+        private string selectedId = "";
+        public event EventHandler SelectedIdChanged;
+        /// <summary>非默认皮肤：色卡不可点、画成置灰（提示「该风格自带配色」）。</summary>
+        public bool Locked;
+
+        public ThemePicker()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.White;
+        }
+
+        public string SelectedId
+        {
+            get { return selectedId; }
+            set { selectedId = value == null ? "" : value; Invalidate(); }
+        }
+
+        private Rectangle ChipRect(int index)
+        {
+            int n = Themes.All.Length;
+            if (n <= 0) return Rectangle.Empty;
+            int cols = 10;
+            int rows = (n + cols - 1) / cols;
+            int gap = 6, pad = 2;
+            int cw = Math.Max(8, (Width - pad * 2 - (cols - 1) * gap) / cols);
+            int ch = Math.Max(8, (Height - pad * 2 - (rows - 1) * gap) / rows);
+            int row = index / cols, col = index % cols;
+            return new Rectangle(pad + col * (cw + gap), pad + row * (ch + gap), cw, ch);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;   // 白底上的小字用 ClearType 才实
+            g.Clear(BackColor);
+            for (int i = 0; i < Themes.All.Length; i++)
+            {
+                var t = Themes.All[i];
+                Rectangle r = ChipRect(i);
+                if (r.Bottom > Height) break;
+                Color top = t.bgTop, bottom = t.bgBottom, accent = t.accent;
+                if (Locked)
+                {
+                    top = Skins.Mix(t.bgTop, Ui.CardBg, 0.62);
+                    bottom = Skins.Mix(t.bgBottom, Ui.CardBg, 0.62);
+                    accent = Skins.Mix(t.accent, Ui.CardBg, 0.55);
+                }
+                using (var path = Ui.RoundPath(r, 5))
+                {
+                    using (var b = new LinearGradientBrush(r, top, bottom, 90f)) g.FillPath(b, path);
+                    bool sel = !Locked && t.id == selectedId;
+                    using (var p = new Pen(sel ? Ui.Accent : Ui.CardBorder, sel ? 2f : 1f))
+                        g.DrawPath(p, path);
+                }
+                int barH = Math.Max(3, r.Height / 5);
+                using (var b = new SolidBrush(accent))
+                    g.FillRectangle(b, r.X + 2, r.Bottom - barH - 2, r.Width - 4, barH);
+            }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            if (Locked || !Enabled) return;
+            int index = HitTest(e.Location);
+            if (index < 0) return;
+            SelectedId = Themes.All[index].id;
+            Invalidate();
+            if (SelectedIdChanged != null) SelectedIdChanged(this, EventArgs.Empty);
+        }
+
+        private int HitTest(Point p)
+        {
+            for (int i = 0; i < Themes.All.Length; i++)
+                if (ChipRect(i).Contains(p)) return i;
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// 外观页「界面风格」：默认 + 5 套皮肤，一排 6 个可点的风格块（缩略配色 + 名字 + 一句定位）。
+    /// 选中画 2px 强调色描边；点一下由 SettingsForm 立刻预览（只改内存里的 ui.skin）。
+    /// </summary>
+    public class SkinPicker : Control
+    {
+        private string selectedId = Skins.DefaultId;
+        private int hover = -1;
+        public event EventHandler SelectedIdChanged;
+
+        public SkinPicker()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.White;
+            Cursor = Cursors.Hand;
+        }
+
+        public string SelectedId
+        {
+            get { return selectedId; }
+            set { selectedId = Skins.Get(value).id; Invalidate(); }
+        }
+
+        /// <summary>6 个风格块（顺序 = Skins.All：默认 / 无垠 / 云母 / 宣纸 / 仪表 / 霓虹）。</summary>
+        public SkinDef[] Items { get { return Skins.All; } }
+
+        /// <summary>第 index 个风格块的命中矩形（给验收/探针反射用）。</summary>
+        public Rectangle RectOf(int index)
+        {
+            int n = Skins.All.Length;
+            if (n <= 0 || index < 0 || index >= n) return Rectangle.Empty;
+            var g = CreateGraphics();
+            try
+            {
+                float k = g.DpiX / 96f;
+                int gap = (int)Math.Round(6 * k);
+                int w = Math.Max(1, (Width - (n - 1) * gap) / n);
+                int h = Math.Max(1, Math.Min(Height, (int)Math.Round(60 * k)));
+                return new Rectangle(index * (w + gap), 0, w, h);
+            }
+            finally { g.Dispose(); }
+        }
+
+        /// <summary>点在哪一块上（-1 = 空白）。</summary>
+        public int HitTest(Point p)
+        {
+            for (int i = 0; i < Skins.All.Length; i++)
+                if (RectOf(i).Contains(p)) return i;
+            return -1;
+        }
+
+        /// <summary>每个风格块底下的一句定位（比 SkinDef.tagline 短，72 DIP 宽放得下）。</summary>
+        private static string ShortTag(SkinDef s)
+        {
+            if (s == null) return "";
+            switch (s.id)
+            {
+                case "quiet": return "近黑细线";
+                case "mica": return "磨砂玻璃";
+                case "paper": return "宣纸朱砂";
+                case "instrument": return "金属琥珀";
+                case "neon": return "品红霓虹";
+                default: return Themes.All.Length + " 套主题";
+            }
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.Clear(BackColor);
+            float k = g.DpiX / 96f;
+            var all = Skins.All;
+            for (int i = 0; i < all.Length; i++)
+            {
+                var skin = all[i];
+                Rectangle r = RectOf(i);
+                if (r.Width <= 2 || r.Height <= 2) continue;
+                bool sel = skin.id == selectedId;
+                bool hov = i == hover;
+
+                int radius = Math.Max(2, (int)Math.Round(6 * k));
+                using (var path = Ui.RoundPath(r, radius))
+                {
+                    using (var b = new SolidBrush(skin.windowBg)) g.FillPath(b, path);
+                    // 上半截是这套皮肤的「窗口底 → 卡片底」渐变，底边压一条强调色
+                    int stripH = Math.Max(6, (int)Math.Round(26 * k));
+                    var strip = new Rectangle(r.X, r.Y, r.Width, stripH);
+                    var state = g.Save();
+                    g.SetClip(path, CombineMode.Intersect);
+                    Color bgTop = skin.colors != null ? skin.colors.bgTop : Ui.Theme.bgTop;
+                    Color bgBottom = skin.colors != null ? skin.colors.bgBottom : Ui.Theme.bgBottom;
+                    using (var b = new LinearGradientBrush(strip, bgTop, bgBottom, 90f)) g.FillRectangle(b, strip);
+                    Color accent = skin.colors != null ? skin.colors.accent : Ui.Theme.accent;
+                    Color accent2 = skin.accent2.IsEmpty ? accent : skin.accent2;
+                    using (var b = new LinearGradientBrush(
+                        new Rectangle(strip.X, strip.Bottom - Math.Max(2, (int)(3 * k)), strip.Width, Math.Max(2, (int)(3 * k))),
+                        accent, accent2, 0f))
+                        g.FillRectangle(b, strip.X, strip.Bottom - Math.Max(2, (int)(3 * k)),
+                            strip.Width, Math.Max(2, (int)(3 * k)));
+                    // 缩略图左上角一个小圆点（和设计稿的色卡一样）
+                    float dot = 2.2f * k;
+                    using (var b = new SolidBrush(accent))
+                        g.FillEllipse(b, r.X + 5 * k, r.Y + 5 * k, dot * 2, dot * 2);
+                    g.Restore(state);
+                }
+
+                using (var f = UiFont.MakeFamily(skin.headingFont, 9f, FontStyle.Bold))
+                using (var b = new SolidBrush(skin.windowInk))
+                {
+                    var nr = new RectangleF(r.X, r.Y + 25 * k, r.Width, 16 * k);
+                    var sf = new StringFormat();
+                    sf.Alignment = StringAlignment.Center;
+                    sf.LineAlignment = StringAlignment.Center;
+                    g.DrawString(skin.name, f, b, nr, sf);
+                }
+                using (var f = UiFont.MakeFamily(skin.headingFont, 7.5f, FontStyle.Regular))
+                using (var b = new SolidBrush(skin.windowMuted))
+                {
+                    var tr = new RectangleF(r.X, r.Y + 40 * k, r.Width, 14 * k);
+                    var sf = new StringFormat();
+                    sf.Alignment = StringAlignment.Center;
+                    sf.LineAlignment = StringAlignment.Center;
+                    g.DrawString(ShortTag(skin), f, b, tr, sf);
+                }
+
+                int border = sel || hov ? 2 : 1;
+                using (var path = Ui.RoundPath(r, radius))
+                using (var p = new Pen(sel ? Ui.Accent : (hov ? Skins.Mix(Ui.Accent, Ui.Muted, 0.45) : Ui.Edge), border * k))
+                    g.DrawPath(p, path);
+            }
+            g.SmoothingMode = SmoothingMode.Default;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int h = HitTest(e.Location);
+            if (h != hover) { hover = h; Invalidate(); }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (hover != -1) { hover = -1; Invalidate(); }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            int index = HitTest(e.Location);
+            if (index < 0) return;
+            string id = Skins.All[index].id;
+            if (id == selectedId) return;
+            selectedId = id;
+            Invalidate();
+            if (SelectedIdChanged != null) SelectedIdChanged(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>设置窗口左栏：顶部 app 标识 + 版本号，7 项导航（考勤/固定日程/提醒/外观/日程/工资/纸条），底部配置位置。</summary>
+    internal class SettingsRail : Control
+    {
+        public int SelectedIndex;
+        public string[] FootLines = new string[0];
+        public event Action<int> PageChanged;
+
+        private int hover = -1;
+
+        public SettingsRail()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Ui.RailBg;
+            Cursor = Cursors.Hand;
+        }
+
+        private float K
+        {
+            get
+            {
+                using (var g = Graphics.FromHwnd(IntPtr.Zero)) return g.DpiX / 96f;
+            }
+        }
+
+        private int NavTop { get { return (int)Math.Round(76 * K); } }
+        private int ItemH { get { return (int)Math.Round(33 * K); } }
+        private int ItemGap { get { return (int)Math.Round(2 * K); } }
+        private int Pad { get { return (int)Math.Round(12 * K); } }
+
+        private Rectangle NavRect(int i)
+        {
+            return new Rectangle(Pad, NavTop + i * (ItemH + ItemGap), Width - Pad - (int)Math.Round(8 * K), ItemH);
+        }
+
+        private int IndexAt(int y)
+        {
+            for (int i = 0; i < SettingsHead.Titles.Length; i++)
+                if (NavRect(i).Contains(new Point(Pad + 2, y))) return i;
+            return -1;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            float k = g.DpiX / 96f;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            using (var b = new SolidBrush(Ui.RailBg)) g.FillRectangle(b, ClientRectangle);
+            using (var p = new Pen(Ui.WindowEdge, 1f)) g.DrawLine(p, Width - 1, 0, Width - 1, Height);
+
+            int pad = Pad;
+            var mark = new Rectangle(pad, (int)Math.Round(15 * k), (int)Math.Round(20 * k), (int)Math.Round(20 * k));
+            using (var path = Ui.RoundPath(mark, (int)Math.Round(6 * k)))
+            using (var b = new SolidBrush(Ui.Accent)) g.FillPath(b, path);
+            using (var f = UiFont.MakeFamily(Ui.HeadingFont, 9.5f, FontStyle.Bold))
+            {
+                var sf = new StringFormat();
+                sf.Alignment = StringAlignment.Center;
+                sf.LineAlignment = StringAlignment.Center;
+                using (var b = new SolidBrush(Ui.AccentInk)) g.DrawString("班", f, b, mark, sf);
+            }
+            using (var f = UiFont.Make(9.5f, FontStyle.Bold))
+            using (var b = new SolidBrush(Ui.Ink))
+                g.DrawString("上班工具箱", f, b, mark.Right + (int)Math.Round(7 * k), mark.Y - (int)Math.Round(1 * k));
+
+            // 版本号小胶囊
+            string ver = "v" + AppInfo.Version;
+            using (var f = UiFont.MakeNumber(7.5f, FontStyle.Bold))
+            {
+                SizeF vs = g.MeasureString(ver, f);
+                int cw = (int)Math.Round(vs.Width + 10 * k), ch = (int)Math.Round(15 * k);
+                var chip = new Rectangle(pad, mark.Bottom + (int)Math.Round(7 * k), cw, ch);
+                using (var path = Ui.RoundPath(chip, (int)Math.Round(5 * k)))
+                {
+                    using (var b = new SolidBrush(Ui.RailBg)) g.FillPath(b, path);
+                    using (var p = new Pen(Ui.WindowEdge, 1f)) g.DrawPath(p, path);
+                }
+                using (var b = new SolidBrush(Ui.Muted))
+                {
+                    var sf = new StringFormat();
+                    sf.Alignment = StringAlignment.Center;
+                    sf.LineAlignment = StringAlignment.Center;
+                    g.DrawString(ver, f, b, chip, sf);
+                }
+            }
+
+            // 7 项导航
+            for (int i = 0; i < SettingsHead.Titles.Length; i++)
+            {
+                Rectangle r = NavRect(i);
+                bool sel = i == SelectedIndex;
+                bool hov = i == hover;
+                if (sel || hov)
+                {
+                    using (var path = Ui.RoundPath(r, (int)Math.Round(8 * k)))
+                    using (var b = new SolidBrush(sel ? Ui.RailActive : Ui.RailHover)) g.FillPath(b, path);
+                }
+                if (sel)
+                {
+                    var bar = new Rectangle(pad - (int)Math.Round(6 * k), r.Y + (int)Math.Round(9 * k),
+                        (int)Math.Round(2 * k), r.Height - (int)Math.Round(18 * k));
+                    using (var path = Ui.RoundPath(bar, bar.Width))
+                    using (var b = new SolidBrush(Ui.Accent)) g.FillPath(b, path);
+                }
+                var icon = new Rectangle(r.X + (int)Math.Round(10 * k), r.Y + (r.Height - (int)Math.Round(14 * k)) / 2,
+                    (int)Math.Round(14 * k), (int)Math.Round(14 * k));
+                DrawIcon(g, i, icon, sel ? Ui.Accent : Ui.Dim, k);
+                using (var f = UiFont.Make(9.5f, sel ? FontStyle.Bold : FontStyle.Regular))
+                using (var b = new SolidBrush(sel ? Ui.Ink : Ui.Muted))
+                {
+                    var sf = new StringFormat();
+                    sf.LineAlignment = StringAlignment.Center;
+                    g.DrawString(SettingsHead.Titles[i], f, b,
+                        new RectangleF(r.X + 32 * k, r.Y, r.Width - 34 * k, r.Height), sf);
+                }
+            }
+
+            // 底部：配置位置 + 上下班时间
+            int lineH = (int)Math.Round(12 * k);
+            int footTop = Height - pad - (int)Math.Round(12 * k) - lineH * (FootLines.Length + 1);
+            using (var f = UiFont.Make(8f, FontStyle.Bold))
+            using (var b = new SolidBrush(Ui.Dim))
+                g.DrawString("配置", f, b, pad, footTop);
+            for (int i = 0; i < FootLines.Length; i++)
+            {
+                Rectangle lr = new Rectangle(pad, footTop + lineH * (i + 1), Width - pad * 2 + 2, lineH);
+                using (var f = UiFont.Make(7.5f, FontStyle.Regular))
+                    TextRenderer.DrawText(g, FootLines[i] ?? "", f, lr, Ui.Muted,
+                        TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            }
+
+            g.SmoothingMode = SmoothingMode.Default;
+        }
+
+        /// <summary>7 个极简图标：圆钟 / 日历 / 铃铛 / 调色盘 / 2×2 格子 / ¥ / 纸飞机。</summary>
+        private static void DrawIcon(Graphics g, int kind, Rectangle r, Color c, float k)
+        {
+            using (var pen = new Pen(c, Math.Max(1f, 1.3f * k)))
+            using (var brush = new SolidBrush(c))
+            {
+                float x = r.X, y = r.Y, w = r.Width, h = r.Height;
+                switch (kind)
+                {
+                    case 0:   // 考勤：圆钟
+                        g.DrawEllipse(pen, x + w * 0.08f, y + h * 0.08f, w * 0.84f, h * 0.84f);
+                        g.DrawLine(pen, x + w * 0.5f, y + h * 0.3f, x + w * 0.5f, y + h * 0.52f);
+                        g.DrawLine(pen, x + w * 0.5f, y + h * 0.52f, x + w * 0.7f, y + h * 0.64f);
+                        break;
+                    case 1:   // 固定日程：日历
+                        g.DrawRectangle(pen, x + w * 0.1f, y + h * 0.2f, w * 0.8f, h * 0.7f);
+                        g.DrawLine(pen, x + w * 0.1f, y + h * 0.42f, x + w * 0.9f, y + h * 0.42f);
+                        g.DrawLine(pen, x + w * 0.32f, y + h * 0.1f, x + w * 0.32f, y + h * 0.3f);
+                        g.DrawLine(pen, x + w * 0.68f, y + h * 0.1f, x + w * 0.68f, y + h * 0.3f);
+                        break;
+                    case 2:   // 提醒：铃铛
+                        g.DrawArc(pen, x + w * 0.16f, y + h * 0.14f, w * 0.68f, h * 0.56f, 180, 180);
+                        g.DrawLine(pen, x + w * 0.16f, y + h * 0.42f, x + w * 0.24f, y + h * 0.78f);
+                        g.DrawLine(pen, x + w * 0.84f, y + h * 0.42f, x + w * 0.76f, y + h * 0.78f);
+                        g.DrawLine(pen, x + w * 0.24f, y + h * 0.78f, x + w * 0.76f, y + h * 0.78f);
+                        g.FillEllipse(brush, x + w * 0.42f, y + h * 0.8f, w * 0.16f, h * 0.12f);
+                        break;
+                    case 3:   // 外观：调色盘
+                        g.DrawEllipse(pen, x + w * 0.08f, y + h * 0.08f, w * 0.84f, h * 0.84f);
+                        g.FillEllipse(brush, x + w * 0.3f, y + h * 0.3f, w * 0.13f, h * 0.13f);
+                        g.FillEllipse(brush, x + w * 0.56f, y + h * 0.28f, w * 0.13f, h * 0.13f);
+                        g.FillEllipse(brush, x + w * 0.62f, y + h * 0.56f, w * 0.13f, h * 0.13f);
+                        break;
+                    case 4:   // 日程：2×2 格子
+                        g.DrawRectangle(pen, x + w * 0.12f, y + h * 0.12f, w * 0.34f, h * 0.34f);
+                        g.DrawRectangle(pen, x + w * 0.54f, y + h * 0.12f, w * 0.34f, h * 0.34f);
+                        g.DrawRectangle(pen, x + w * 0.12f, y + h * 0.54f, w * 0.34f, h * 0.34f);
+                        g.DrawRectangle(pen, x + w * 0.54f, y + h * 0.54f, w * 0.34f, h * 0.34f);
+                        break;
+                    case 5:   // 工资：¥
+                        using (var f = UiFont.MakeNumber(8.5f, FontStyle.Bold))
+                        {
+                            var sf = new StringFormat();
+                            sf.Alignment = StringAlignment.Center;
+                            sf.LineAlignment = StringAlignment.Center;
+                            g.DrawString("¥", f, brush, r, sf);
+                        }
+                        break;
+                    default:  // 纸条：纸飞机
+                        var plane = new PointF[]
+                        {
+                            new PointF(x + w * 0.08f, y + h * 0.5f),
+                            new PointF(x + w * 0.92f, y + h * 0.12f),
+                            new PointF(x + w * 0.5f, y + h * 0.9f),
+                            new PointF(x + w * 0.42f, y + h * 0.58f)
+                        };
+                        g.DrawPolygon(pen, plane);
+                        g.DrawLine(pen, x + w * 0.42f, y + h * 0.58f, x + w * 0.92f, y + h * 0.12f);
+                        break;
+                }
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int h = IndexAt(e.Y);
+            if (h != hover) { hover = h; Invalidate(); }
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (hover != -1) { hover = -1; Invalidate(); }
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            int i = IndexAt(e.Y);
+            if (i < 0) return;
+            SelectedIndex = i;
+            Invalidate();
+            if (PageChanged != null) PageChanged(i);
+        }
+    }
+
+    /// <summary>内容区标题条：当前页名字 + 一句说明；宣纸皮肤下「外观」页右上角画朱砂印章。</summary>
+    internal class SettingsHead : Control
+    {
+        public static readonly string[] Titles = new string[]
+        {
+            "考勤", "固定日程", "提醒", "外观", "日程", "工资", "纸条"
+        };
+
+        public static readonly string[] SubTitles = new string[]
+        {
+            "班次、工作日与节假日",
+            "午休 / 晚休 / 下班与自建日程",
+            "飞书考勤对话与日程提醒",
+            "主题、字体、提醒动画与配置备份",
+            "多份日历订阅与四类通知样式",
+            "月工资与发薪日",
+            "小纸条的会话面板与公共中继"
+        };
+
+        private int pageIndex;
+        public int PageIndex
+        {
+            get { return pageIndex; }
+            set { pageIndex = Math.Max(0, Math.Min(Titles.Length - 1, value)); Invalidate(); }
+        }
+
+        public SettingsHead()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Ui.WindowBg;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            float k = g.DpiX / 96f;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            using (var b = new SolidBrush(Ui.WindowBg)) g.FillRectangle(b, ClientRectangle);
+
+            int left = (int)Math.Round(16 * k);
+            using (var f = UiFont.MakeFamily(Ui.HeadingFont, 13f, FontStyle.Bold))
+            {
+                string title = Titles[pageIndex];
+                SizeF ts = g.MeasureString(title, f);
+                using (var b = new SolidBrush(Ui.Ink))
+                    g.DrawString(title, f, b, left, (int)Math.Round(9 * k));
+                using (var sf = UiFont.Make(9f, FontStyle.Regular))
+                using (var sb = new SolidBrush(Ui.Muted))
+                    g.DrawString(SubTitles[pageIndex], sf, sb,
+                        left + (int)ts.Width + (int)Math.Round(14 * k),
+                        (int)Math.Round(9 * k) + (int)Math.Round(ts.Height * 0.42f));
+            }
+
+            // 宣纸：外观页标题右侧一枚朱砂「班」印（26 DIP，圆角 3，白字，略歪 -4°）
+            if (Ui.Seal && pageIndex == 3)
+            {
+                int size = (int)Math.Round(26 * k);
+                int x = Width - (int)Math.Round(16 * k) - size;
+                int y = (int)Math.Round(9 * k);
+                var state = g.Save();
+                g.TranslateTransform(x + size / 2f, y + size / 2f);
+                g.RotateTransform(-4f);
+                var box = new Rectangle(-size / 2, -size / 2, size, size);
+                using (var path = Ui.RoundPath(box, (int)Math.Round(3 * k)))
+                using (var b = new SolidBrush(Ui.SealBg)) g.FillPath(b, path);
+                using (var f = UiFont.MakeFamily(Ui.HeadingFont, 12f, FontStyle.Bold))
+                {
+                    var sf = new StringFormat();
+                    sf.Alignment = StringAlignment.Center;
+                    sf.LineAlignment = StringAlignment.Center;
+                    using (var b = new SolidBrush(Ui.SealInk)) g.DrawString("班", f, b, box, sf);
+                }
+                g.Restore(state);
+            }
+
+            g.SmoothingMode = SmoothingMode.Default;
+        }
+    }
 
         /// <summary>固定日程列表：一行一张小卡片，左边是这套配色，右边是名字和时间。</summary>
         public class ScheduleList : Control
@@ -2784,13 +3757,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                         bool sel = i == selected;
                         using (var path = RoundRect(r, (int)Math.Round(9 * k)))
                         {
-                            using (var b = new SolidBrush(sel ? Color.FromArgb(240, 245, 255) : Color.FromArgb(250, 251, 253)))
+                            using (var b = new SolidBrush(sel ? Ui.RowActive : Ui.RowBg))
                                 g.FillPath(b, path);
-                            using (var pen = new Pen(sel ? Color.FromArgb(64, 124, 245) : Color.FromArgb(226, 231, 240), sel ? 2f : 1f))
+                            using (var pen = new Pen(sel ? Ui.Accent : Ui.RowBorder, sel ? 2f : 1f))
                                 g.DrawPath(pen, path);
                         }
                         Color a, b2, ink;
-                        ReminderStyles.Resolve(f.styleId, Themes.Get("midnight"), out a, out b2, out ink);
+                        ReminderStyles.Resolve(f.styleId, Ui.RowTheme, out a, out b2, out ink);
                         int pad = (int)Math.Round(8 * k);
                         var chip = new Rectangle(r.X + pad, r.Y + pad, (int)Math.Round(8 * k), r.Height - pad * 2);
                         using (var br = new SolidBrush(a)) g.FillRectangle(br, chip.X, chip.Y, chip.Width, chip.Height / 2 + 1);
@@ -2798,13 +3771,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                         int tx = r.X + pad * 2 + chip.Width;
                         string title = f.name + (f.role == "lunch" && f.deduct ? "（扣工时）" : "");
                         if (!f.enabled) title += "  · 已停用";
-                        using (var br = new SolidBrush(f.enabled ? Color.FromArgb(38, 46, 64) : Color.FromArgb(150, 156, 168)))
+                        using (var br = new SolidBrush(f.enabled ? Ui.RowText : Ui.Dim))
                             g.DrawString(title, fName, br, tx, r.Y + (int)Math.Round(4 * k));
                         string sub = f.IsOffWork
                             ? "按班次下班时间 · " + f.RepeatLabel
                             : f.start + (string.IsNullOrWhiteSpace(f.end) ? "" : "–" + f.end) + " · " + f.RepeatLabel;
                         if (!f.notify) sub += " · 不提醒";
-                        using (var br = new SolidBrush(Color.FromArgb(120, 128, 146)))
+                        using (var br = new SolidBrush(Ui.RowSub))
                             g.DrawString(sub, fSub, br, tx, r.Y + (int)Math.Round(24 * k));
                     }
                 }
@@ -2812,11 +3785,11 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 // 内容超出一屏就画一条细滚动条，告诉用户下面还有
                 if (NeedsBar)
                 {
-                    using (var track = new SolidBrush(Color.FromArgb(238, 241, 246)))
+                    using (var track = new SolidBrush(Ui.Track))
                         g.FillRectangle(track, Width - BarW, 0, BarW, Height);
                     var th = ThumbRect();
                     using (var path = RoundRect(new Rectangle(th.X, th.Y, th.Width - 1, th.Height - 1), BarW / 2))
-                    using (var br = new SolidBrush(Color.FromArgb(188, 196, 210)))
+                    using (var br = new SolidBrush(Ui.Thumb))
                         g.FillPath(br, path);
                 }
             }
@@ -2953,9 +3926,9 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;   // 白底上的小字用 ClearType 才实
                 g.Clear(BackColor);
-                using (var bg = new SolidBrush(Color.FromArgb(247, 248, 251)))
+                using (var bg = new SolidBrush(Ui.Surface))
                     g.FillRectangle(bg, 0, 0, Width, Height);
-                using (var bp = new Pen(Color.FromArgb(232, 236, 244)))
+                using (var bp = new Pen(Ui.RowBorder))
                     g.DrawRectangle(bp, 0, 0, Width - 1, Height - 1);
                 float k = K;
                 if (items.Count == 0)
@@ -2963,7 +3936,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                     var sfEmpty = new StringFormat();
                     sfEmpty.Alignment = StringAlignment.Center;
                     sfEmpty.LineAlignment = StringAlignment.Center;
-                    using (var brEmpty = new SolidBrush(Color.FromArgb(150, 156, 168)))
+                    using (var brEmpty = new SolidBrush(Ui.Dim))
                     using (var fEmpty = UiFont.Make(8.5f))
                         g.DrawString("还没有日程\r\n右边填一条，点「添加日程」", fEmpty, brEmpty,
                             new RectangleF(0, 0, Width, Height), sfEmpty);
@@ -2982,28 +3955,28 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                         bool sel = i == selected, open = i == expanded;
                         using (var path = RoundRect(r, (int)Math.Round(8 * k)))
                         {
-                            using (var b = new SolidBrush(sel ? Color.FromArgb(240, 245, 255) : Color.White))
+                            using (var b = new SolidBrush(sel ? Ui.RowActive : Ui.RowBg))
                                 g.FillPath(b, path);
-                            using (var pen = new Pen(sel ? Color.FromArgb(64, 124, 245) : Color.FromArgb(226, 231, 240), sel ? 2f : 1f))
+                            using (var pen = new Pen(sel ? Ui.Accent : Ui.RowBorder, sel ? 2f : 1f))
                                 g.DrawPath(pen, path);
                         }
                         DateTime start = Reminders.ParseStart(ev);
                         string head = start == DateTime.MinValue ? "时间无效" : start.ToString("MM-dd HH:mm") + " 提醒";
                         if (start != DateTime.MinValue && start < DateTime.Now) head = "已过 · " + start.ToString("MM-dd HH:mm");
                         int pad = (int)Math.Round(8 * k);
-                        using (var br = new SolidBrush(Color.FromArgb(130, 138, 154)))
+                        using (var br = new SolidBrush(Ui.RowSub))
                             g.DrawString(head, fHead, br, r.X + pad, r.Y + (int)Math.Round(4 * k));
-                        using (var br = new SolidBrush(Color.FromArgb(38, 46, 64)))
+                        using (var br = new SolidBrush(Ui.RowText))
                             g.DrawString(Clip(ev.title, r.Width - pad * 2, fTitle, g), fTitle, br, r.X + pad, r.Y + (int)Math.Round(18 * k));
                         if (open)
                         {
                             string when = Reminders.TimeRange(ev);
                             string place = string.IsNullOrWhiteSpace(ev.place) ? "未填位置" : ev.place;
                             string body = when + " · " + place;
-                            using (var br = new SolidBrush(Color.FromArgb(96, 104, 122)))
+                            using (var br = new SolidBrush(Ui.Dim))
                                 g.DrawString(body, fBody, br, r.X + pad, r.Y + (int)Math.Round(46 * k));
                             string detail = string.IsNullOrWhiteSpace(ev.detail) ? "（没有备注）" : ev.detail;
-                            using (var br = new SolidBrush(Color.FromArgb(96, 104, 122)))
+                            using (var br = new SolidBrush(Ui.Dim))
                                 g.DrawString(Clip(detail, r.Width - pad * 2, fBody, g), fBody, br, r.X + pad, r.Y + (int)Math.Round(68 * k));
                         }
                     }
@@ -3078,7 +4051,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
             ClientSize = new Size(460, 368);
-            BackColor = Color.White;
+            BackColor = Ui.WindowBg;
             Font = UiFont.Make(9f, FontStyle.Regular);
             AutoScaleMode = AutoScaleMode.None;
 
@@ -3142,8 +4115,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnCancel.Text = "取消";
             btnCancel.SetBounds(248, 312, 96, 32);
             btnCancel.FlatStyle = FlatStyle.Flat;
-            btnCancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-            btnCancel.BackColor = Color.White;
+            btnCancel.FlatAppearance.BorderColor = Ui.Edge;
+            btnCancel.BackColor = Ui.Surface;
             btnCancel.DialogResult = DialogResult.Cancel;
             Controls.Add(btnCancel);
 
@@ -3153,7 +4126,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnOk.FlatStyle = FlatStyle.Flat;
             btnOk.FlatAppearance.BorderSize = 0;
             btnOk.BackColor = Ui.Accent;
-            btnOk.ForeColor = Color.White;
+            btnOk.ForeColor = Ui.AccentInk;
             btnOk.Click += delegate
             {
                 ResultTextFont = selText;
@@ -3303,7 +4276,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 AutoScaleMode = AutoScaleMode.None;
                 ClientSize = new Size(452, 390);
                 Font = UiFont.Make(9f, FontStyle.Regular);
-                BackColor = Color.White;
+                BackColor = Ui.WindowBg;
                 FromColor(bgColor);
 
                 sv = new SvPanel();
@@ -3379,7 +4352,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 ok.FlatStyle = FlatStyle.Flat;
                 ok.FlatAppearance.BorderSize = 0;
                 ok.BackColor = Ui.Accent;
-                ok.ForeColor = Color.White;
+                ok.ForeColor = Ui.AccentInk;
                 ok.Click += delegate
                 {
                     ThemeName = tbName.Text.Trim();
@@ -3396,8 +4369,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 cancel.Text = "取消";
                 cancel.SetBounds(344, 336, 92, 32);
                 cancel.FlatStyle = FlatStyle.Flat;
-                cancel.FlatAppearance.BorderColor = Color.FromArgb(214, 220, 232);
-                cancel.BackColor = Color.White;
+                cancel.FlatAppearance.BorderColor = Ui.Edge;
+                cancel.BackColor = Ui.Surface;
                 cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
                 Controls.Add(cancel);
 

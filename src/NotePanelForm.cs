@@ -71,6 +71,9 @@ namespace WorkCountdown
 
         private readonly Settings settings;
         private readonly NoteSettings note;
+        private readonly SkinDef skin;           // 整体界面主题（皮肤）：颜色 / 圆角 / 质感都从这取
+        private readonly bool skinDefault;       // 默认皮肤：外观必须和 v3.6 完全一致
+        private readonly bool glass;             // 磨砂玻璃底座（默认皮肤的「背景风格」或云母皮肤）
         private readonly ThemeDef theme;
         private readonly Rectangle card;
         private readonly bool topMost;
@@ -125,7 +128,7 @@ namespace WorkCountdown
 
         private readonly List<Hit> hits = new List<Hit>();
         private readonly List<NoteContact> drawnContacts = new List<NoteContact>();
-        private readonly Font fTitle, fSub, fContact, fContactSub, fMsg, fMsgSub, fTiny, fField, fButton, fGlyph, fName;
+        private readonly Font fTitle, fHeading, fSub, fContact, fContactSub, fMsg, fMsgSub, fTiny, fField, fButton, fGlyph, fName;
         private Bitmap frame;
         private readonly Timer anim;
         private int animTick;
@@ -138,7 +141,13 @@ namespace WorkCountdown
         {
             this.settings = settings;
             this.note = settings.note;
-            this.theme = theme != null ? theme : Themes.Get(settings.ui.theme);
+            this.skin = Skins.Current(settings.ui);
+            this.skinDefault = skin.IsDefault;
+            this.glass = Skins.UsesGlass(settings.ui);
+            // 默认皮肤继续用调用方传进来的那套主题；其它皮肤用自带配色（Widget 现在传的已经是 ResolveTheme，
+            // 这里再兜一次，旧调用点也不会把皮肤配色盖掉）。
+            this.theme = skin.colors != null ? skin.colors
+                : (theme != null ? theme : Skins.ResolveTheme(settings.ui));
             this.card = card;
             this.topMost = topMost;
             this.onSend = onSend;
@@ -184,6 +193,10 @@ namespace WorkCountdown
             BuildHits();
 
             fTitle = F(14f, FontStyle.Bold);
+            // 皮肤标题字体：宣纸宋体、仪表 Bahnschrift；默认皮肤 / 没配字体的皮肤跟界面中文字体走
+            fHeading = !skinDefault && !string.IsNullOrWhiteSpace(skin.headingFont)
+                ? UiFont.MakeFamily(skin.headingFont, Pt(14f), FontStyle.Bold)
+                : F(14f, FontStyle.Bold);
             fSub = F(10.5f, FontStyle.Regular);
             fContact = F(11.5f, FontStyle.Regular);
             fName = F(12.5f, FontStyle.Regular);      // 联系人名字：比胶囊里的辅助字大一号、居中画
@@ -267,9 +280,47 @@ namespace WorkCountdown
         private Color Accent { get { return theme.accent; } }
         private Color SurfaceTop { get { return Mix(theme.bgTop, Color.White, Light ? 0.02 : 0.04); } }
         private Color SurfaceBottom { get { return theme.bgBottom; } }
-        private Color FieldBg { get { return Light ? Color.FromArgb(12, 0, 0, 0) : Color.FromArgb(14, 255, 255, 255); } }
-        private Color FieldBorder { get { return Light ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(22, 255, 255, 255); } }
-        private Color OnAccent { get { return Luminance(Accent) > 0.55 ? Color.FromArgb(23, 17, 17) : Color.White; } }
+        private Color FieldBg
+        {
+            get
+            {
+                if (skinDefault) return Light ? Color.FromArgb(12, 0, 0, 0) : Color.FromArgb(14, 255, 255, 255);
+                return Light ? Mix(skin.panelBg, Color.White, 0.55) : Mix(skin.panelBg, Color.Black, 0.22);
+            }
+        }
+        private Color FieldBorder
+        {
+            get
+            {
+                if (skinDefault) return Light ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(22, 255, 255, 255);
+                return Light ? Mix(skin.panelBg, skin.windowInk, 0.18) : Mix(skin.panelBg, Color.White, 0.14);
+            }
+        }
+        private Color OnAccent
+        {
+            get
+            {
+                if (!skinDefault) return skin.accentInk;
+                return Luminance(Accent) > 0.55 ? Color.FromArgb(23, 17, 17) : Color.White;
+            }
+        }
+
+        // ---- 皮肤圆角（默认皮肤全部保持 v3.6 的数值）----
+        private int NoteRadius { get { return S(skin.radiusNote); } }                                   // 默认 18
+        private int BubbleRadius { get { return S(skinDefault ? 11 : skin.radiusBubble); } }            // 默认 11
+        private int InputRadius { get { return S(skinDefault ? 12 : skin.radiusBubble); } }             // 默认 12
+        private int FieldRadius { get { return S(skinDefault ? 10 : skin.radiusCard); } }               // 默认 10
+        private int ButtonRadius { get { return S(skinDefault ? 9 : skin.radiusCard); } }               // 默认 9
+        private int ContactRadius(bool vertical)
+        {
+            int half = S(vertical ? 34 : 30) / 2;
+            return skinDefault ? S(vertical ? 9 : 15) : Math.Min(S(skin.radiusPill), half);
+        }
+        private int PillRadius(Rectangle r)
+        {
+            int half = r.Height / 2;
+            return skinDefault ? half : Math.Min(S(skin.radiusPill), half);
+        }
 
         // ---------------------------------------------------------------- 打开 / 关闭
 
@@ -902,7 +953,8 @@ namespace WorkCountdown
             bool centered = false, float fontPx = 12.5f, bool commitOnBlur = false, Func<bool> keepOpenSubmit = null)
         {
             editingField = true;
-            var ed = new NoteField(value, screen, FieldSolid(true), Ink, Accent, scale, topMost, centered, Pt(fontPx));
+            var ed = new NoteField(value, screen, FieldSolid(true), Ink, Accent, scale, topMost, centered, Pt(fontPx),
+                skinDefault ? 11 : skin.radiusBubble);
             if (maxLen > 0) ed.MaxLength = maxLen;
             fieldEditor = ed;
             ed.ValueChanged = onText;
@@ -1095,6 +1147,9 @@ namespace WorkCountdown
 
         private Color FieldSolid(bool background)
         {
+            if (!skinDefault)
+                return Light ? (background ? Mix(skin.panelBg, Color.White, 0.6) : Mix(skin.panelBg, Color.Black, 0.24))
+                    : (background ? Mix(skin.panelBg, Color.Black, 0.18) : Mix(skin.panelBg, Color.White, 0.24));
             return Light ? (background ? Mix(theme.bgBottom, Color.White, 0.6) : Mix(theme.bgBottom, Color.Black, 0.24))
                 : (background ? Mix(theme.bgBottom, Color.Black, 0.22) : Mix(theme.bgBottom, Color.White, 0.28));
         }
@@ -1137,15 +1192,8 @@ namespace WorkCountdown
 
                 var saved = g.Save();
                 g.TranslateTransform(slide, 0);
-                using (var path = RoundPath(new Rectangle(0, 0, w, h), S(18)))
-                {
-                    if (Frost.On(settings.ui))
-                        Frost.PaintSurface(g, path, new Rectangle(0, 0, w, Math.Max(1, h)), theme, alpha, 1);
-                    else
-                        using (var br = new LinearGradientBrush(new Rectangle(0, 0, w, Math.Max(1, h)), Alpha(SurfaceTop, (int)(255 * alpha)),
-                            Alpha(SurfaceBottom, (int)(255 * alpha)), 90f))
-                            g.FillPath(br, path);
-                }
+                using (var path = RoundPath(new Rectangle(0, 0, w, h), NoteRadius))
+                    PaintPanelBackdrop(g, path, new Rectangle(0, 0, w, Math.Max(1, h)), alpha);
 
                 DrawHeader(g, alpha);
                 if (state == PanelState.Add) DrawAddSheet(g, alpha);
@@ -1159,21 +1207,105 @@ namespace WorkCountdown
                 // 「新建对话」页的 DrawAddSheet 会把整卡渐变重填一遍，先画就被盖掉了。
                 // 笔迹往里缩半笔宽，以前直接画在窗口边上，一半被裁掉，只剩不到 1px，几乎看不见。
                 // 用户反馈「边框稍微粗一点」：从 1 DIP 调到 CardBorderDip（1.8 DIP）。
+                // 皮肤（非默认）：描边色改走 skin.panelEdge，霓虹用 品红→青 渐变描边 + 内侧辉光。
                 float bw = Math.Max(2f, S(CardBorderDip));
                 int bi = (int)Math.Max(1, Math.Round(bw / 2.0));
-                using (var path = RoundPath(new Rectangle(bi, bi, Math.Max(2, w - bi * 2), Math.Max(2, h - bi * 2)),
-                    Math.Max(2, S(18) - bi)))
-                using (var pen = new Pen(Alpha(Accent, (int)(255 * alpha * 0.62)), bw))
-                    g.DrawPath(pen, path);
+                var border = new Rectangle(bi, bi, Math.Max(2, w - bi * 2), Math.Max(2, h - bi * 2));
+                using (var path = RoundPath(border, Math.Max(2, NoteRadius - bi)))
+                    PaintPanelBorder(g, path, border, bw, alpha);
                 g.Restore(saved);
             }
+        }
+
+        /// <summary>
+        /// 面板底：玻璃皮肤（云母）走 Frost；默认皮肤还是 v3.6 的主题渐变；其它皮肤用 skin.panelBg，
+        /// 再叠一层皮肤高光；宣纸额外铺一层纸纹颗粒（复用 Frost 的噪点 tile）。
+        /// </summary>
+        private void PaintPanelBackdrop(Graphics g, GraphicsPath path, Rectangle r, double a)
+        {
+            if (glass)
+            {
+                Frost.PaintSurface(g, path, r, theme, a, 1);
+                return;
+            }
+            if (skinDefault)
+            {
+                using (var br = new LinearGradientBrush(r, Alpha(SurfaceTop, (int)(255 * a)),
+                    Alpha(SurfaceBottom, (int)(255 * a)), 90f))
+                    g.FillPath(br, path);
+                return;
+            }
+            using (var br = new LinearGradientBrush(r, Alpha(Mix(skin.panelBg, Color.White, 0.03), (int)(255 * a)),
+                Alpha(skin.panelBg, (int)(255 * a)), 90f))
+                g.FillPath(br, path);
+            PaintPanelSheen(g, path, r, a);
+            if (skin.paperGrain)
+                Frost.PaintPaperGrain(g, path, r, Mix(skin.panelBg, theme.textMain, 0.35), 2.6 * a);
+            if (skin.neonEdge) PaintInnerGlow(g, path, a);
+        }
+
+        /// <summary>皮肤高光：顶部一层白色渐变（宣纸最明显、无垠几乎看不见）。</summary>
+        private void PaintPanelSheen(Graphics g, GraphicsPath path, Rectangle r, double a)
+        {
+            if (skin.sheenAlpha <= 0) return;
+            GraphicsState st = g.Save();
+            try
+            {
+                g.SetClip(path, CombineMode.Intersect);
+                int h = Math.Max(1, (int)Math.Round(r.Height * 0.42));
+                var band = new Rectangle(r.X, r.Y, Math.Max(1, r.Width), h);
+                using (var br = new LinearGradientBrush(band,
+                    Alpha(Color.White, (int)(255 * a * Math.Min(1.0, skin.sheenAlpha))),
+                    Color.FromArgb(0, 255, 255, 255), 90f))
+                    g.FillRectangle(br, band);
+            }
+            finally { g.Restore(st); }
+        }
+
+        /// <summary>霓虹内侧辉光：宽笔沿圆角走一圈再按 path 裁掉外侧，只剩贴边的一圈光。</summary>
+        private void PaintInnerGlow(Graphics g, GraphicsPath path, double a)
+        {
+            GraphicsState st = g.Save();
+            try
+            {
+                g.SetClip(path, CombineMode.Intersect);
+                using (var pen = new Pen(Alpha(Accent, (int)(255 * a * 0.20)), Math.Max(2f, S(9))))
+                    g.DrawPath(pen, path);
+                using (var pen = new Pen(Alpha(skin.accent2, (int)(255 * a * 0.14)), Math.Max(1.5f, S(4))))
+                    g.DrawPath(pen, path);
+            }
+            finally { g.Restore(st); }
+        }
+
+        /// <summary>非默认皮肤整卡描边；霓虹用 品红→青 渐变描边 + 内侧细亮边。</summary>
+        private void PaintPanelBorder(Graphics g, GraphicsPath path, Rectangle r, float bw, double a)
+        {
+            if (skinDefault)
+            {
+                using (var pen = new Pen(Alpha(Accent, (int)(255 * a * 0.62)), bw))
+                    g.DrawPath(pen, path);
+                return;
+            }
+            if (skin.neonEdge)
+            {
+                using (var grad = new LinearGradientBrush(r, Alpha(Accent, (int)(255 * a)),
+                    Alpha(skin.accent2, (int)(255 * a)), 35f))
+                using (var pen = new Pen(grad, bw))
+                    g.DrawPath(pen, path);
+                using (var pen = new Pen(Alpha(skin.accent2, (int)(255 * a * 0.30)), Math.Max(1f, bw * 0.45f)))
+                    g.DrawPath(pen, path);
+                return;
+            }
+            using (var pen = new Pen(Alpha(skin.panelEdge, (int)(255 * a * 0.95)), bw))
+                g.DrawPath(pen, path);
         }
 
         private void DrawHeader(Graphics g, double a)
         {
             var r = HeaderRect();
             DrawPlane(g, new RectangleF(r.X, r.Y + S(3), S(24), S(26)), Alpha(Accent, (int)(255 * a)));
-            DrawText(g, "小纸条", fTitle, Alpha(Ink, (int)(255 * a)), r.X + S(32), r.Y + S(16));
+            // 标题字体跟皮肤走（宣纸宋体、仪表 Bahnschrift）；默认皮肤还是原来的加粗中文字体
+            DrawText(g, "小纸条", fHeading, Alpha(Ink, (int)(255 * a)), r.X + S(32), r.Y + S(16));
             Rectangle nick = NickRect();
             // 副标题：有昵称就显示「我的 ID · 昵称」，没有还是「我的 ID · 这台电脑」
             string sub = "我的 ID " + note.id;
@@ -1191,11 +1323,18 @@ namespace WorkCountdown
             {
                 // 「新建对话」旁边跟一颗昵称胶囊：双击就能改本机昵称（不用进设置页）
                 bool set = !string.IsNullOrEmpty(note.nickname);
+                Color nickBg = skinDefault
+                    ? Alpha(Ink, (int)(255 * a * (set ? 0.10 : 0.05)))
+                    : set ? Alpha(Light ? Mix(skin.panelBg, Color.White, 0.55) : Mix(skin.panelBg, Color.White, 0.06), (int)(255 * a))
+                          : Color.FromArgb(0);
                 DrawPill(g, nick, set ? "昵称 " + note.nickname : "＋ 昵称",
-                    Alpha(set ? Ink : Muted, (int)(255 * a)),
-                    Alpha(Ink, (int)(255 * a * (set ? 0.10 : 0.05))), a, !set);
+                    Alpha(set ? Ink : Muted, (int)(255 * a)), nickBg, a, !set);
+                // 「＋ 新建对话」：默认皮肤是强调色淡底 + 强调色字；皮肤按设计改成实心强调色胶囊
+                // （宣纸朱砂 / 仪表琥珀 / 霓虹品红），配 skin.accentInk 的文字色
+                bool solid = !skinDefault;
                 DrawPill(g, new Rectangle(r.Right - S(96), r.Y + S(2), S(96), S(28)), "＋ 新建对话",
-                    Alpha(Accent, (int)(255 * a)), Alpha(Accent, (int)(255 * a * 0.16)), a, false);
+                    Alpha(solid ? OnAccent : Accent, (int)(255 * a)),
+                    Alpha(Accent, (int)(255 * a * (solid ? 1.0 : 0.16))), a, false, solid);
             }
         }
 
@@ -1227,7 +1366,9 @@ namespace WorkCountdown
             }
             for (int i = 0; i < drawnContacts.Count; i++)
                 DrawCapsule(g, ContactRectAt(i), drawnContacts[i], drawnContacts[i].id == selectedId || i == hoverContact, a, true);
-            DrawPill(g, ColumnsAddRect(), "＋ 新建对话", Alpha(Accent, (int)(255 * a)), Alpha(Accent, (int)(255 * a * 0.10)), a, true);
+            DrawPill(g, ColumnsAddRect(), "＋ 新建对话",
+                Alpha(skinDefault ? Accent : OnAccent, (int)(255 * a)),
+                Alpha(Accent, (int)(255 * a * (skinDefault ? 0.10 : 1.0))), a, true, !skinDefault);
             DrawContactScrollHint(g, a);
         }
 
@@ -1281,14 +1422,26 @@ namespace WorkCountdown
         private void DrawCapsule(Graphics g, Rectangle r, NoteContact c, bool on, double a, bool vertical)
         {
             var t = note.Thread(c.id);
-            using (var path = RoundPath(r, S(vertical ? 9 : 15)))
+            Color fill, edge;
+            if (skinDefault)
             {
                 // 浅色主题别用半透明白：白底上等于没有，看着像盖了一层白纱；改用极淡的墨色
-                var fill = on ? Mix(theme.bgTop, Accent, 0.16)
+                fill = on ? Mix(theme.bgTop, Accent, 0.16)
                     : (Light ? Mix(theme.bgBottom, theme.textMain, 0.05) : Color.FromArgb(20, 255, 255, 255));
+                edge = on ? Accent : theme.edge;
+            }
+            else
+            {
+                // 皮肤：底的混合基色是 skin.panelBg（不是主题的 bgTop），选中态用强调色淡染
+                fill = on ? Mix(skin.panelBg, Accent, 0.20)
+                    : (Light ? Mix(skin.panelBg, theme.textMain, 0.06) : Mix(skin.panelBg, Color.White, 0.07));
+                edge = on ? Accent : skin.panelEdge;
+            }
+            using (var path = RoundPath(r, ContactRadius(vertical)))
+            {
                 using (var br = new SolidBrush(Alpha(fill, (int)(255 * a))))
                     g.FillPath(br, path);
-                using (var pen = new Pen(Alpha(on ? Accent : theme.edge, (int)(255 * a * (on ? 0.8 : 0.9))), Math.Max(1f, scale)))
+                using (var pen = new Pen(Alpha(edge, (int)(255 * a * (on ? 0.8 : 0.9))), Math.Max(1f, scale)))
                     g.DrawPath(pen, path);
             }
             var t2 = note.Thread(c.id);
@@ -1483,16 +1636,49 @@ namespace WorkCountdown
             int w = (int)Math.Min(maxBubble, tw + padX * 2);
             int x = mine ? body.Right - w : body.X;
             var r = new Rectangle(x, y, w, h);
-            // 收到的气泡：浅色主题用淡墨色，不用半透明白（白底上像一层白纱/白遮罩）
-            var bubbleFill = mine ? Mix(Accent, theme.bgBottom, 0.78)
-                : (Light ? Mix(theme.bgBottom, theme.textMain, 0.07) : Color.FromArgb(18, 255, 255, 255));
-            using (var path = RoundPath(r, S(11)))
-            using (var br = new SolidBrush(Alpha(bubbleFill, a)))
-                g.FillPath(br, path);
+            Color bubbleFill, bubbleInk;
+            if (skinDefault)
+            {
+                // 收到的气泡：浅色主题用淡墨色，不用半透明白（白底上像一层白纱/白遮罩）
+                bubbleFill = mine ? Mix(Accent, theme.bgBottom, 0.78)
+                    : (Light ? Mix(theme.bgBottom, theme.textMain, 0.07) : Color.FromArgb(18, 255, 255, 255));
+                bubbleInk = mine ? Ink : Muted;
+            }
+            else
+            {
+                // 皮肤：收到 / 发出直接取 skin.bubbleIn/bubbleOut 和配套文字色
+                bubbleFill = mine ? skin.bubbleOut : skin.bubbleIn;
+                bubbleInk = mine ? skin.bubbleOutInk : skin.bubbleInInk;
+            }
+            using (var path = RoundPath(r, BubbleRadius))
+            {
+                using (var br = new SolidBrush(Alpha(bubbleFill, a)))
+                    g.FillPath(br, path);
+                if (!skinDefault)
+                {
+                    // 皮肤气泡带一圈细边：收消息用 panelEdge（霓虹换青色描边），
+                    // 仪表 / 霓虹这种半透明强调色发出的消息再补一圈强调色边
+                    Color edge = Color.Empty;
+                    int ea = 0;
+                    if (!mine)
+                    {
+                        edge = skin.neonEdge ? skin.accent2 : skin.panelEdge;
+                        ea = skin.neonEdge ? (int)(a * 0.30) : (int)(a * 0.90);
+                    }
+                    else if (skin.neonEdge || skin.screws)
+                    {
+                        edge = Accent;
+                        ea = (int)(a * 0.45);
+                    }
+                    if (edge.A > 0 && ea > 0)
+                        using (var pen = new Pen(Alpha(edge, ea), Math.Max(1f, scale)))
+                            g.DrawPath(pen, path);
+                }
+            }
             // DrawText 的 centerY 是按字体 cell 高度算的，中文 / 数字字形在 cell 里偏上，
             // 直接放在几何中心会显得「字偏上」；这里补一个视觉居中偏移（按字号比例）。
             float cyText = r.Y + r.Height / 2f + S(4);
-            DrawText(g, text, fMsg, Alpha(mine ? Ink : Muted, a), r.X + padX, cyText);
+            DrawText(g, text, fMsg, Alpha(bubbleInk, a), r.X + padX, cyText);
             string hm = Hm(m.ts);
             float hw = Measure(g, hm, fMsgSub);
             float hx = mine ? r.X - gap - hw : r.Right + gap;
@@ -1525,7 +1711,7 @@ namespace WorkCountdown
         {
             if (state != PanelState.Chat && state != PanelState.History) return;
             var r = InputRect();
-            using (var path = RoundPath(r, S(12)))
+            using (var path = RoundPath(r, InputRadius))
             {
                 using (var br = new SolidBrush(Alpha(FieldBg, (int)(255 * a))))
                     g.FillPath(br, path);
@@ -1535,9 +1721,16 @@ namespace WorkCountdown
             DrawText(g, string.IsNullOrEmpty(composeText) ? "写一句，回车发送…" : composeText, fField,
                 Alpha(string.IsNullOrEmpty(composeText) ? Dim : Ink, (int)(255 * a)), r.X + S(12), r.Y + r.Height / 2);
             var send = new Rectangle(r.Right - S(34), r.Y + S(5), S(28), S(28));
-            using (var path = RoundPath(send, S(9)))
-            using (var br = new SolidBrush(Alpha(Accent, (int)(255 * a))))
-                g.FillPath(br, path);
+            using (var path = RoundPath(send, ButtonRadius))
+            {
+                // 霓虹发出的按钮带一圈辉光（设计里的 sendGlow），其它皮肤保持干净的实心块
+                if (!skinDefault && skin.neonEdge)
+                    for (int i = 2; i >= 1; i--)
+                        using (var pen = new Pen(Alpha(Accent, (int)(255 * a * 0.12 * i)), Math.Max(2f, S(2 + i * 2))))
+                            g.DrawPath(pen, path);
+                using (var br = new SolidBrush(Alpha(Accent, (int)(255 * a))))
+                    g.FillPath(br, path);
+            }
             DrawPlane(g, new RectangleF(send.X + S(7), send.Y + S(7), S(14), S(14)), Alpha(OnAccent, (int)(255 * a)));
             if (!string.IsNullOrEmpty(status) && Environment.TickCount - statusAt < 6000)
                 DrawText(g, status, fTiny, Alpha(Color.FromArgb(239, 138, 96), (int)(255 * a)),
@@ -1548,16 +1741,9 @@ namespace WorkCountdown
         {
             int w = winWidth;
             int h = (int)heightNow;
-            using (var path = RoundPath(new Rectangle(0, 0, w, h), S(18)))
-            {
-                if (Frost.On(settings.ui))
-                    Frost.PaintSurface(g, path, new Rectangle(0, 0, w, Math.Max(1, h)), theme, a, 1);
-                else
-                    using (var br = new LinearGradientBrush(new Rectangle(0, 0, w, Math.Max(1, h)), Alpha(SurfaceTop, (int)(255 * a)),
-                        Alpha(SurfaceBottom, (int)(255 * a)), 90f))
-                        g.FillPath(br, path);
-            }
-            DrawText(g, "＋ 新建对话", fTitle, Alpha(Ink, (int)(255 * a)), S(16), S(28));
+            using (var path = RoundPath(new Rectangle(0, 0, w, h), NoteRadius))
+                PaintPanelBackdrop(g, path, new Rectangle(0, 0, w, Math.Max(1, h)), a);
+            DrawText(g, "＋ 新建对话", fHeading, Alpha(Ink, (int)(255 * a)), S(16), S(28));
             Button(g, new Rectangle(w - S(46), S(14), S(30), S(30)), "×", false, a);
 
             DrawText(g, "对方的 5 位 ID / 5 位对话码", fTiny, Alpha(Dim, (int)(255 * a)), S(16), S(48));
@@ -1591,7 +1777,7 @@ namespace WorkCountdown
 
         private void FieldBox(Graphics g, Rectangle r, string text, Color color, bool mono, double a)
         {
-            using (var path = RoundPath(r, S(10)))
+            using (var path = RoundPath(r, FieldRadius))
             {
                 using (var br = new SolidBrush(Alpha(FieldBg, (int)(255 * a)))) g.FillPath(br, path);
                 using (var pen = new Pen(Alpha(FieldBorder, (int)(255 * a)), Math.Max(1f, scale))) g.DrawPath(pen, path);
@@ -1607,7 +1793,7 @@ namespace WorkCountdown
 
         private void Button(Graphics g, Rectangle r, string text, bool primary, double a)
         {
-            using (var path = RoundPath(r, S(9)))
+            using (var path = RoundPath(r, ButtonRadius))
             {
                 var fill = primary ? Accent
                     : (Light ? Mix(theme.bgBottom, theme.textMain, 0.05) : Color.FromArgb(16, 255, 255, 255));
@@ -1619,12 +1805,18 @@ namespace WorkCountdown
             DrawTextMid(g, text, fButton, Alpha(primary ? OnAccent : Ink, (int)(255 * a)), r);
         }
 
-        private void DrawPill(Graphics g, Rectangle r, string text, Color ink, Color bg, double a, bool dashed)
+        private void DrawPill(Graphics g, Rectangle r, string text, Color ink, Color bg, double a, bool dashed, bool solid = false)
         {
-            using (var path = RoundPath(r, r.Height / 2))
+            Color border;
+            if (skinDefault) border = Alpha(Accent, (int)(255 * a * 0.55));
+            else if (solid) border = Alpha(OnAccent, (int)(255 * a * 0.16));
+            else if (dashed) border = Alpha(Accent, (int)(255 * a * 0.5));
+            else border = Alpha(skin.panelEdge, (int)(255 * a * 0.9));
+            using (var path = RoundPath(r, PillRadius(r)))
             {
-                using (var br = new SolidBrush(bg)) g.FillPath(br, path);
-                using (var pen = new Pen(Alpha(Accent, (int)(255 * a * 0.55)), Math.Max(1f, scale)))
+                if (bg.A > 0)
+                    using (var br = new SolidBrush(bg)) g.FillPath(br, path);
+                using (var pen = new Pen(border, Math.Max(1f, scale)))
                 {
                     if (dashed) pen.DashStyle = DashStyle.Dash;
                     g.DrawPath(pen, path);
@@ -1763,7 +1955,7 @@ namespace WorkCountdown
                 Application.RemoveMessageFilter(wheelFilter);
                 wheelFilter = null;
             }
-            foreach (var f in new Font[] { fTitle, fSub, fContact, fContactSub, fMsg, fMsgSub, fTiny, fField, fButton, fGlyph, fName })
+            foreach (var f in new Font[] { fTitle, fHeading, fSub, fContact, fContactSub, fMsg, fMsgSub, fTiny, fField, fButton, fGlyph, fName })
                 if (f != null) f.Dispose();
             if (frame != null) { frame.Dispose(); frame = null; }
             base.OnFormClosed(e);
@@ -1789,6 +1981,7 @@ namespace WorkCountdown
             private readonly string original;
             private readonly Color bg, accent;
             private readonly float scale;
+            private readonly int radiusDip;      // 编辑窗圆角（DIP）：跟皮肤的输入框圆角走
             private int radius;
             private Region shape;
             public Action<string> ValueChanged;   // 每次输入回调（面板里实时更新 composeText / addId / addRemark）
@@ -1801,12 +1994,13 @@ namespace WorkCountdown
             public int MaxLength { set { box.MaxLength = value; } }
 
             public NoteField(string value, Rectangle screen, Color bg, Color fg,
-                Color accent, float scale, bool topMost, bool centered, float fontPt)
+                Color accent, float scale, bool topMost, bool centered, float fontPt, int radiusDip = 11)
             {
                 original = value ?? "";
                 this.bg = bg;
                 this.accent = accent;
                 this.scale = scale;
+                this.radiusDip = radiusDip;
                 FormBorderStyle = FormBorderStyle.None;
                 StartPosition = FormStartPosition.Manual;
                 ShowInTaskbar = false;
@@ -1816,7 +2010,7 @@ namespace WorkCountdown
                 DoubleBuffered = true;
                 SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
 
-                radius = Math.Max(2, Math.Min(Sd(11), Math.Min(Width, Height) / 2));
+                radius = Math.Max(2, Math.Min(Sd(this.radiusDip), Math.Min(Width, Height) / 2));
                 RebuildShape();
 
                 box = new TextBox();
@@ -1889,7 +2083,7 @@ namespace WorkCountdown
             private void RebuildShape()
             {
                 int w = Math.Max(2, ClientSize.Width), h = Math.Max(2, ClientSize.Height);
-                radius = Math.Max(2, Math.Min(Sd(11), Math.Min(w, h) / 2));
+                radius = Math.Max(2, Math.Min(Sd(radiusDip), Math.Min(w, h) / 2));
                 Region old = shape;
                 using (var path = RoundPath(new Rectangle(0, 0, w, h), radius))
                     shape = new Region(path);

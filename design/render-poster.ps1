@@ -6,7 +6,7 @@
 # 再把底部超出内容的纯背景色裁掉、补回 56 CSS 的底部留白。
 # 改了 manual-poster.html 的高度 / 加了章节后不用手动调：CssHeight 给一个足够大的值就行。
 param(
-    [int]$CssHeight = 4600
+    [int]$CssHeight = 8000
 )
 
 $ErrorActionPreference = 'Stop'

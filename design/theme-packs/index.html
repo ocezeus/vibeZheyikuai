@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>上班工具箱 · 5 个整体界面主题方向</title>
+<link rel="stylesheet" href="packs.css">
+<link rel="stylesheet" href="themes.css">
+</head>
+<body data-theme="quiet">
+
+<!-- 图标定义（stroke 由 .ic 控制，颜色跟随 currentColor） -->
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+  <symbol id="i-min" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.6 6.6l10.8 10.8M17.4 6.6L6.6 17.4"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-chevd" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M19.1 14.9a1.6 1.6 0 0 0 .3 1.75l.07.07a1.95 1.95 0 1 1-2.76 2.76l-.07-.07a1.6 1.6 0 0 0-1.75-.3 1.6 1.6 0 0 0-.97 1.47V21a1.95 1.95 0 1 1-3.9 0v-.1a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.75.3l-.07.07a1.95 1.95 0 1 1-2.76-2.76l.07-.07a1.6 1.6 0 0 0 .3-1.75 1.6 1.6 0 0 0-1.47-.97H3a1.95 1.95 0 1 1 0-3.9h.1a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.3-1.75l-.07-.07a1.95 1.95 0 1 1 2.76-2.76l.07.07a1.6 1.6 0 0 0 1.75.3H9a1.6 1.6 0 0 0 .97-1.47V3a1.95 1.95 0 1 1 3.9 0v.1a1.6 1.6 0 0 0 .97 1.47 1.6 1.6 0 0 0 1.75-.3l.07-.07a1.95 1.95 0 1 1 2.76 2.76l-.07.07a1.6 1.6 0 0 0-.3 1.75V9a1.6 1.6 0 0 0 1.47.97H21a1.95 1.95 0 1 1 0 3.9h-.1a1.6 1.6 0 0 0-1.5.97Z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.4 11a8.5 8.5 0 1 0-2.5 7"/><path d="M20.4 4.6V11H14"/></symbol>
+  <symbol id="i-plane" viewBox="0 0 24 24"><path d="M21.4 2.6 2.6 9.9l6.9 2.6 2.6 6.9 9.3-16.8Z"/><path d="M9.5 12.5 21.4 2.6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M8 3.2v3.6M16 3.2v3.6M3.5 10.2h17"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18.2 8.7a6.2 6.2 0 1 0-12.4 0c0 5-2.4 6.6-2.4 6.6h17.2s-2.4-1.6-2.4-6.6Z"/><path d="M10.2 19.2a2.1 2.1 0 0 0 3.6 0"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3.4a8.6 8.6 0 1 0 0 17.2c1.15 0 1.9-.78 1.9-1.82 0-.55-.26-.98-.55-1.35-.3-.38-.52-.76-.52-1.22 0-.94.78-1.62 1.74-1.62h1.55c1.95 0 3.48-1.48 3.48-3.52 0-4.1-3.42-7.67-7.6-7.67Z"/><circle cx="8.1" cy="10.2" r="1.1"/><circle cx="12" cy="7.7" r="1.1"/><circle cx="15.9" cy="10.2" r="1.1"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><path d="M12 7.4V12l3.2 2"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s6.8-6 6.8-10.8a6.8 6.8 0 1 0-13.6 0C5.2 15 12 21 12 21Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+  <symbol id="i-loop" viewBox="0 0 24 24"><path d="M20.5 11.5a8.5 8.5 0 0 1-14.6 5.7M3.5 12.5a8.5 8.5 0 0 1 14.6-5.7"/><path d="M3.5 4.8v6.2h6.2M20.5 19.2v-6.2h-6.2"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.6" y="3.6" width="6.8" height="6.8" rx="2"/><rect x="13.6" y="3.6" width="6.8" height="6.8" rx="2"/><rect x="3.6" y="13.6" width="6.8" height="6.8" rx="2"/><rect x="13.6" y="13.6" width="6.8" height="6.8" rx="2"/></symbol>
+  <symbol id="i-yen" viewBox="0 0 24 24"><path d="M6.5 4.5 12 12l5.5-7.5"/><path d="M12 12v7.5M8.4 14.2h7.2M8.4 17.2h7.2"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7.6 10.8 4.4 4.4 4.4-4.4"/><path d="M4.6 20h14.8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.6 4.6 4.6L19 7"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.6"/><path d="m15.8 15.8 4.2 4.2"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark">班</div>
+    <div><div class="t">上班工具箱 · 主题方向</div><div class="s">5 WHOLE-UI SKINS · 1px = 1 DIP</div></div>
+  </div>
+  <nav class="tabs" id="tabs"></nav>
+  <div class="tb-right">
+    <div class="tb-hint">点标签换主题 · 每一块都按<b>真实尺寸</b>画（设置 680×720 / 小纸条 392×282 / 卡片 280×188）</div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="thead">
+    <div class="idx" id="tIdx">01</div>
+    <div class="main">
+      <h1><span id="tName">无垠</span> <em id="tEn">Quiet</em></h1>
+      <p class="tag" id="tTag"></p>
+    </div>
+    <div class="meta">
+      <div class="pal" id="tPal"></div>
+      <div class="specs" id="tSpecs"></div>
+      <div class="cost" id="tCost"><i></i><span>实现成本</span> <b>低</b></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ 桌面场景 -->
+  <div class="stage" id="stage">
+    <div class="lb" style="left:36px;top:26px"><b>设置窗口</b> · 新布局 680×720</div>
+    <div class="lb" style="left:748px;top:26px"><b>小纸条</b> · 抽屉式 392×282</div>
+    <div class="lb" style="left:748px;top:340px"><b>右键胶囊</b> · 6 颗 · 修改主题已长开</div>
+    <div class="lb" style="left:1176px;top:26px"><b>展开卡片</b> · 280×188</div>
+    <div class="lb" style="left:1176px;top:240px"><b>收起横条</b> · 224×68</div>
+    <div class="lb" style="left:1176px;top:332px"><b>会议提醒</b> · 卡内全屏都这套色</div>
+    <div class="lb" style="left:1176px;top:546px"><b>工资面板</b> · 单击 ¥ 展开</div>
+    <div class="stage-note"><b>挑中后回复编号 01–05</b> · 1 CSS px = 1 DIP · 全部按 100% 尺寸画</div>
+
+    <!-- 设置窗口 -->
+    <div class="set">
+      <div class="set-bar">
+        <div class="mark">班</div>
+        <div class="ttl">上班工具箱</div>
+        <div class="verchip">v3.6.0</div>
+        <div class="wbtns">
+          <button class="wbtn"><svg class="ic"><use href="#i-min"/></svg></button>
+          <button class="wbtn"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+      <div class="set-body">
+        <div class="set-rail">
+          <div class="ri"><svg class="ic"><use href="#i-clock"/></svg>考勤</div>
+          <div class="ri"><svg class="ic"><use href="#i-cal"/></svg>固定日程</div>
+          <div class="ri"><svg class="ic"><use href="#i-bell"/></svg>提醒</div>
+          <div class="ri on"><svg class="ic"><use href="#i-palette"/></svg>外观</div>
+          <div class="ri"><svg class="ic"><use href="#i-grid"/></svg>日程<span class="badge">3</span></div>
+          <div class="ri"><svg class="ic"><use href="#i-yen"/></svg>工资</div>
+          <div class="ri"><svg class="ic"><use href="#i-plane"/></svg>纸条</div>
+          <div class="rail-foot"><b>配置</b><br>%APPDATA%\WorkCountdown<br>上班 09:00 · 弹性 10h30m</div>
+        </div>
+        <div class="set-main">
+          <div class="set-head">
+            <h3>外观</h3>
+            <p>主题、字体、提醒动画与配置备份</p>
+            <div class="seal">班</div>
+          </div>
+          <div class="set-scroll">
+            <div class="sc">
+              <h4>主题配色<span class="hint">39 套内置 + 自建 · 点一下立刻换</span></h4>
+              <div class="themegrid" id="themeGrid"></div>
+              <div class="themerow">
+                <span class="cur">当前：<b id="curTheme">经典 · 石墨灰</b></span>
+                <span class="sp"></span>
+                <button class="btn ghost sm">编辑</button>
+                <button class="btn sm primary">＋ 新建主题</button>
+              </div>
+            </div>
+            <div class="sc">
+              <h4>背景风格<span class="hint">磨砂玻璃下桌面会真的透出来</span></h4>
+              <div class="rowset">
+                <span class="seg"><span class="on">纯色</span><span>磨砂玻璃</span></span>
+                <span class="note">玻璃是拟态，不抓屏、不掉帧</span>
+              </div>
+            </div>
+            <div class="sc">
+              <h4>外观与提醒<span class="hint">改完点右下「保存」</span></h4>
+              <div class="rowset">
+                <span class="cap">不透明度</span><span class="slide"><i></i><u></u></span><span class="val">94</span><span class="unit">%</span>
+                <span class="grow"></span>
+                <span class="cap">自动收起</span><span class="val">5</span><span class="unit">秒（0 = 不自动）</span>
+              </div>
+              <div class="rowset">
+                <span class="cap">窗口置顶</span><span class="sw on"><i></i></span>
+                <span class="cap">开机自启</span><span class="sw"><i></i></span>
+                <span class="cap">显示午休</span><span class="sw on"><i></i></span>
+                <span class="cap">减少动态</span><span class="sw"><i></i></span>
+              </div>
+              <div class="rowset">
+                <span class="cap">最短停留</span><span class="val">20</span><span class="unit">秒（3–20）</span>
+                <span class="grow"></span>
+                <span class="cap">背景光效</span><span class="sel">原样式<svg class="ic"><use href="#i-chevd"/></svg></span>
+              </div>
+              <div class="rowset">
+                <span class="cap">提醒扩散</span><span class="seg"><span>卡内</span><span class="on">全屏</span></span>
+                <span class="cap">扩散样式</span><span class="seg"><span class="on">圆形柔光</span><span>进度条拉伸</span><span>警戒带</span></span>
+              </div>
+              <div class="rowset">
+                <span class="cap">提醒配色</span>
+                <span class="chipsw">
+                  <span style="--c:#F0B23C"><i></i>会议</span>
+                  <span style="--c:#7FB8D9"><i></i>午休</span>
+                  <span style="--c:#A98FDC"><i></i>晚休</span>
+                  <span style="--c:#5FD08A"><i></i>下班</span>
+                </span>
+              </div>
+            </div>
+            <div class="sc">
+              <h4>字体<span class="hint">中英文分开选</span></h4>
+              <div class="rowset">
+                <span class="cap">中文</span><span class="sel">苹方 粗体<svg class="ic"><use href="#i-chevd"/></svg></span>
+                <span class="cap">数字</span><span class="sel">Consolas<svg class="ic"><use href="#i-chevd"/></svg></span>
+                <span class="grow"></span>
+                <button class="btn sm">字体…</button>
+              </div>
+              <div class="rowset">
+                <span class="note">预览　距离下班　<b style="font-family:var(--fNum);color:var(--tx);font-size:13px;letter-spacing:.02em">05:05:17</b>　<b style="font-family:var(--fNum);color:var(--tx);font-size:13px">¥12,345.678</b></span>
+              </div>
+            </div>
+            <div class="sc">
+              <h4>配置备份<span class="hint">换电脑或给同事：导出 → 导入</span></h4>
+              <div class="rowset">
+                <button class="btn sm">导出配置…</button>
+                <button class="btn sm">导入配置…</button>
+                <button class="btn sm">恢复默认</button>
+                <span class="note">导入后重启悬浮窗生效</span>
+              </div>
+            </div>
+          </div>
+          <div class="set-foot">
+            <span class="path">配置位置 C:\Users\xlean\AppData\Roaming\WorkCountdown\settings.json</span>
+            <span class="sp"></span>
+            <button class="btn">取消</button>
+            <button class="btn primary">保存</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 小纸条 -->
+    <div class="note">
+      <div class="nh">
+        <svg class="ic plane"><use href="#i-plane"/></svg>
+        <div class="tt"><b>小纸条</b><span>我的 ID 48372 · 小明</span></div>
+        <div class="acts">
+          <span class="npill"><span class="k">昵称</span>小明</span>
+          <span class="npill plus">＋ 新建对话</span>
+          <span class="dots"><i></i></span>
+        </div>
+      </div>
+      <div class="nc">
+        <span class="ncon">小赵</span><span class="ncon">阿凯</span><span class="ncon">老王</span><span class="ncon on">项目群</span>
+        <span class="ncscroll"><i></i><i class="on"></i><i></i></span>
+      </div>
+      <div class="room"><b>项目群</b><span>对话码 项目组#1</span></div>
+      <div class="chat">
+        <div class="daysep">今天</div>
+        <div class="msg own"><span class="tm">18:27</span><span class="bub">收到，我先看下</span></div>
+        <div class="msg"><span class="tm">18:32</span><span class="bub">小满：我下午补一页数据</span></div>
+        <div class="msg"><span class="tm">18:33</span><span class="bub">小满：周五那版也一起带上</span></div>
+      </div>
+      <div class="nin">写一句，回车发送…<span class="send"><svg class="ic"><use href="#i-plane"/></svg></span></div>
+    </div>
+
+    <!-- 右键胶囊 -->
+    <div class="bubm">
+      <div class="bp"><svg class="ic"><use href="#i-plus"/></svg>新增日程</div>
+      <div class="bp on"><svg class="ic"><use href="#i-palette"/></svg>修改主题</div>
+      <div class="bpanel">
+        <div class="bphead"><span>主题色卡</span><span class="sp"></span><b>4 × 3 一屏</b></div>
+        <div class="bpgrid" id="bubGrid"></div>
+        <div class="bmore"><svg class="ic"><use href="#i-plus"/></svg>新建主题</div>
+      </div>
+      <div class="bp"><svg class="ic"><use href="#i-clock"/></svg>触发上下班</div>
+      <div class="bp"><svg class="ic"><use href="#i-pin"/></svg>窗口置顶</div>
+      <div class="bp"><svg class="ic"><use href="#i-bell"/></svg>预览通知</div>
+      <div class="bp"><svg class="ic"><use href="#i-loop"/></svg>检查更新</div>
+    </div>
+
+    <!-- 卡片：展开 -->
+    <div class="s-cards">
+      <div class="card" style="--p:62%">
+        <div class="r1">
+          <span class="dot"></span><span class="st">工作中</span>
+          <span class="tools">
+            <svg class="ic"><use href="#i-plane"/></svg>
+            <span class="yen">¥</span>
+            <svg class="ic"><use href="#i-gear"/></svg>
+            <svg class="ic"><use href="#i-refresh"/></svg>
+            <svg class="ic"><use href="#i-chev"/></svg>
+          </span>
+        </div>
+        <div class="r2"><span class="a">距离下班</span><span class="b">下班 18:00</span></div>
+        <div class="num" id="numBig">03:07:33</div>
+        <div class="pbar"><i></i><u></u></div>
+        <div class="foot">上班 09:00 · 预计下班 18:00</div>
+        <div class="next"><em>距晚休</em><b>3h07m</b></div>
+        <div class="foot2">已工作 5h52m · 应勤 9h00m</div>
+      </div>
+    </div>
+
+    <!-- 卡片：收起 -->
+    <div class="cbar" style="position:absolute;left:1176px;top:262px;--p:76%">
+      <div class="r1"><span class="dot"></span><span class="st">距离下班</span><span class="rt">下班 18:00</span></div>
+      <div class="num" id="numSmall">05:30:56</div>
+      <div class="pbar"><i></i></div>
+    </div>
+
+    <!-- 提醒卡 -->
+    <div class="rem" style="position:absolute;left:1176px;top:354px">
+      <div class="a">
+        <div class="eyebrow">会议提醒 · 飞书</div>
+        <div class="ttl">需求对齐会</div>
+        <div class="sub">还剩 <b>12</b> 分钟</div>
+        <div class="x"><svg class="ic"><use href="#i-x"/></svg></div>
+      </div>
+      <div class="b">
+        <div class="when"><b>15:00–15:30</b>会议室 A</div>
+        <div class="hint">点击收起 · 常驻到 15:30</div>
+      </div>
+    </div>
+
+    <!-- 工资面板 -->
+    <div class="sal" style="position:absolute;left:1176px;top:568px">
+      <div class="h"><span class="t">今日收入</span><span class="r">已工作 5h52m</span></div>
+      <div class="big"><small>¥</small>182.<em>473</em></div>
+      <div class="f"><span>本月</span><b>¥8,412.30</b><span class="sep">·</span><span>距发薪 6 天</span></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </div>
+
+  <!-- ====================================================== 收起态五套对比 -->
+  <section class="cmpwrap">
+    <div class="hd">
+      <h3>收起态 · 五套并排</h3>
+      <p>平时贴在屏幕边上的就是这条 224×68 的横条，点一下直接切过去</p>
+      <span class="sp"></span>
+      <p style="font-size:10.5px;color:#5F6775">按 100% 尺寸显示</p>
+    </div>
+    <div class="cmpflex" id="cmpFlex"></div>
+  </section>
+
+  <section class="notes">
+    <div class="col">
+      <h4>五套共用同一个新结构</h4>
+      <p>设置窗口从「顶部七个标签页」改成 <b>左栏导航 + 内容卡片</b>（考勤 / 固定日程 / 提醒 / 外观 / 日程 / 工资 / 纸条 七项不变）；卡片、小纸条、右键胶囊的布局和功能跟 v3.6 一致。五套换的是<b>皮肤</b>：颜色、字体、圆角、边框、质感、进度条画法和少量装饰。</p>
+    </div>
+    <div class="col">
+      <h4>怎么挑</h4>
+      <ul style="margin:0;padding-left:16px">
+        <li>配什么壁纸：浅色壁纸 → <b>宣纸</b>；照片 / 深色 → <b>云母</b>、<b>霓虹</b>；纯黑桌面 → <b>无垠</b>、<b>仪表</b>。</li>
+        <li>想要「几乎看不见」→ <b>无垠</b>；想要「有质感」→ <b>云母</b>；想要「有个性」→ <b>仪表</b>、<b>霓虹</b>。</li>
+        <li>白天用得多、旁边就是飞书 → <b>宣纸</b>。</li>
+      </ul>
+    </div>
+    <div class="col">
+      <h4>选中之后</h4>
+      <p>按选中的皮肤改 <code>src/Widget.cs</code> / <code>SettingsForm.cs</code> / <code>NotePanelForm.cs</code> / <code>BubbleMenuForm.cs</code>（GDI+ 自绘；发光复用 CardGlow 现成的模糊实现），跑两套测试 + 装机。其它四套先不实现，以后想加也能当主题进色卡列表。</p>
+    </div>
+  </section>
+</main>
+
+<script src="palettes.js"></script>
+<script src="packs.js"></script>
+</body>
+</html>

@@ -11,7 +11,7 @@ namespace WorkCountdown
     /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
     public static class AppInfo
     {
-        public const string Version = "3.6.0";
+        public const string Version = "3.7.0";
     }
 
     public class HolidayEntry
@@ -773,7 +773,8 @@ namespace WorkCountdown
         public string edge { get; set; }        // right | left | free
         public int opacity { get; set; }        // 40..100
         public string accent { get; set; }      // #RRGGBB（旧字段，保留兼容）
-        public string theme { get; set; }       // 主题 id
+        public string theme { get; set; }       // 主题 id（仅默认皮肤用：39 套内置 + 自建）
+        public string skin { get; set; }        // 整体界面主题（皮肤）id：default / quiet / mica / paper / instrument / neon
         public bool alwaysOnTop { get; set; }
         public int autoCollapseSeconds { get; set; }
         public bool showLunch { get; set; }     // 是否显示午休倒计时
@@ -805,6 +806,7 @@ namespace WorkCountdown
             opacity = 94;
             accent = "#4C8DFF";
             theme = "midnight";
+            skin = Skins.DefaultId;
             alwaysOnTop = true;
             autoCollapseSeconds = 20;
             showLunch = true;
@@ -1574,6 +1576,8 @@ namespace WorkCountdown
             bool known = false;
             foreach (var t in Themes.All) { if (t.id == s.ui.theme) { known = true; break; } }
             if (!known) s.ui.theme = "midnight";
+            // 整体界面主题（皮肤）：老配置没有这一项 / 空 / 坏值 / 大小写错 → 归到合法 id（默认 default）
+            s.ui.skin = Skins.Get(s.ui.skin).id;
             if (s.ui.edge != "right" && s.ui.edge != "left" && s.ui.edge != "free") s.ui.edge = "right";
             if (s.ui.autoCollapseSeconds < 0) s.ui.autoCollapseSeconds = 0;
             if (s.ui.reminderEffect != "none" && s.ui.reminderEffect != "glow"
@@ -2802,6 +2806,19 @@ namespace WorkCountdown
                 return regular.IndexOf("PingFang", StringComparison.OrdinalIgnoreCase) >= 0
                     || regular.StartsWith("苹方", StringComparison.Ordinal);
             }
+        }
+
+        /// <summary>
+        /// 按指定字体族建字体（皮肤标题用：宣纸宋体 / 仪表 Bahnschrift）；字体不存在就退回界面默认。
+        /// </summary>
+        public static Font MakeFamily(string family, float size, FontStyle style = FontStyle.Regular)
+        {
+            if (!string.IsNullOrWhiteSpace(family))
+            {
+                try { return new Font(family.Trim(), size, style, GraphicsUnit.Point); }
+                catch { }
+            }
+            return Make(size, style);
         }
 
         public static Font Make(float size, FontStyle style = FontStyle.Regular)

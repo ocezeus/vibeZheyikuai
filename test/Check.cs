@@ -99,6 +99,33 @@ class Check
         return bmp;
     }
 
+    /// <summary>矩形里的平均颜色（皮肤底色像素级验收用）。</summary>
+    static Color AverageColor(Bitmap bmp, Rectangle r)
+    {
+        long rr = 0, gg = 0, bb = 0;
+        int n = 0;
+        int top = Math.Max(0, r.Top), bottom = Math.Min(bmp.Height, r.Bottom);
+        int left = Math.Max(0, r.Left), right = Math.Min(bmp.Width, r.Right);
+        for (int y = top; y < bottom; y++)
+            for (int x = left; x < right; x++)
+            {
+                Color c = bmp.GetPixel(x, y);
+                rr += c.R; gg += c.G; bb += c.B; n++;
+            }
+        if (n == 0) return Color.Empty;
+        return Color.FromArgb((int)(rr / n), (int)(gg / n), (int)(bb / n));
+    }
+
+    /// <summary>
+    /// 控件「期望可见」状态：设置窗在验收里不 Show，Control.Visible 会因为父窗不可见恒为 false，
+    /// 所以直接读 Control 内部 state 位（0x02 = Visible）判断 Visible 属性有没有被设成 true。
+    /// </summary>
+    static bool DesiredVisible(Control c)
+    {
+        var mi = typeof(Control).GetMethod("GetState", BindingFlags.Instance | BindingFlags.NonPublic);
+        return mi != null && (bool)mi.Invoke(c, new object[] { 2 });
+    }
+
     /// <summary>
     /// 统计矩形里的「硬不透明」（a ≥ 250）和「半透明」（120 ≤ a &lt; 250）像素数：
     /// 实心背景整块是 255，磨砂玻璃（Frost）底色是半透明，用来判断背景风格真的走了不同的绘制。
@@ -2511,6 +2538,217 @@ class Check
                 Call(m, "OnMouseUp", new MouseEventArgs(MouseButtons.Left, 1, detail.X, detail.Y, 0));
                 Ok("「详细编辑」落到提醒页", settingsTab == 2, "tab=" + settingsTab);
             }
+        }
+
+        // ---- 5k. v3.7.0 六套整体界面主题（设置窗口 / 小纸条 / 胶囊菜单）----
+        {
+            // 设置窗口按 96 DPI 设计、运行时整体放大；断言按 DPI 换算回「DIP 设计尺寸」
+            // （这台机器 system DPI = 150%，ClientSize 实际是 1035×960 px = 690×640 DIP）
+            float dpiK;
+            using (var gg = Graphics.FromHwnd(IntPtr.Zero)) dpiK = gg.DpiX / 96f;
+            Func<int, int> dip = delegate(int d) { return (int)Math.Round(d * dpiK); };
+
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.Normalize();
+            using (var dlg = new SettingsForm(new SettingsStore(), s))
+            {
+                var tabs = (TabControl)Get(dlg, "tabs");
+                Ok("设置窗口 690×640 DIP（不超过 640 DIP 高，150% 缩放也不出屏）",
+                    Math.Abs(dlg.ClientSize.Width - dip(690)) <= 1 && Math.Abs(dlg.ClientSize.Height - dip(640)) <= 1,
+                    dlg.ClientSize + "（期望 " + dip(690) + "×" + dip(640) + "，DPI×" + dpiK.ToString("0.##") + "）");
+                Ok("左栏导航里还是 7 个页（表头被裁掉）", tabs.TabPages.Count == 7, tabs.TabPages.Count + " 页");
+
+                var look = tabs.TabPages[3];
+                string cardTitles = "";
+                foreach (Control c in look.Controls) cardTitles += (cardTitles.Length == 0 ? "" : "/") + c.Text;
+                Ok("外观页 4 张卡：界面风格 / 主题配色 / 外观与提醒 / 配置备份",
+                    look.Controls.Count == 4 && cardTitles == "界面风格/主题配色/外观与提醒/配置备份",
+                    look.Controls.Count + " 张：" + cardTitles);
+
+                var picker = Get(dlg, "skinPicker") as SkinPicker;
+                var themePicker = (ThemePicker)Get(dlg, "picker");
+                var lblLocked = (Label)Get(dlg, "lblThemeLocked");
+                Ok("外观页有「界面风格」skinPicker（默认 + 5 套 = 6 块）",
+                    picker != null && picker.Items.Length == 6,
+                    picker == null ? "skinPicker=null" : picker.Items.Length + " 块");
+
+                bool rectsOk = true, hitOk = true;
+                var rectParts = new System.Collections.Generic.List<string>();
+                for (int i = 0; i < picker.Items.Length; i++)
+                {
+                    var r = picker.RectOf(i);
+                    rectParts.Add(picker.Items[i].id + "=" + r.Width + "x" + r.Height + "@" + r.X);
+                    if (r.Width <= 2 || r.Height <= 2 || r.Left < 0 || r.Top < 0
+                        || r.Right > picker.Width || r.Bottom > picker.Height) rectsOk = false;
+                    if (picker.HitTest(new Point(r.Left + r.Width / 2, r.Top + r.Height / 2)) != i) hitOk = false;
+                }
+                Ok("6 个风格块都画在控件内", rectsOk, string.Join(" ", rectParts.ToArray()));
+                Ok("风格块命中区 = 绘制位置（点块中心命中自己）", hitOk,
+                    hitOk ? "6/6 命中正确" : "有块命中错位");
+
+                Ok("默认皮肤时 39 套主题色卡可点、锁定提示隐藏",
+                    !themePicker.Locked && themePicker.Enabled && !DesiredVisible(lblLocked),
+                    "locked=" + themePicker.Locked + " enabled=" + themePicker.Enabled
+                    + " 提示可见=" + DesiredVisible(lblLocked));
+
+                // 点「霓虹」块：只改内存预览；39 套色卡置灰 + 提示出现
+                var rNeon = picker.RectOf(5);
+                Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
+                    rNeon.Left + rNeon.Width / 2, rNeon.Top + rNeon.Height / 2, 0));
+                Ok("点「霓虹」→ ui.skin=neon，主题色卡置灰并提示自带配色",
+                    s.ui.skin == "neon" && picker.SelectedId == "neon"
+                    && themePicker.Locked && !themePicker.Enabled && DesiredVisible(lblLocked),
+                    "skin=" + s.ui.skin + " selected=" + picker.SelectedId + " locked=" + themePicker.Locked
+                    + " enabled=" + themePicker.Enabled + " 提示可见=" + DesiredVisible(lblLocked));
+
+                var saved = Call(dlg, "Save", false);
+                Ok("Save(false) 把所选皮肤存下来", (bool)saved && s.ui.skin == "neon",
+                    "save=" + saved + " skin=" + s.ui.skin);
+
+                var rDefault = picker.RectOf(0);
+                Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
+                    rDefault.Left + rDefault.Width / 2, rDefault.Top + rDefault.Height / 2, 0));
+                Ok("点回「默认」→ 恢复 default、色卡解锁、提示消失",
+                    s.ui.skin == "default" && picker.SelectedId == "default"
+                    && !themePicker.Locked && themePicker.Enabled && !DesiredVisible(lblLocked),
+                    "skin=" + s.ui.skin + " locked=" + themePicker.Locked
+                    + " 提示可见=" + DesiredVisible(lblLocked));
+
+                // 6 块逐一点：预览的皮肤 id 和锁定态都跟着走
+                bool everyClick = true;
+                string clickTrace = "";
+                for (int i = 0; i < picker.Items.Length; i++)
+                {
+                    var r = picker.RectOf(i);
+                    Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
+                        r.Left + r.Width / 2, r.Top + r.Height / 2, 0));
+                    var skin = Skins.All[i];
+                    clickTrace += skin.id + "→" + s.ui.skin + " ";
+                    if (s.ui.skin != skin.id || picker.SelectedId != skin.id) everyClick = false;
+                    bool wantLocked = !skin.IsDefault;
+                    if (themePicker.Locked != wantLocked || DesiredVisible(lblLocked) != wantLocked) everyClick = false;
+                }
+                Ok("六块逐一点击：预览对应皮肤，锁定态 / 提示跟着切", everyClick, clickTrace);
+            }
+
+            // 小纸条 / 右键胶囊：六套皮肤各构造一次，面板里取到的皮肤 id 必须生效
+            var card = new Rectangle(600, 200, 420, 282);
+            Func<string, Settings> skinSettings = delegate(string id)
+            {
+                var ns = new Settings();
+                ns.lark.enabled = false;
+                ns.calendarEnabled = false;
+                ns.ui.theme = "midnight";
+                ns.ui.skin = id;
+                ns.note.style = "drawer";
+                ns.note.id = "48372";
+                ns.Normalize();
+                return ns;
+            };
+
+            string noteTrace = "", bubbleTrace = "";
+            bool noteAll = true, bubbleAll = true;
+            foreach (var skin in Skins.All)
+            {
+                var noteSet = skinSettings(skin.id);
+                try
+                {
+                    using (var p = new NotePanelForm(noteSet, Skins.ResolveTheme(noteSet.ui), card, true,
+                        null, null, null, null, null))
+                    {
+                        var got = (SkinDef)Get(p, "skin");
+                        noteTrace += got.id + (got.id == skin.id ? "" : "!") + " ";
+                        if (got.id != skin.id || (bool)Get(p, "skinDefault") != skin.IsDefault) noteAll = false;
+                    }
+                }
+                catch (Exception ex) { noteAll = false; noteTrace += skin.id + "!" + ex.GetType().Name + " "; }
+
+                var bubbleSet = skinSettings(skin.id);
+                bubbleSet.ui.alwaysOnTop = true;
+                try
+                {
+                    using (var m = new BubbleMenuForm(bubbleSet, Skins.ResolveTheme(bubbleSet.ui), card, true,
+                        null, null, null, null, null))
+                    {
+                        var got = (SkinDef)Get(m, "skin");
+                        var pills = (Rectangle[])Get(m, "pillRects");
+                        bubbleTrace += got.id + "(" + pills.Length + ") ";
+                        if (got.id != skin.id || pills.Length != 6) bubbleAll = false;
+                        m.CloseMenu();
+                    }
+                }
+                catch (Exception ex) { bubbleAll = false; bubbleTrace += skin.id + "!" + ex.GetType().Name + " "; }
+            }
+            Ok("六套皮肤下小纸条都能构造、面板皮肤 id 生效", noteAll, noteTrace);
+            Ok("六套皮肤下胶囊菜单都能构造、6 颗胶囊、皮肤 id 生效", bubbleAll, bubbleTrace);
+
+            // 像素 1：纸条面板底色跟着皮肤走（5 套非默认皮肤实测对得上 panelBg）
+            int backdropOk = 0;
+            string backdropTrace = "";
+            foreach (string id in new string[] { "quiet", "mica", "paper", "instrument", "neon" })
+            {
+                var set = skinSettings(id);
+                using (var p = new NotePanelForm(set, Skins.ResolveTheme(set.ui), card, true, null, null, null, null, null))
+                using (var bmp = RenderPanel(p))
+                {
+                    var skin = (SkinDef)Get(p, "skin");
+                    var strip = new Rectangle(20, Math.Max(2, bmp.Height - 14), Math.Max(1, bmp.Width - 40), 10);
+                    Color avg = AverageColor(bmp, strip);
+                    int dist = Distance(avg, skin.panelBg);
+                    backdropTrace += id + "=" + fmt(avg) + "→" + dist + " ";
+                    if (dist <= 40) backdropOk++;
+                }
+            }
+            Ok("纸条面板底色跟着皮肤走（5 套实测对得上 SkinDef.panelBg）", backdropOk == 5, backdropTrace);
+
+            // 像素 2：宣纸底偏暖（R 明显高于 B）
+            var paperSet = skinSettings("paper");
+            using (var p = new NotePanelForm(paperSet, Skins.ResolveTheme(paperSet.ui), card, true, null, null, null, null, null))
+            using (var bmp = RenderPanel(p))
+            {
+                Color avg = AverageColor(bmp, new Rectangle(20, Math.Max(2, bmp.Height - 14), Math.Max(1, bmp.Width - 40), 10));
+                Ok("宣纸面板底色偏暖（R 明显高于 B）", avg.R - avg.B >= 8, fmt(avg) + " R-B=" + (avg.R - avg.B));
+            }
+
+            // 像素 3：霓虹描边 / 辉光含品红
+            var neonSet = skinSettings("neon");
+            using (var p = new NotePanelForm(neonSet, Skins.ResolveTheme(neonSet.ui), card, true, null, null, null, null, null))
+            using (var bmp = RenderPanel(p))
+            {
+                int magenta = 0;
+                for (int y = 0; y < bmp.Height; y++)
+                    for (int x = 0; x < bmp.Width; x++)
+                    {
+                        Color c = bmp.GetPixel(x, y);
+                        if (c.R > 170 && c.R - c.G > 60 && c.B - c.G > 25) magenta++;
+                    }
+                Ok("霓虹面板描边 / 辉光含品红", magenta > 500, magenta + " 个品红像素");
+            }
+
+            // 像素 4：胶囊菜单底色跟着皮肤走（5 套非默认皮肤实测对得上 bubbleIn）
+            int pillOk = 0;
+            string pillTrace = "";
+            foreach (string id in new string[] { "quiet", "mica", "paper", "instrument", "neon" })
+            {
+                var set = skinSettings(id);
+                set.ui.alwaysOnTop = true;
+                using (var m = new BubbleMenuForm(set, Skins.ResolveTheme(set.ui), card, true, null, null, null, null, null))
+                {
+                    var skin = (SkinDef)Get(m, "skin");
+                    Set(m, "openedAt", Environment.TickCount - 5000);
+                    var pills = (Rectangle[])Get(m, "pillRects");
+                    using (var bmp = RenderForm(m, m.Width, m.Height))
+                    {
+                        int dist = Distance(AverageColor(bmp, pills[0]), skin.bubbleIn);
+                        pillTrace += id + "=" + dist + " ";
+                        if (dist <= 45) pillOk++;
+                    }
+                    m.CloseMenu();
+                }
+            }
+            Ok("胶囊菜单底色跟着皮肤走（5 套实测对得上 SkinDef.bubbleIn）", pillOk == 5, pillTrace);
         }
 
         // ---- 15. 多份日历订阅 + 晚同步补提醒 ----

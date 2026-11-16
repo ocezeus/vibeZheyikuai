@@ -6,10 +6,61 @@
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
 
-## 当前版本：v3.6.0
+## 当前版本：v3.7.0
 
-已装机（FileVersion 3.6.0.0）；日常改动**不升版本号、不出 zip、不动一图说明书**，改动全部追加在下面；用户说「发版」才走下面的发版流程。
+已装机（FileVersion 3.7.0.0）；日常改动**不升版本号、不出 zip、不动一图说明书**，改动全部追加在下面；用户说「发版」才走下面的发版流程。
 
+### 2026-11-16 · v3.7.0 六套整体界面主题（默认 + 无垠/云母/宣纸/仪表/霓虹）
+
+用户从 `design/theme-packs/` 的 5 套方向稿里选定后，要求做成**能切换的整体界面主题**。落实为 **6 套「界面风格」**：默认（保留原来的 39 套配色主题 + 背景风格）+ 无垠 Quiet / 云母 Mica / 宣纸 Ink / 仪表 Instrument / 霓虹 Neon，在 **设置 →「外观」→「界面风格」** 切换；换的不只是配色，卡片 / 设置窗口 / 小纸条 / 右键胶囊 / 提醒整套一起换。
+
+**① 皮肤引擎（`src/Skins.cs`（新）/ `src/Models.cs`）**
+- `SkinDef` 定义每套皮肤：配色（windowBg / windowInk / cardBg / cardEdge / rail / panel / bubble…）、圆角（卡片收起 / 展开 / 小纸条 / 胶囊）、描边 + 顶部高光、进度条画法（原有 / Hairline / Pill / Brush / Segmented / Neon 五种）、数字发光、标题字体，以及玻璃 / 纸纹 / 螺丝 / 霓虹描边 / 朱砂印章 / 无垠 hairline 等令牌。
+- `Skins.Current(ui)` / `Skins.ResolveTheme(ui)` / `Skins.UsesGlass(ui)` / `Skins.CardBorderColor` / `Skins.GlowColor`：默认皮肤全部回落到 v3.6 的原取值，五套皮肤返回自带配色。
+- `UiSettings.skin`（默认 `"default"`；`Normalize()` 里 null / 空 / 未知 / 大小写错一律归 default，老配置零迁移）。
+
+**② 各窗体换肤（默认皮肤逐像素不变）**
+- `src/Widget.cs`：卡片圆角、描边、顶部高光、5 种进度条、数字发光、卡片外光色、仪表螺丝全部走 skin；默认皮肤的现有画法一行没改。
+- `src/CardGlowForm.cs`：卡片外柔光 / 扫边颜色改取 `Skins.GlowColor`。
+- `src/SettingsForm.cs`：设置窗口从顶部七标签改成**左栏导航 + 内容卡片**（690×640 DIP，七项不变）；外观页新增「界面风格」卡（6 块，点一下立即预览，保存写 `ui.skin`）；换肤后控件树 / 自绘卡片 / 色卡统一刷新；非默认皮肤时 39 套主题色卡置灰 + 提示「该风格自带配色，切回《默认》可选 39 套」；宣纸朱砂印章、仪表螺丝、无垠细线卡等细节。
+- `src/NotePanelForm.cs` / `src/BubbleMenuForm.cs`：小纸条面板（气泡 / 输入框 / 昵称胶囊 / 圆角 / 字体）和右键胶囊（124×40 + 246 面板尺寸不变，只换配色 / 圆角 / 字体）跟着皮肤；云母仍走磨砂玻璃。
+- `src/Frost.cs`：`Frost.On` 改由 `Skins.UsesGlass(ui)` 驱动；新增 `PaintPaperGrain`（宣纸颗粒，复用噪点 tile）。
+- `build.ps1`：编译列表加 `src/Skins.cs`。
+- 版本：`src/Models.cs`（AppInfo.Version）/ `src/AssemblyInfo.cs` / `package.ps1` 默认版本 / README 顶部 → **3.7.0**。
+
+**③ 测试与探针**
+- `test/Test.cs` / `test/Check.cs`：新增六套皮肤断言（皮肤表 / Normalize / 序列化往返 / ResolveTheme / UsesGlass / 形态令牌 / 默认皮肤回落 / 设置窗口左栏布局 / 色卡置灰提示 / 保存字段 / 小纸条与胶囊换肤），两套全绿：Test 334 / Check 316（原 299 / 299，新增 35 + 17 条，全部 ALL PASS）。
+- 新增探针：`test/SkinCardShot.cs`（六套卡片并排 `visual/skins/sheet-expanded.png`、收起态 `sheet-collapsed.png`、工资、提醒；默认皮肤与 v3.6 基线逐像素比）、`test/SkinSettingsShot.cs`（六套设置页 `settings-*.png` + 切肤联动自检）、`test/SkinNoteShot.cs`（小纸条 / 胶囊六套 `visual/skins/after/`）。
+
+**④ 验证**
+- 默认皮肤**逐像素比对**：与 v3.6 基线 16 张探针图，11 张 0 像素差、5 张仅 1 像素差（倒计时秒位 / 输入光标相位），等于没变。
+- 六套卡片并排（1820×254）、六套设置页（1041×1000）、小纸条 / 胶囊六套并排全部出图并逐张看过版式。
+- 两套测试全绿：Test 334 / Check 316。
+- 一图说明书新增第 06 节「界面风格 · 六套」并重出 `manual-poster.png`（2400×11386；版本 v3.7.0 / 页脚 2026-11-16）。
+- 文档：README 新增「## 界面风格（v3.7.0，六套）」一节、设置窗口改左栏导航描述、更新一图说明书尺寸与测试条数；`package.ps1`「使用说明」补一句界面风格。
+
+**⑤ 修复**
+- `UiSettings.skin` 归一化：老配置 / 手改配置里为空、未知、大小写错、带空白的 `skin` 值，会在 `Settings.Normalize()` 里规范成合法的小写 id（`Skins.Get` 先 `Trim()` 再忽略大小写匹配，未命中回退 `default`），避免坏值落盘；断言覆盖 null / 空串 / 未知 / 大小写错 / 首尾空格 / 六个合法 id 往返。
+
+**⑥ 打包 / 发布 / 装机**
+- 已打包并发 GitHub Release（lead 补）。
+
+### 2026-11-16 13:15 · 主题方向稿：5 套整体界面皮肤（设计稿，源码 0 改动）
+
+用户原话：「继续工具箱开发，基于已有的功能，开发更换主题功能；渲染五个主题，用html呈现，我挑选一下」；
+确认范围＝**「5 个版本的整体工具箱界面（含卡片 + 设置页 + 小纸条）重设计」**，先出可交互 HTML 让用户挑，挑完再实现。
+
+- 新增 `design\theme-packs\`（全部是新文件，未碰 `src\`）：
+  - `index.html` + `packs.css` + `themes.css` + `packs.js`：可交互预览页，顶部五个标签 / `←→` 切换 / 底部「收起态并排」可点；`#paper` 等 hash 直达；`?only=stage` 只截桌面场景。
+  - `palettes.js`：39 套内置主题真实配色（从 `design\theme-cards.html` 的 `THEMES` JSON 提取，与 `src\Models.cs` 同源）。
+  - `ui-spec.md`（762 行）：现有 v3.6 界面几何 / 字号 / 颜色的 brief，含 9 条「源码里发现、README 没写」的细节（图标顺序 ✈ ¥ ⚙ ↻ ›、设置页主题网格 10×4、提醒扩散已迁到日程页、文字混色公式、设置页真实裁切等）。
+  - `render.ps1`（整页 1.25x → `shots\final\`）、`compose.ps1`（场景 → `shots\stage-*.png` + `shots\theme-compare.png` 2×3 对比图）。
+  - `README.md`：怎么打开 / 文件说明 / 五套定位 / 出图命令 / 待确认项。
+- 五套方向（都画了卡片 + 设置窗口 + 小纸条 + 右键胶囊四块）：01 无垠 Quiet（近黑 + 1px 细线 + 等宽数字，成本低）、02 云母 Mica（磨砂玻璃全套，成本中，`Frost.cs` 已有基础）、03 宣纸 Ink（浅色 + 宋体 + 朱砂印章，成本中）、04 仪表 Instrument（金属 + 琥珀数码 + 24 格分刻 + 螺丝，成本中高）、05 霓虹 Neon（品红 × 青辉光 + 网格，成本高）。
+- 五套共用**同一个新结构**：设置窗口从顶部七标签改成左栏导航 + 内容卡片（680×720，现在是 524×640）；卡片 224×68 / 280×188、小纸条 392×282、胶囊 124×40 + 246 长开面板都不变，换的只是皮肤。
+- 验证：Chrome 无头出图 5 套 × 2 种（整页 1.25x / 场景 1:1），`theme-compare.png` 1298×1217；`#paper` 等 hash 直达、切标签、色卡填充、时钟均正常；页面无外部依赖，`file://` 双击即可打开。
+- 源码 / 版本 / 装机：**0 改动**；版本仍 v3.6.0；未打包、未装机、未动一图说明书。
+- 下一步：等用户挑 01–05（或组合），再按选中皮肤改 `Widget.cs` / `SettingsForm.cs` / `NotePanelForm.cs` / `BubbleMenuForm.cs`，跑两套测试 + 装机。
 ### 2026-11-13 18:40 · 发版 v3.6.0（磨砂玻璃 / 卡片页昵称 / 两排联系人 / 预览通知 / 检查更新 + 自动发版）
 
 用户 5 条需求（原话）：

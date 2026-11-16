@@ -6,7 +6,7 @@ using System.Drawing.Imaging;
 namespace WorkCountdown
 {
     /// <summary>
-    /// 磨砂玻璃背景（主题背景风格 <c>ui.bgStyle = "glass"</c>）。
+    /// 磨砂玻璃背景（主题背景风格 <c>ui.bgStyle = "glass"</c>，或皮肤 <c>skin.glass</c> 云母）。
     ///
     /// 卡片 / 小纸条面板 / 胶囊气泡都是分层窗（UpdateLayeredWindow，逐像素 alpha），
     /// 这里用「半透明主题底色 + 柔光雾气 + 模糊磨砂颗粒 + 玻璃边缘高光」模拟一块压在桌面上的毛玻璃。
@@ -25,9 +25,13 @@ namespace WorkCountdown
         private static Bitmap grain;
         private static readonly object grainLock = new object();
 
+        /// <summary>
+        /// 这一份设置要不要按磨砂玻璃画：默认皮肤看「背景风格」，云母强制玻璃，其它皮肤都不是玻璃。
+        /// 转发到 <see cref="Skins.UsesGlass"/>，老调用点（Frost.On）继续可用。
+        /// </summary>
         public static bool On(UiSettings ui)
         {
-            return ui != null && ui.bgStyle == Glass;
+            return Skins.UsesGlass(ui);
         }
 
         public static string Normalize(string style)
@@ -96,6 +100,46 @@ namespace WorkCountdown
                 g.DrawLine(pen, bounds.X + S(bounds, 8), bounds.Bottom - rim / 2f, bounds.Right - S(bounds, 8), bounds.Bottom - rim / 2f);
 
             g.Restore(state);
+        }
+
+        /// <summary>
+        /// 纸纹颗粒（宣纸皮肤）：复用磨砂玻璃那张噪点 tile（<see cref="GrainTile"/>，只生成一次），
+        /// 用颜色矩阵把它染成纸的墨色，再按 tile 铺进 path。tile 本身不重建，每帧只多一次颜色矩阵 + 几次贴图。
+        /// <paramref name="alpha"/> 是颗粒浓度（1 ≈ 原噪点的 2~5% 很淡，宣纸用 2.4 左右）。
+        /// </summary>
+        public static void PaintPaperGrain(Graphics g, GraphicsPath path, Rectangle bounds, Color ink, double alpha)
+        {
+            if (g == null || path == null || bounds.Width <= 0 || bounds.Height <= 0) return;
+            if (alpha <= 0.003) return;
+            Bitmap tile = GrainTile();
+            GraphicsState state = g.Save();
+            try
+            {
+                g.SetClip(path, CombineMode.Intersect);
+                g.SmoothingMode = SmoothingMode.None;
+                g.PixelOffsetMode = PixelOffsetMode.None;
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                var cm = new ColorMatrix(new float[][]
+                {
+                    new float[] { ink.R / 255f, 0f, 0f, 0f, 0f },
+                    new float[] { 0f, ink.G / 255f, 0f, 0f, 0f },
+                    new float[] { 0f, 0f, ink.B / 255f, 0f, 0f },
+                    new float[] { 0f, 0f, 0f, (float)Math.Min(4.0, Math.Max(0.0, alpha)), 0f },
+                    new float[] { 0f, 0f, 0f, 0f, 1f }
+                });
+                using (var ia = new ImageAttributes())
+                {
+                    ia.SetColorMatrix(cm);
+                    int tw = Math.Max(1, tile.Width), th = Math.Max(1, tile.Height);
+                    for (int y = bounds.Y; y < bounds.Bottom; y += th)
+                        for (int x = bounds.X; x < bounds.Right; x += tw)
+                            g.DrawImage(tile, new Rectangle(x, y, tw, th), 0, 0, tw, th, GraphicsUnit.Pixel, ia);
+                }
+            }
+            finally
+            {
+                g.Restore(state);
+            }
         }
 
         private static float S(Rectangle bounds, float dip)

@@ -38,6 +38,14 @@ namespace WorkCountdown
         private CardStatus status;
         private ThemeDef theme;
         private float scale = 1f;
+
+        /// <summary>
+        /// 当前整体界面主题（皮肤）。默认皮肤继续走原有画法（39 套主题 + 背景风格），
+        /// 其它五套按 SkinDef 的字段画圆角 / 描边 / 高光 / 进度条 / 发光 / 装饰。
+        /// 查表只有 6 项，直接算，免得设置改完没刷新。
+        /// </summary>
+        private SkinDef Skin { get { return Skins.Current(settings.ui); } }
+
         private bool fetching;
         private bool lastFetchFailed;
         private DateTime lastDay = DateTime.Today;
@@ -203,7 +211,7 @@ namespace WorkCountdown
             settings.NormalizeCustomThemes();
             if (settings.note == null) settings.note = new NoteSettings();
             settings.note.Normalize();
-            this.theme = Themes.Get(settings.ui.theme);
+            this.theme = Skins.ResolveTheme(settings.ui);
 
             using (var screen = Graphics.FromHwnd(IntPtr.Zero))
             {
@@ -291,6 +299,8 @@ namespace WorkCountdown
                     if (salaryTick || NoteRimActive()) Invalidate();
                     return;
                 }
+                // 流动亮带只有默认 / 云母 / 霓虹这三套有；别的皮肤静止时不用 18fps 空转
+                if (!BarAnimated && !salaryTick && !NoteRimActive()) return;
                 Invalidate();
             };
             remindT.Tick += delegate { StepReminder(); };
@@ -365,10 +375,16 @@ namespace WorkCountdown
             }
         }
 
-        /// <summary>卡片圆角的物理像素（收起 14 / 展开 18 DIP），和 RenderCard 画的那条路径一致。</summary>
+        /// <summary>卡片圆角（DIP）：默认皮肤收起 14 / 展开 18，其它皮肤按 SkinDef。</summary>
+        private int CardRadiusDip
+        {
+            get { return Math.Max(1, collapsed ? Skin.radiusCollapsed : Skin.radiusExpanded); }
+        }
+
+        /// <summary>卡片圆角的物理像素，和 RenderCard 画的那条路径一致（CardGlowForm 也读它）。</summary>
         internal int CardRadiusPx
         {
-            get { return S(collapsed ? 14 : 18); }
+            get { return S(CardRadiusDip); }
         }
 
         /// <summary>按当前设置重建所有卡片字体（换中文字体 / 数字字体后调用）。</summary>
@@ -429,6 +445,7 @@ namespace WorkCountdown
             if (!settings.ui.reducedMotion && !SystemInformation.HighContrast && cardGlow == null)
             {
                 cardGlow = new CardGlowForm(this, theme, scale);
+                cardGlow.SetGlow(Skins.GlowColor(Skin, theme));
                 cardGlow.Begin();
             }
             // 开机也是展开的：同样按「N 秒没动就收起」的规则走，别一直杵在那儿
@@ -513,11 +530,16 @@ namespace WorkCountdown
 
         private void Recompute()
         {
-            theme = Themes.Get(settings.ui.theme);
+            theme = Skins.ResolveTheme(settings.ui);
             // 窗口底色必须和卡片一致：圆角抗锯齿边缘会与底色混合，浅灰底会出现一圈白边
             if (BackColor != theme.bgBottom) BackColor = theme.bgBottom;
             status = StatusBuilder.Build(settings, snapshot, DateTime.Now, theme);
-            if (cardGlow != null) cardGlow.SetTheme(theme);
+            if (cardGlow != null)
+            {
+                cardGlow.SetTheme(theme);
+                // 卡外光颜色按皮肤走；默认皮肤 Skins.GlowColor 就是 theme.accent，画法不变
+                cardGlow.SetGlow(Skins.GlowColor(Skin, theme));
+            }
             UpdateTickRate();
             // 工资面板开着时，午休行出现 / 消失会改变展开高度：每秒顺手校正一次
             if (salaryOpen && !screenReminder && !collapsed && !animating && !salaryAnimating && Height != ExpandedH)
@@ -1402,7 +1424,7 @@ namespace WorkCountdown
         /// <summary>提醒的两层色：固定日程按自己的配色；会议、日程等跟随当前主题。</summary>
         private void ReminderColors(out Color a, out Color b, out Color ink)
         {
-            if (theme == null) theme = Themes.Get(settings.ui.theme);
+            if (theme == null) theme = Skins.ResolveTheme(settings.ui);
             // 固定日程按自己选的配色（旧规则），其余三类按「该类日程」的配色设置
             string styleId = Reminders.ColorIdOf(settings, remindEvent, FixedOf(remindEvent));
             ReminderStyles.Resolve(styleId, theme, out a, out b, out ink);
@@ -2082,14 +2104,19 @@ namespace WorkCountdown
         private void RenderCard(Graphics g)
         {
             if (status == null) Recompute();
-            if (theme == null) theme = Themes.Get(settings.ui.theme);
-            using (var path = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+            if (theme == null) theme = Skins.ResolveTheme(settings.ui);
+            SkinDef skin = Skin;
+            using (var path = CardPath())
             {
-                if (Frost.On(settings.ui))
+                if (Skins.UsesGlass(settings.ui))
                     Frost.PaintSurface(g, path, new Rectangle(0, 0, Width, Height), theme, 1, 1);
                 else
                     using (var brush = new LinearGradientBrush(new Rectangle(0, 0, Width, Height), theme.bgTop, theme.bgBottom, 90f))
                         g.FillPath(brush, path);
+                // 皮肤质感：顶部高光（默认皮肤 sheenAlpha=0，什么都不画）→ 纸纹（宣纸）
+                PaintSkinSheen(g, path, skin);
+                if (skin.paperGrain)
+                    Frost.PaintPaperGrain(g, path, new Rectangle(0, 0, Width, Height), theme.textMain, 2.4);
                 PaintCardGlow(g, path);
                 if (!reminding)
                 {
@@ -2116,7 +2143,7 @@ namespace WorkCountdown
                                 layer.Clear(Color.Transparent);
                                 var clip = layer.Clip;
                                 // 提醒层也按卡片的圆角裁一刀，否则两块色块会把圆角糊成直角
-                                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                                using (var cardPath = CardPath())
                                     layer.SetClip(cardPath, CombineMode.Intersect);
                                 PaintReminder(layer, elapsed, quietNow, 1, contentA);
                                 layer.Clip = clip;
@@ -2137,8 +2164,143 @@ namespace WorkCountdown
                 // 提醒动画期间不描边：浅色主题下这一圈线会压在色块上显出一条亮边。
                 if (!reminding)
                 {
-                    using (var pen = new Pen(Color.FromArgb(24, theme.accent), Math.Max(1, scale))) g.DrawPath(pen, path);
+                    DrawCardBorder(g, path, skin);
+                    if (skin.screws) DrawScrews(g);
                     DrawNoteRim(g, path);
+                }
+            }
+        }
+
+        // ---------------- 皮肤质感（顶部高光 / 纸纹 / 描边 / 霓虹边 / 螺丝） ----------------
+
+        /// <summary>
+        /// 皮肤指定的圆角：默认皮肤沿用原来的两条路径（收起 14 / 展开 18），提醒层和光晕层也走这里。
+        /// </summary>
+        private GraphicsPath CardPath()
+        {
+            return RoundPath(new Rectangle(0, 0, Width, Height), CardRadiusPx);
+        }
+
+        /// <summary>
+        /// 卡片描边。默认皮肤照旧（1 物理像素、accent @ 24/255）；
+        /// 其它皮肤按 skin.borderWidth + Skins.CardBorderColor；霓虹走品红→青渐变 + 内侧辉光。
+        /// </summary>
+        private void DrawCardBorder(Graphics g, GraphicsPath path, SkinDef skin)
+        {
+            if (skin.IsDefault)
+            {
+                using (var pen = new Pen(Color.FromArgb(24, theme.accent), Math.Max(1, scale))) g.DrawPath(pen, path);
+                return;
+            }
+            if (skin.neonEdge)
+            {
+                DrawNeonEdge(g, path, skin);
+                return;
+            }
+            // 笔画正好落在圆角路径内侧：Path 贴着窗口边，笔画一半会在窗口外，
+            // 所以按 2 倍线宽画、再用卡片路径裁一刀，露出来的就是 borderWidth 那么宽的一条。
+            int width = Math.Max(1, skin.borderWidth);
+            var saved = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            using (var pen = new Pen(Skins.CardBorderColor(skin, theme), Math.Max(1f, 2f * S(width))))
+            {
+                pen.LineJoin = LineJoin.Round;
+                g.DrawPath(pen, path);
+            }
+            g.Restore(saved);
+        }
+
+        /// <summary>霓虹：品红→青渐变笔画，外加三层递减的内侧辉光（卡片外面的辉光交给 CardGlowForm）。</summary>
+        private void DrawNeonEdge(Graphics g, GraphicsPath path, SkinDef skin)
+        {
+            var saved = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            // 由外到内：宽而淡的辉光 → 贴着边的一条实线
+            float[] widths = new float[] { 13f, 8.5f, 5.2f, Math.Max(1f, skin.borderWidth * 2f) };
+            double[] alphas = new double[] { 0.035, 0.07, 0.15, 1.0 };
+            for (int i = 0; i < widths.Length; i++)
+            {
+                using (var brush = NeonEdgeBrush(alphas[i]))
+                using (var pen = new Pen(brush, Math.Max(1f, S(widths[i]))))
+                {
+                    pen.LineJoin = LineJoin.Round;
+                    g.DrawPath(pen, path);
+                }
+            }
+            g.Restore(saved);
+        }
+
+        /// <summary>霓虹描边用的品红→紫→青渐变（按整张卡片对角线铺色）。</summary>
+        private LinearGradientBrush NeonEdgeBrush(double alpha)
+        {
+            Color hot = theme.accent;
+            Color cool = Skin.accent2.IsEmpty ? theme.accent : Skin.accent2;
+            var rect = new Rectangle(0, 0, Math.Max(2, Width), Math.Max(2, Height));
+            var brush = new LinearGradientBrush(rect, Color.Black, Color.Black, 35f);
+            var blend = new ColorBlend();
+            blend.Colors = new[] { Skins.Alpha(hot, alpha), Skins.Alpha(Skins.Mix(hot, cool, 0.5), alpha), Skins.Alpha(cool, alpha) };
+            blend.Positions = new[] { 0f, 0.55f, 1f };
+            brush.InterpolationColors = blend;
+            return brush;
+        }
+
+        /// <summary>顶部高光：skin.sheenAlpha &gt; 0 时在卡片内画一层自上而下、透明收边的白色高光。</summary>
+        private void PaintSkinSheen(Graphics g, GraphicsPath path, SkinDef skin)
+        {
+            double sheen = skin == null ? 0 : Math.Max(0, Math.Min(1, skin.sheenAlpha));
+            if (sheen <= 0.004) return;
+            int top = (int)Math.Round(255 * sheen);
+            if (top <= 0) return;
+            var saved = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            var rect = new Rectangle(0, 0, Math.Max(2, Width), Math.Max(2, Height));
+            using (var brush = new LinearGradientBrush(rect, Color.FromArgb(top, Color.White), Color.FromArgb(0, Color.White), 90f))
+            {
+                var blend = new ColorBlend();
+                blend.Colors = new[]
+                {
+                    Color.FromArgb(top, Color.White),
+                    Color.FromArgb((int)Math.Round(top * 0.38), Color.White),
+                    Color.FromArgb(0, Color.White),
+                    Color.FromArgb(0, Color.White)
+                };
+                blend.Positions = new[] { 0f, 0.22f, 0.48f, 1f };
+                brush.InterpolationColors = blend;
+                g.FillRectangle(brush, rect);
+            }
+            g.Restore(saved);
+        }
+
+        /// <summary>仪表：四角 4 颗小螺丝（半径约 2.4 DIP，左上受光、右下背光的深色凹凸）。</summary>
+        private void DrawScrews(Graphics g)
+        {
+            int inset = S(7);
+            int r = Math.Max(2, S(2.4f));
+            Color body = Skins.Mix(theme.bgBottom, Color.Black, 0.26);
+            Color slot = Skins.Mix(theme.bgBottom, Color.Black, 0.55);
+            var corners = new[]
+            {
+                new Point(inset, inset), new Point(Width - inset, inset),
+                new Point(inset, Height - inset), new Point(Width - inset, Height - inset)
+            };
+            foreach (var c in corners)
+            {
+                var box = new Rectangle(c.X - r, c.Y - r, r * 2, r * 2);
+                using (var brush = new SolidBrush(body)) g.FillEllipse(brush, box);
+                // 左上受光、右下背光：一圈 1 物理像素的斜向高光/暗边
+                float w = Math.Max(1f, scale);
+                using (var pen = new Pen(Color.FromArgb(74, Color.White), w))
+                    g.DrawArc(pen, box.X, box.Y, box.Width, box.Height, 175f, 100f);
+                using (var pen = new Pen(Color.FromArgb(96, Color.Black), w))
+                    g.DrawArc(pen, box.X + w, box.Y + w, Math.Max(2, box.Width - w * 2), Math.Max(2, box.Height - w * 2), 10f, 90f);
+                // 中间的十字槽
+                using (var pen = new Pen(slot, Math.Max(1f, scale)))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Round;
+                    int s = Math.Max(1, r / 2);
+                    g.DrawLine(pen, c.X - s, c.Y, c.X + s, c.Y);
+                    g.DrawLine(pen, c.X, c.Y - s, c.X, c.Y + s);
                 }
             }
         }
@@ -2150,6 +2312,7 @@ namespace WorkCountdown
         /// <summary>
         /// 卡片背景的三层色光：角落柔光 A、进度条同色光 B、内缘轮廓光 D。
         /// 设置里可单选或三种都开；强度固定 1.6×（和 HTML 预览的 1.6 对齐）。
+        /// 光色取 Skins.GlowColor：默认皮肤就是原来的 theme.accent。
         /// </summary>
         private void PaintCardGlow(Graphics g, GraphicsPath cardPath)
         {
@@ -2159,7 +2322,7 @@ namespace WorkCountdown
             bool a = all || mode == "corner";
             bool b = all || mode == "bar";
             double damp = all ? 0.70 : 1.0;
-            Color accent = theme.accent;
+            Color accent = Skins.GlowColor(Skin, theme);
             var saved = g.Save();
             g.SetClip(cardPath, CombineMode.Intersect);
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -2323,7 +2486,7 @@ namespace WorkCountdown
                 layer.UnlockBits(bits);
 
                 var saved = g.Save();
-                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                using (var cardPath = CardPath())
                     g.SetClip(cardPath, CombineMode.Replace);
                 g.DrawImageUnscaled(layer, 0, 0);
                 g.Restore(saved);
@@ -2337,7 +2500,7 @@ namespace WorkCountdown
             {
                 int seam = collapsed ? S(37) : S(64);
                 var saved = g.Save();
-                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                using (var cardPath = CardPath())
                 {
                     g.SetClip(cardPath, CombineMode.Replace);
                     if (bar)
@@ -2383,7 +2546,7 @@ namespace WorkCountdown
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                 g.Clear(Color.Transparent);
-                using (var cardPath = RoundPath(new Rectangle(0, 0, Width, Height), S(collapsed ? 14 : 18)))
+                using (var cardPath = CardPath())
                     g.SetClip(cardPath, CombineMode.Intersect);
                 PaintReminder(g, RemindInMs + RemindHoldMs, false, 1, 1);
             }
@@ -2646,7 +2809,8 @@ namespace WorkCountdown
                 int dy = (int)Math.Round((1 - pFocal) * S(8));
                 Font basis=status.bigIsClock?fontBig:fontBigText;
                 Font fit=FitFont(g,status.big,basis,w);
-                Line(g,status.big,fit,theme.textMain,new RectangleF(pad-S(2),y+dy,w+S(2),S(BigDip)),pFocal,false);
+                // 云母 / 仪表 / 霓虹：数字带发光；默认皮肤还是原来的 Line
+                LineNumber(g,status.big,fit,new RectangleF(pad-S(2),y+dy,w+S(2),S(BigDip)),pFocal,false);
                 if(fit!=basis) fit.Dispose();
                 y+=S(BigDip)+gap;
             }
@@ -2898,6 +3062,15 @@ namespace WorkCountdown
         private void DrawProgress(Graphics g, int x, int y, int width, int height, bool glowOn)
         {
             if (barAlpha <= 0.01) return;
+            // 五套皮肤各自一种画法：高度按皮肤，在原来的行盒（height，还是 S(BarDip)）里垂直居中，
+            // 行高推进不变，所以卡片高度一点没动。
+            SkinProgress skinBar = Skin.progress;
+            if (skinBar != SkinProgress.Default)
+            {
+                int barH = Math.Max(1, S(ProgressBarDip(skinBar)));
+                DrawSkinProgress(g, skinBar, x, y + (height - barH) / 2, Math.Max(2, width), barH);
+                return;
+            }
             using (var path = RoundPath(new Rectangle(x, y, width, height), height / 2))
             using (var brush = new SolidBrush(Fade(theme.track, barAlpha)))
                 g.FillPath(brush, path);
@@ -3037,6 +3210,312 @@ namespace WorkCountdown
             }
         }
 
+        // ---------------- 五套皮肤的进度条（默认皮肤的 DrawProgress 一行没改） ----------------
+
+        /// <summary>皮肤进度条的高度（DIP）：每种画法一条，画的时候在 S(BarDip) 的行盒里垂直居中。</summary>
+        private static int ProgressBarDip(SkinProgress style)
+        {
+            switch (style)
+            {
+                case SkinProgress.Hairline: return 2;
+                case SkinProgress.Pill: return 5;
+                case SkinProgress.Brush: return 3;
+                case SkinProgress.Segmented: return 8;
+                case SkinProgress.Neon: return 4;
+            }
+            return BarDip;
+        }
+
+        /// <summary>当前走过比例（0..1）。</summary>
+        private double BarProgress { get { return status == null ? 0 : Math.Max(0, Math.Min(1, status.progress)); } }
+
+        /// <summary>这套皮肤的进度条有没有逐帧动的东西（流动亮带）：没有就不必 18fps 重画。</summary>
+        private bool BarAnimated
+        {
+            get
+            {
+                SkinProgress style = Skin.progress;
+                return style == SkinProgress.Default || style == SkinProgress.Pill || style == SkinProgress.Neon;
+            }
+        }
+
+        /// <summary>
+        /// 非默认皮肤的轨道色（已经带好透明度）：
+        /// 深色皮肤用半透明白（设计稿全是 rgba(255,255,255,.09~.14)，云母压在玻璃上才不会被盖成一块深灰），
+        /// 宣纸用深一档的纸色（设计稿 --trk:#E4D9C3）。
+        /// </summary>
+        private Color BarTrackInk(double alpha)
+        {
+            alpha = Clamp01(alpha);
+            int a = (int)Math.Round(255 * alpha);
+            if (a <= 0) return Color.Transparent;
+            if (Skin.light) return Color.FromArgb(a, Skins.Mix(theme.edge, theme.track, 0.12));
+            double k = Skin.glass ? 0.14 : 0.11;
+            return Color.FromArgb((int)Math.Round(a * k), Color.White);
+        }
+
+        private void DrawSkinProgress(Graphics g, SkinProgress style, int x, int y, int width, int height)
+        {
+            switch (style)
+            {
+                case SkinProgress.Hairline: DrawBarHairline(g, x, y, width, height); break;
+                case SkinProgress.Pill: DrawBarPill(g, x, y, width, height); break;
+                case SkinProgress.Brush: DrawBarBrush(g, x, y, width, height); break;
+                case SkinProgress.Segmented: DrawBarSegmented(g, x, y, width, height); break;
+                case SkinProgress.Neon: DrawBarNeon(g, x, y, width, height); break;
+            }
+        }
+
+        /// <summary>无垠：2 DIP 细线，只留一条实线，不发光、不流动。</summary>
+        private void DrawBarHairline(Graphics g, int x, int y, int width, int height)
+        {
+            int radius = height / 2;
+            using (var path = RoundPath(new Rectangle(x, y, width, height), radius))
+            using (var brush = new SolidBrush(BarTrackInk(barAlpha * 0.9)))
+                g.FillPath(brush, path);
+            int filled = (int)Math.Round(width * BarProgress);
+            if (filled < 1) return;
+            // 无垠的进度是一条近白的细线（accent2 往主文字色提亮），不是强调色
+            Color ink = Skin.accent2.IsEmpty ? theme.accent : Skins.Mix(Skin.accent2, theme.textMain, 0.3);
+            using (var path = RoundPath(new Rectangle(x, y, filled, height), radius))
+            using (var brush = new SolidBrush(Fade(ink, barAlpha)))
+                g.FillPath(brush, path);
+        }
+
+        /// <summary>云母：5 DIP 渐变胶囊 + 柔光 + 流动亮带。</summary>
+        private void DrawBarPill(Graphics g, int x, int y, int width, int height)
+        {
+            int radius = height / 2;
+            int filled = (int)Math.Round(width * BarProgress);
+            Color start = theme.accent;
+            Color end = Skin.accent2.IsEmpty ? theme.accent : Skin.accent2;
+            // 柔光：三圈同色、越大越淡（对应 CSS 的 0 0 14px）
+            if (filled > height)
+            {
+                for (int i = 3; i >= 1; i--)
+                {
+                    int grow = S(i * 1.2f);
+                    if (grow <= 0) continue;
+                    var halo = new Rectangle(x - grow, y - grow, filled + grow * 2, height + grow * 2);
+                    using (var path = RoundPath(halo, (height + grow * 2) / 2))
+                    using (var brush = new SolidBrush(Color.FromArgb((int)Math.Round(22 * barAlpha / i), start)))
+                        g.FillPath(brush, path);
+                }
+            }
+            using (var path = RoundPath(new Rectangle(x, y, width, height), radius))
+            using (var brush = new SolidBrush(BarTrackInk(barAlpha)))
+                g.FillPath(brush, path);
+            if (filled < Math.Max(2, height / 2)) return;
+            using (var path = RoundPath(new Rectangle(x, y, filled, height), radius))
+            {
+                using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), height),
+                    Fade(start, barAlpha), Fade(end, barAlpha), 0f))
+                    g.FillPath(brush, path);
+                // 上面压一道高光，胶囊才有玻璃厚度
+                using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(2, height)),
+                    Color.FromArgb((int)Math.Round(70 * barAlpha), Color.White), Color.FromArgb(0, Color.White), 90f))
+                    g.FillPath(brush, path);
+                PaintBarFlow(g, path, x, y, height, filled);
+            }
+        }
+
+        /// <summary>宣纸：3 DIP 朱砂笔触（accent2 → accent 横向渐变），两端收圆，不流动、不发光。</summary>
+        private void DrawBarBrush(Graphics g, int x, int y, int width, int height)
+        {
+            int radius = height / 2;
+            using (var path = RoundPath(new Rectangle(x, y, width, height), radius))
+            using (var brush = new SolidBrush(BarTrackInk(barAlpha)))
+                g.FillPath(brush, path);
+            int filled = (int)Math.Round(width * BarProgress);
+            if (filled < height) return;
+            Color start = Skin.accent2.IsEmpty ? theme.accent : Skin.accent2;   // 朱砂亮面
+            Color end = theme.accent;                                           // 朱砂暗面
+            using (var path = RoundPath(new Rectangle(x, y, filled, height), radius))
+            {
+                using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), height),
+                    Fade(start, barAlpha), Fade(end, barAlpha), 0f))
+                    g.FillPath(brush, path);
+                using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(2, height)),
+                    Color.FromArgb((int)Math.Round(46 * barAlpha), Color.White), Color.FromArgb(0, Color.White), 90f))
+                    g.FillPath(brush, path);
+            }
+        }
+
+        /// <summary>仪表：8 DIP 分刻刻度（24 格），琥珀色，像仪表刻度；格子在整条轨道上等分。</summary>
+        private void DrawBarSegmented(Graphics g, int x, int y, int width, int height)
+        {
+            const int cells = 24;
+            int gap = Math.Max(1, S(1.6f));
+            int radius = Math.Max(1, S(1));
+            double progress = BarProgress;
+            Color on = theme.accent;                                    // 琥珀
+            // 没走到的暗刻：半透明白（设计稿 --trk 是 rgba(255,255,255,.11) 的重复条纹）
+            Color off = Color.FromArgb((int)Math.Round(255 * Clamp01(barAlpha) * 0.11), Color.White);
+            int filledW = (int)Math.Round(width * progress);
+            if (filledW > height)
+            {
+                // 已走段底下一圈琥珀柔光（对应 CSS 的 0 0 10px）
+                for (int i = 2; i >= 1; i--)
+                {
+                    int grow = S(i * 1.6f);
+                    if (grow <= 0) continue;
+                    var halo = new Rectangle(x - grow, y - grow, filledW + grow * 2, height + grow * 2);
+                    using (var path = RoundPath(halo, radius + grow))
+                    using (var brush = new SolidBrush(Color.FromArgb((int)Math.Round(16 * barAlpha / i), on)))
+                        g.FillPath(brush, path);
+                }
+            }
+            for (int i = 0; i < cells; i++)
+            {
+                int left = x + (int)Math.Round(width * (double)i / cells);
+                int right = x + (int)Math.Round(width * (double)(i + 1) / cells);
+                int cw = Math.Max(1, right - left - gap);
+                var cell = new Rectangle(left, y, cw, height);
+                using (var path = RoundPath(cell, radius))
+                using (var brush = new SolidBrush(off))
+                    g.FillPath(brush, path);
+                double fill = Clamp01(progress * cells - i);
+                if (fill <= 0.001) continue;
+                int fw = (int)Math.Round(cw * fill);
+                if (fw < 1) continue;
+                using (var path = RoundPath(new Rectangle(cell.X, y, fw, height), radius))
+                using (var brush = new SolidBrush(Fade(on, barAlpha)))
+                    g.FillPath(brush, path);
+            }
+        }
+
+        /// <summary>霓虹：4 DIP 品红→青渐变 + 双层辉光（外层青、内层品红）+ 亮带。</summary>
+        private void DrawBarNeon(Graphics g, int x, int y, int width, int height)
+        {
+            int radius = height / 2;
+            int filled = (int)Math.Round(width * BarProgress);
+            Color hot = theme.accent;
+            Color cool = Skin.accent2.IsEmpty ? theme.accent : Skin.accent2;
+            if (filled > height)
+            {
+                for (int i = 4; i >= 2; i--)
+                {
+                    int grow = S(i * 1.1f);
+                    var halo = new Rectangle(x - grow, y - grow, filled + grow * 2, height + grow * 2);
+                    using (var path = RoundPath(halo, (height + grow * 2) / 2))
+                    using (var brush = new SolidBrush(Color.FromArgb((int)Math.Round(9 * barAlpha), cool)))
+                        g.FillPath(brush, path);
+                }
+                for (int i = 2; i >= 1; i--)
+                {
+                    int grow = S(i * 1.0f);
+                    var halo = new Rectangle(x - grow, y - grow, filled + grow * 2, height + grow * 2);
+                    using (var path = RoundPath(halo, (height + grow * 2) / 2))
+                    using (var brush = new SolidBrush(Color.FromArgb((int)Math.Round(26 * barAlpha / i), hot)))
+                        g.FillPath(brush, path);
+                }
+            }
+            using (var path = RoundPath(new Rectangle(x, y, width, height), radius))
+            using (var brush = new SolidBrush(BarTrackInk(barAlpha)))
+                g.FillPath(brush, path);
+            if (filled < Math.Max(2, height / 2)) return;
+            using (var path = RoundPath(new Rectangle(x, y, filled, height), radius))
+            {
+                using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), height), Color.Black, Color.Black, 0f))
+                {
+                    var blend = new ColorBlend();
+                    blend.Colors = new[] { Fade(hot, barAlpha), Fade(Skins.Mix(hot, cool, 0.5), barAlpha), Fade(cool, barAlpha) };
+                    blend.Positions = new[] { 0f, 0.55f, 1f };
+                    brush.InterpolationColors = blend;
+                    g.FillPath(brush, path);
+                }
+                using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(2, height)),
+                    Color.FromArgb((int)Math.Round(70 * barAlpha), Color.White), Color.FromArgb(0, Color.White), 90f))
+                    g.FillPath(brush, path);
+                PaintBarFlow(g, path, x, y, height, filled);
+            }
+        }
+
+        /// <summary>云母 / 霓虹那条流动光带：节奏和默认皮肤一致（两头淡入淡出，2.6s 一圈）。</summary>
+        private void PaintBarFlow(Graphics g, GraphicsPath clip, int x, int y, int height, int filled)
+        {
+            if (settings.ui.reducedMotion || SystemInformation.HighContrast) return;
+            if (filled <= height * 4) return;
+            double phase = flowPhase >= 0
+                ? flowPhase
+                : (Environment.TickCount % FlowPeriodMs) / (double)FlowPeriodMs;
+            double opacity = FlowOpacity(phase);
+            if (opacity <= 0.01) return;
+            int bandW = Math.Max(S(24), filled / 3);
+            int cx = (int)Math.Round(x - bandW + (filled + bandW) * phase);
+            int peak = (int)Math.Round(150 * barAlpha * opacity);
+            if (peak <= 0) return;
+            var saved = g.Save();
+            g.SetClip(clip, CombineMode.Intersect);
+            var flowRect = new Rectangle(cx - bandW, y, bandW * 2, Math.Max(2, height));
+            using (var brush = new LinearGradientBrush(flowRect, Color.FromArgb(0, Color.White), Color.FromArgb(0, Color.White), 0f))
+            {
+                var blend = new ColorBlend();
+                blend.Colors = new[] { Color.FromArgb(0, Color.White), Color.FromArgb(peak, Color.White), Color.FromArgb(0, Color.White) };
+                blend.Positions = new[] { 0f, 0.5f, 1f };
+                brush.InterpolationColors = blend;
+                g.FillRectangle(brush, flowRect);
+            }
+            g.Restore(saved);
+        }
+
+        // ---------------- 大数字发光（云母 / 仪表 / 霓虹） ----------------
+
+        /// <summary>数字发光的两圈偏移半径（DIP），借 DrawSalaryAmount / PaintCardGlow 的多圈低透明度画法。</summary>
+        private static readonly float[] NumberHaloDip = new float[] { 1.5f, 3.4f };
+
+        /// <summary>
+        /// 大号数字：颜色取 skin.numberColor（null = theme.textMain，即默认皮肤的原样）；
+        /// skin.numberGlow 时先按 8 个方向铺两圈低透明度偏移（内圈 accent2、外圈 textMain），
+        /// 再把正文压上去。默认皮肤仍然是一次 Line，一个像素都不变。
+        /// </summary>
+        private void LineNumber(Graphics g, string text, Font font, RectangleF rect, double alpha, bool far)
+        {
+            SkinDef skin = Skin;
+            // 皮肤可以用 numberColor 指定数字颜色（仪表是琥珀数码）；null 就是原来的 theme.textMain
+            Color numInk = skin.numberColor.HasValue ? skin.numberColor.Value : theme.textMain;
+            if (!skin.numberGlow)
+            {
+                Line(g, text, font, numInk, rect, alpha, far);
+                return;
+            }
+            double a = Clamp01(alpha);
+            if (a < 0.01) return;
+            string clean = (text ?? "").Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ');
+            if (clean.Length == 0) return;
+            double strength = skin.numberGlowAlpha <= 0 ? 0.35 : Math.Min(1.2, skin.numberGlowAlpha);
+            Color warm = skin.accent2.IsEmpty ? theme.accent : skin.accent2;
+            using (var format = new StringFormat
+            {
+                Alignment = far ? StringAlignment.Far : StringAlignment.Near,
+                LineAlignment = StringAlignment.Center,
+                Trimming = StringTrimming.EllipsisCharacter,
+                FormatFlags = StringFormatFlags.NoWrap
+            })
+            {
+                for (int ring = 0; ring < NumberHaloDip.Length; ring++)
+                {
+                    float r = Math.Max(1f, S(NumberHaloDip[ring]));
+                    double k = ring == 0 ? 0.55 : 0.22;
+                    int al = (int)Math.Round(255 * a * strength * k);
+                    if (al <= 1) continue;
+                    Color ink = ring == 0 ? Skins.Mix(warm, theme.textMain, 0.25) : theme.textMain;
+                    using (var brush = new SolidBrush(Color.FromArgb(al, ink)))
+                    {
+                        for (int i = 0; i < 8; i++)
+                        {
+                            double ang = Math.PI * 2 * i / 8.0;
+                            g.DrawString(clean, font, brush, new RectangleF(
+                                rect.X + (float)Math.Cos(ang) * r,
+                                rect.Y + (float)Math.Sin(ang) * r,
+                                rect.Width, rect.Height), format);
+                        }
+                    }
+                }
+            }
+            Line(g, text, font, numInk, rect, alpha, far);
+        }
+
 
         /// <summary>右上角图标的命中区。正常由绘制时填好；万一还没画过，就按当前宽度算一个。</summary>
         private Rectangle GlyphRect(Rectangle stored, int fromRightDip)
@@ -3058,7 +3537,7 @@ namespace WorkCountdown
                 right=tag+" "+(status.lunchValue??"").Replace("还剩 ","");
             }
             Line(g,right,fontCollapsedLabel,muted,new RectangleF(Width-pad-S(86),S(7),S(86),S(20)),1,true);
-            Line(g,status.big,status.bigIsClock?fontCollapsedNum:fontCollapsedText,theme.textMain,
+            LineNumber(g,status.big,status.bigIsClock?fontCollapsedNum:fontCollapsedText,
                 new RectangleF(pad-S(1),S(27),w,S(27)),1,false);
             DrawProgress(g,pad,S(59),Width-pad*2,S(3),true);
             if(lastFetchFailed) Line(g,"!",fontStatus,Color.FromArgb(242,179,76),new RectangleF(Width-pad-S(14),S(32),S(14),S(20)),1,true);
@@ -3639,7 +4118,9 @@ namespace WorkCountdown
             double a = NoteRimAlpha();
             if (a < 0.02) return;
             var rim = new Rectangle(S(1), S(1), Math.Max(2, Width - S(2)), Math.Max(2, Height - S(2)));
-            using (var path = RoundPath(rim, S(collapsed ? 13 : 17)))
+            // 贴边闪光跟着皮肤的圆角走：默认皮肤保持原来的 13 / 17 DIP（比卡片小 1 DIP）
+            int rimRadius = Skin.IsDefault ? (collapsed ? 13 : 17) : Math.Max(1, CardRadiusDip - 1);
+            using (var path = RoundPath(rim, S(rimRadius)))
             {
                 for (int i = 3; i >= 1; i--)
                     using (var pen = new Pen(Color.FromArgb((int)(a * 24 / i), theme.accent), Math.Max(2f, S(2) * i)))

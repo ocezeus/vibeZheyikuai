@@ -97,6 +97,8 @@ namespace WorkCountdown
         private Bitmap conic;
         private int startAt;
         private bool light;
+        /// <summary>皮肤指定的卡外光颜色（null = 用主题 accent，也就是默认皮肤的行为）。</summary>
+        private Color? glowOverride;
 
         public CardGlowForm(WidgetForm owner, ThemeDef theme, float scale)
         {
@@ -142,6 +144,23 @@ namespace WorkCountdown
             theme = t;
             light = Luminance(t.bgTop) > 0.56;
             // 颜色烘在位图里，换主题必须重做
+            haloKey = null;
+            baseKey = null;
+            baseBucket = -1;
+            DisposeConic();
+            Invalidate();
+        }
+
+        /// <summary>
+        /// 卡外光的颜色（Skins.GlowColor）：颜色烘在位图里，变了才重做。
+        /// 默认皮肤传进来的就是 theme.accent，画出来和以前一样。
+        /// </summary>
+        public void SetGlow(Color? c)
+        {
+            bool same = glowOverride.HasValue == c.HasValue
+                && (!c.HasValue || glowOverride.Value.ToArgb() == c.Value.ToArgb());
+            if (same) return;
+            glowOverride = c;
             haloKey = null;
             baseKey = null;
             baseBucket = -1;
@@ -220,7 +239,14 @@ namespace WorkCountdown
                 (int)Math.Round(a.B + (b.B - a.B) * t));
         }
 
-        private Color Accent { get { return theme == null ? Color.White : theme.accent; } }
+        private Color Accent
+        {
+            get
+            {
+                if (glowOverride.HasValue) return glowOverride.Value;
+                return theme == null ? Color.White : theme.accent;
+            }
+        }
 
         /// <summary>浅色主题把光压暗一档，不然白底上会糊成一片。</summary>
         private double Strength { get { return light ? 0.55 : 1.0; } }

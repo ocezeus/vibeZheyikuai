@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.Globalization;
 using WorkCountdown;
 
@@ -380,8 +381,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "3.6.0/3.6.0");
-            Check("程序集版本是 3.6.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "3.6.0.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "3.7.0/3.7.0");
+            Check("程序集版本是 3.7.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "3.7.0.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");
@@ -1029,6 +1030,187 @@ internal static class Test
             var idleRelay = new NoteRelay(new NoteSettings());
             idleRelay.RefreshSubscriptions();
             Check("未连接时刷新订阅安静返回", idleRelay.Connected.ToString(), "False");
+        }
+
+        // ---- 20) v3.7.0 六套整体界面主题（皮肤）：表 / 默认与归一化 / 序列化 / 配色 / 令牌 ----
+        {
+            Func<Color, string> hex = delegate(Color c)
+            {
+                return "#" + c.R.ToString("X2") + c.G.ToString("X2") + c.B.ToString("X2");
+            };
+            Func<string, UiSettings> skinUi = delegate(string id)
+            {
+                var u = new UiSettings();
+                u.skin = id;
+                return u;
+            };
+            Func<string, string, bool> glassOf = delegate(string id, string style)
+            {
+                var u = new UiSettings();
+                u.skin = id;
+                u.bgStyle = style;
+                return Skins.UsesGlass(u);
+            };
+            Func<string, string> skinAccent = delegate(string id)
+            {
+                return hex(Skins.ResolveTheme(skinUi(id)).accent);
+            };
+
+            Check("皮肤数量", Skins.All.Length.ToString(), "6");
+            var skinIds = new HashSet<string>();
+            int dupSkin = 0;
+            foreach (var sk in Skins.All) if (sk == null || !skinIds.Add(sk.id)) dupSkin++;
+            Check("皮肤 id 不重复", dupSkin.ToString(), "0");
+
+            string skinIdList = "", skinNameList = "", skinLightList = "", skinTagList = "";
+            foreach (var sk in Skins.All)
+            {
+                skinIdList += (skinIdList.Length == 0 ? "" : "/") + sk.id;
+                skinNameList += (skinNameList.Length == 0 ? "" : "/") + sk.name;
+                skinLightList += sk.light ? "1" : "0";
+                skinTagList += (skinTagList.Length == 0 ? "" : "/") + (string.IsNullOrWhiteSpace(sk.tagline) ? "0" : "1");
+            }
+            Check("皮肤 id 顺序", skinIdList, "default/quiet/mica/paper/instrument/neon");
+            Check("皮肤名字", skinNameList, "默认/无垠/云母/宣纸/仪表/霓虹");
+            Check("只有宣纸是浅色皮肤", skinLightList, "000100");
+            Check("每套皮肤都有一句定位说明", skinTagList, "1/1/1/1/1/1");
+
+            Check("Skins.Get 未知 id / null 回退默认",
+                Skins.Get("nope").id + "/" + Skins.Get(null).id, "default/default");
+            Check("Skins.Get 大小写 / 带空白也认得出（规范成小写 id）",
+                Skins.Get("NEON").id + "/" + Skins.Get(" neon ").id + "/" + Skins.Get("Quiet").id,
+                "neon/neon/quiet");
+            Check("Skins.Current 按 id 取皮肤",
+                Skins.Current(skinUi("mica")).name + "/" + Skins.Current(skinUi("paper")).name, "云母/宣纸");
+            Check("Skins.Current(null) 回退默认", Skins.Current(null).id, "default");
+            Check("Skins.IsDefault 认默认 / 认其它",
+                Skins.IsDefault(new UiSettings()).ToString() + "/" + Skins.IsDefault(skinUi("neon")).ToString(),
+                "True/False");
+
+            var skinFresh = new Settings();
+            Check("新配置默认皮肤", skinFresh.ui.skin, "default");
+
+            // 老配置 / 手改坏的配置：Normalize 把 null / 空 / 未知 / 大小写 / 空白都归到合法 id
+            string[] badSkins = new string[] { null, "", "   ", "BOGUS", "NEON", "  neon ", "quiet " };
+            string badSkinNorm = "";
+            foreach (string bad in badSkins)
+            {
+                var badSet = new Settings();
+                badSet.ui.skin = bad;
+                badSet.Normalize();
+                badSkinNorm += (badSkinNorm.Length == 0 ? "" : "/") + badSet.ui.skin;
+            }
+            Check("Normalize 把 null / 空 / 未知 / 大小写错 / 带空白 skin 归一化",
+                badSkinNorm, "default/default/default/default/neon/neon/quiet");
+
+            string legalKept = "";
+            foreach (var sk in Skins.All)
+            {
+                var legalSet = new Settings();
+                legalSet.ui.skin = sk.id;
+                legalSet.Normalize();
+                legalKept += legalSet.ui.skin == sk.id ? "1" : "0";
+            }
+            Check("六个合法 id 原样保留", legalKept, "111111");
+
+            string skinRound = "";
+            foreach (var sk in Skins.All)
+            {
+                var roundSet = new Settings();
+                roundSet.ui.skin = sk.id;
+                var roundBack = serializer.Deserialize<Settings>(serializer.Serialize(roundSet));
+                roundBack.Normalize();
+                skinRound += roundBack.ui.skin == sk.id ? "1" : "0";
+            }
+            Check("六套皮肤 JavaScriptSerializer 往返都保留", skinRound, "111111");
+
+            var oldSkinJson = serializer.Deserialize<Settings>("{\"ui\":{\"theme\":\"midnight\"}}");
+            oldSkinJson.Normalize();
+            Check("老配置没有 skin 字段补默认", oldSkinJson.ui.skin, "default");
+            var badSkinJson = serializer.Deserialize<Settings>("{\"ui\":{\"skin\":\"bogus\"}}");
+            badSkinJson.Normalize();
+            Check("坏配置的 skin 归一化成默认", badSkinJson.ui.skin, "default");
+
+            // ResolveTheme：默认皮肤跟随 39 套主题；其它五套各自带固定配色
+            var followMidnight = new Settings();
+            followMidnight.ui.skin = "default";
+            followMidnight.ui.theme = "midnight";
+            var followIvory = new Settings();
+            followIvory.ui.skin = "default";
+            followIvory.ui.theme = "ivory";
+            Check("默认皮肤跟随 ui.theme（换主题配色跟着变）",
+                Skins.ResolveTheme(followMidnight.ui).id + "/" + Skins.ResolveTheme(followIvory.ui).id,
+                "midnight/ivory");
+            Check("默认皮肤的 ResolveTheme 就是那套主题",
+                hex(Skins.ResolveTheme(followIvory.ui).accent) + "/" + hex(Skins.ResolveTheme(followIvory.ui).bgTop),
+                hex(Themes.Get("ivory").accent) + "/" + hex(Themes.Get("ivory").bgTop));
+            Check("五套皮肤各自带固定 accent",
+                skinAccent("quiet") + "/" + skinAccent("mica") + "/" + skinAccent("paper") + "/"
+                + skinAccent("instrument") + "/" + skinAccent("neon"),
+                "#96A9FF/#6EA8FE/#B23A2C/#FFB02E/#FF3CAC");
+            Check("云母 / 宣纸的底色",
+                hex(Skins.ResolveTheme(skinUi("mica")).bgTop) + "/" + hex(Skins.ResolveTheme(skinUi("paper")).bgTop),
+                "#161D2C/#FDFAF2");
+            Check("只有默认皮肤不带固定配色",
+                (Skins.Get("default").colors == null) + "/" + (Skins.Get("neon").colors != null), "True/True");
+
+            // UsesGlass：云母恒开；默认皮肤看「背景风格」；其它四套恒关
+            Check("磨砂玻璃：云母恒开，默认皮肤看背景风格",
+                glassOf("mica", "solid") + "/" + glassOf("default", "glass") + "/" + glassOf("default", "solid"),
+                "True/True/False");
+            Check("磨砂玻璃：无垠 / 宣纸 / 仪表 / 霓虹恒关（背景风格设玻璃也不开）",
+                glassOf("quiet", "glass") + "/" + glassOf("paper", "glass")
+                + "/" + glassOf("instrument", "glass") + "/" + glassOf("neon", "glass"),
+                "False/False/False/False");
+            Check("Skins.UsesGlass(null) 不炸", Skins.UsesGlass(null).ToString(), "False");
+
+            // ---- 形态 / 装饰令牌抽查 ----
+            var skinQuiet = Skins.Get("quiet");
+            Check("无垠：圆角 10/10 + 细线进度条 + 数字不发光 + 细线卡片",
+                skinQuiet.radiusCollapsed + "/" + skinQuiet.radiusExpanded + "/" + skinQuiet.progress
+                + "/" + skinQuiet.numberGlow + "/" + skinQuiet.hairlineCards,
+                "10/10/Hairline/False/True");
+            var skinMica = Skins.Get("mica");
+            Check("云母：玻璃 + 胶囊进度条 + 顶部高光",
+                skinMica.glass + "/" + skinMica.progress + "/" + skinMica.sheenAlpha.ToString("0.00", CultureInfo.InvariantCulture),
+                "True/Pill/0.15");
+            var skinPaper = Skins.Get("paper");
+            Check("宣纸：圆角 5 + 笔触进度条 + 宋体标题 + 纸纹 + 印章",
+                skinPaper.radiusCollapsed + "/" + skinPaper.radiusExpanded + "/" + skinPaper.progress
+                + "/" + skinPaper.headingFont + "/" + skinPaper.paperGrain + "/" + skinPaper.seal,
+                "5/5/Brush/Noto Serif SC/True/True");
+            var skinInstrument = Skins.Get("instrument");
+            Check("仪表：圆角 6 + 分刻进度条 + 四角螺丝 + 琥珀数字 + 数字发光",
+                skinInstrument.radiusCollapsed + "/" + skinInstrument.radiusExpanded + "/" + skinInstrument.progress
+                + "/" + skinInstrument.screws + "/" + hex(skinInstrument.numberColor.Value) + "/" + skinInstrument.numberGlow,
+                "6/6/Segmented/True/#FFC24A/True");
+            var skinNeon = Skins.Get("neon");
+            Check("霓虹：圆角 14 + 霓虹进度条 + 渐变描边 + 数字发光",
+                skinNeon.radiusCollapsed + "/" + skinNeon.radiusExpanded + "/" + skinNeon.progress
+                + "/" + skinNeon.neonEdge + "/" + skinNeon.numberGlow,
+                "14/14/Neon/True/True");
+            var skinDefault = Skins.Get("default");
+            Check("默认皮肤形态和 v3.6 一致（14/18 + 默认进度条 + 不发光）",
+                skinDefault.radiusCollapsed + "/" + skinDefault.radiusExpanded + "/" + skinDefault.progress
+                + "/" + skinDefault.numberGlow + "/" + skinDefault.glass,
+                "14/18/Default/False/False");
+            string skinWinRadius = "";
+            foreach (var sk in Skins.All) skinWinRadius += (skinWinRadius.Length == 0 ? "" : "/") + sk.radiusWindow;
+            Check("六套皮肤的窗口圆角", skinWinRadius, "12/14/20/8/10/16");
+            string skinDefaultTheme = "";
+            foreach (var sk in Skins.All) skinDefaultTheme += string.IsNullOrEmpty(sk.defaultThemeId) ? "0" : "1";
+            Check("每套皮肤都有默认主题 id（色卡高亮用）", skinDefaultTheme, "111111");
+
+            // CardBorderColor / GlowColor：皮肤指定了就用，否则回到主题
+            var midnightTheme = Themes.Get("midnight");
+            Check("默认皮肤卡片描边 / 外光 = 主题 edge / accent",
+                hex(Skins.CardBorderColor(skinDefault, midnightTheme)) + "/" + hex(Skins.GlowColor(skinDefault, midnightTheme)),
+                hex(midnightTheme.edge) + "/" + hex(midnightTheme.accent));
+            Check("皮肤自带的描边 / 外光优先于主题",
+                hex(Skins.CardBorderColor(skinInstrument, midnightTheme)) + "/"
+                + hex(Skins.GlowColor(skinInstrument, midnightTheme)) + "/"
+                + hex(Skins.GlowColor(skinNeon, midnightTheme)),
+                "#3E3F35/#FFB02E/#FF3CAC");
         }
 
         Console.WriteLine();
