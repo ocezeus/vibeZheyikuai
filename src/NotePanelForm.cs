@@ -594,6 +594,34 @@ namespace WorkCountdown
         }
 
         /// <summary>历史页还能往上翻几条（0 = 一屏装得下）。</summary>
+        /// <summary>历史页第一行的上边（窗口像素坐标）——和绘制逻辑保持一致，验收用。</summary>
+        internal int HistoryRowsTopPx()
+        {
+            int top = BodyRect().Y;
+            if (columns) top += S(22);
+            else if (!string.IsNullOrEmpty(selectedId) && note.IsRoom(selectedId) && state != PanelState.History) top += S(22);
+            return top + S(16);
+        }
+
+        /// <summary>历史页最后一行的底边（窗口像素坐标）：断言它不超过 BodyRect 底边，否则会被输入框裁掉。</summary>
+        internal int HistoryRowsBottomPx()
+        {
+            int rowH2 = columns ? S(34) : S(36);
+            return HistoryRowsTopPx() + NoteSettings.HistoryRows * rowH2;
+        }
+
+        /// <summary>正文区（不含输入框）的底边，窗口像素坐标。</summary>
+        internal int BodyBottomPx() { return BodyRect().Bottom; }
+
+        /// <summary>聊天态最近两条气泡的底边（窗口像素坐标）；房间对话带名字行，验证不会被输入框裁掉。</summary>
+        internal int ChatBubblesBottomPx()
+        {
+            int top = BodyRect().Y;
+            if (columns) top += S(22);
+            else if (!string.IsNullOrEmpty(selectedId) && note.IsRoom(selectedId)) top += S(22);
+            return top + 2 * (S(34) + S(7));
+        }
+
         internal int HistoryMaxScroll()
         {
             if (string.IsNullOrEmpty(selectedId) || note == null) return 0;
@@ -1560,7 +1588,7 @@ namespace WorkCountdown
                     body.X + Measure(g, name, fName) + S(10), body.Y + S(7));
                 top += S(22);
             }
-            else if (room)
+            else if (room && state != PanelState.History)
             {
                 // 抽屉式没有名字行：对话码对话补一行「名字 + 对话码」，不然不知道自己在哪个对话里
                 var rc = note.Contact(selectedId);
@@ -1610,11 +1638,18 @@ namespace WorkCountdown
             if (historyScroll < 0) historyScroll = 0;
             int endIdx = count - historyScroll;
             int startIdx = Math.Max(0, endIdx - rowsShow);
+            string histPrefix = "";
+            if (room && !columns)
+            {
+                var rc2 = note.Contact(selectedId);
+                string nm2 = rc2 == null ? "对话 " + selectedId : rc2.Display();
+                histPrefix = Fit(g, nm2 + " · 对话码 " + selectedId + " · ", fTiny, Math.Max(S(60), body.Width * 0.62f));
+            }
             string histTitle;
-            if (count <= rowsShow) histTitle = "最近 " + count + " 条";
-            else if (historyScroll == 0) histTitle = "最近 " + NoteSettings.MaxMessages + " 条 · 滚轮看更早";
-            else histTitle = "往上翻了 " + historyScroll + " 条 · 滚轮继续 / 翻到底看最新";
-            DrawText(g, histTitle, fTiny, Alpha(Dim, (int)(255 * a)), body.X, top);
+            if (count <= rowsShow) histTitle = histPrefix + "最近 " + count + " 条";
+            else if (historyScroll == 0) histTitle = histPrefix + "最近 " + NoteSettings.MaxMessages + " 条 · 滚轮看更早";
+            else histTitle = histPrefix + "往上翻了 " + historyScroll + " 条 · 滚轮继续 / 翻到底看最新";
+            DrawText(g, Fit(g, histTitle, fTiny, body.Width - S(4)), fTiny, Alpha(Dim, (int)(255 * a)), body.X, top);
             int rowTop = top + S(16);
             int rowH2 = columns ? S(34) : S(36);
             int lastIdx = count - 1;

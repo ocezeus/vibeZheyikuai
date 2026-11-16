@@ -11,7 +11,7 @@ namespace WorkCountdown
     /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
     public static class AppInfo
     {
-        public const string Version = "3.8.0";
+        public const string Version = "3.8.1";
     }
 
     public class HolidayEntry

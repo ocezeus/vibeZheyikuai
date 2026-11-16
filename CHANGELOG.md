@@ -6,9 +6,44 @@
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
 
-## 当前版本：v3.8.0
+## 当前版本：v3.8.1
 
-已装机（FileVersion 3.8.0.0）；日常改动**不升版本号、不出 zip、不动一图说明书**，改动全部追加在下面；用户说「发版」才走下面的发版流程。
+已装机（FileVersion 3.8.1.0）；日常改动**不升版本号、不出 zip、不动一图说明书**，改动全部追加在下面；用户说「发版」才走下面的发版流程。
+
+### 2026-11-16 15:40 · v3.8.1 群聊历史最后一行被裁 + 未读左上角每 5 秒快闪两下
+
+用户反馈（原话）：「群聊最下面一条还看不见啊」「而且未读通知的闪烁光效没了，需要未读时大小卡片左上角每五秒快闪两下」。
+
+**① 修复：群聊历史页最下面一条被输入框裁掉（`src/NotePanelForm.cs`）**
+- 根因：抽屉式里「对话码」对话在正文顶部多画一行「名字 + 对话码」并 `top += 22`；历史页 476 高时第 8 行正好被顶到输入框下面 8 DIP（1:1 对话没有这一行所以正常）——v3.8.0 修的淡入停表是另一个问题，群聊还叠了这个裁切。
+- 修法：历史态不再单独画名字行，把「压测群 · 对话码 MIKFU · 」并进历史标题（`histPrefix`，超宽用 `Fit` 截断）；正文只占一行标题，8 行最后一行完整落在输入框上方。聊天态保持原样（名字行 + 两条气泡仍在输入框上方）。
+- 验收：新增 `HistoryRowsTopPx / HistoryRowsBottomPx / BodyBottomPx / ChatBubblesBottomPx` 四个几何接口，Check 断言「群聊历史 8 行不超出正文底边」「聊天态两条气泡也不超出」「标题并进第一行」。
+
+**② 未读：大小卡片左上角每 5 秒快闪两下（`src/Widget.cs`）**
+- 旧方案为什么像「没了」：未读时沿整圈边框每 5 秒轻闪，原来是按 `Environment.TickCount % 5000` 在绘制里算的，只有刚好重画到那 600ms 窗口才看得见——实际上每秒才重画一次，基本只闪 1 帧，肉眼等于没有。
+- 新方案：
+  - 1 秒的 `tick` 里 `MaybeBlinkUnread()` 每 5 秒触发一次（`NoteBlinkIntervalMs = 5000`），记 `noteBlinkAt`；
+  - `flowT`（55ms）在 `NoteRimActive()` 为真时持续重画，所以整轮 420ms 里都有帧；
+  - 包络 `CornerFlashAlpha(elapsed)`：0–150ms 第一下、250–400ms 第二下，中间有暗隙（`Math.Sin` 快进快出）；
+  - 画法 `DrawNoteCorner`：沿卡片左上圆角一段亮带（顶部/左侧各延伸 ~20 DIP）+ 角上一团 accent 柔光，圆角跟着皮肤走；**收起 224×68 和展开 280×188 都有**；
+  - 触发时机：收到新纸条时**立即**闪一轮（同时保留原来整圈边框连闪 2 次），之后未读期间每 5 秒一轮；点开读完（未读数归 0）自动停；
+  - 「减少动态效果」/ 高对比度下不闪（沿用旧规则）。
+- 旧的「每 5 秒整圈轻闪」分支已移除，整圈闪光只保留在「收到那一刻」。
+
+**③ 测试 / 探针**
+- `test/Test.cs`：+9 条角闪包络（5 秒间隔、420ms 两下、第一下峰值、暗隙、第二下、420ms 后灭、负数/超时）。
+- `test/Check.cs`：+4 条（群聊历史 8 行 / 聊天两条气泡不裁切、标题并进第一行、角闪常量与包络）。
+- 结果：**Test 344 / Check 330 全绿**（v3.8.0 是 335 / 326）。
+- 新探针：`test/CornerFlashShot.cs`（六帧离屏渲染对照：展开/收起的 40/120/200/300/380/600ms）、`test/FlashLiveProbe.cs`（真 WidgetForm + 消息循环，打印 `noteBlinkAt`/alpha 序列，验证 1 秒 tick 真的每 5 秒调度）、`test/note-history-shot.ps1`（真机历史页截图）、`tools/flash-probe.ps1`（真机连拍卡片帧）。
+- 真机/离屏证据：`test\visual\skins\sheet-cornerflash.png`（两下快闪的帧对照）、`test\visual\real-flash\live-0048.png`（真 WidgetForm 消息循环下左上角亮带）；群聊历史 8 行图 `test\visual\real-note\history-MIKFU.png`（合成 16 条）。
+
+**④ 版本 / 打包 / 发布**
+- 版本 3.8.0 → **3.8.1**：`src/Models.cs`（AppInfo.Version）、`src/AssemblyInfo.cs`、`package.ps1` 默认 `-Version`、`README.md` 顶部、`design/manual-poster.html` 版本/页脚。
+- 一图说明书同步「没读时左上角每 5 秒快闪两下」并重出：**2400×11413（4,510,398 B）**。
+- **打包**：`dist\上班工具箱-v3.8.1.zip`（**4,189,060 B / 4090.9 KB**）：`WorkCountdown.exe`（455,680 B / FileVersion 3.8.1.0）、一图说明书、使用说明、安装脚本。
+- **发布**：commit `bc6df7a`（15 文件）→ push main + tag `v3.8.1` → GitHub Release **https://github.com/ocezeus/vibeZheyikuai/releases/tag/v3.8.1**（id 446721886），两个资产：`WorkCountdown-v3.8.1.zip`（4090.9 KB）+ `WorkCountdown.exe`（445 KB）；`package.ps1` 一条命令跑完。
+- **装机**：`.\tools\install-dev.ps1` → **FileVersion 3.8.1.0，PID 45184（15:28）**；装机后把 `ui.skin` 恢复成用户此前选的「无垠（quiet）」并重启（PID 46104 / 15:28:53）。
+- **更新链路**：`test\UpdateProbe.exe` → 当前 3.8.1 / 最新 3.8.1 / `IsNewer=false`（已是最新）。匿名 API 仍被限流（HTML 兜底只有版本号），带 token 的 Release API 已确认双资产齐全。
 
 ### 2026-11-16 15:05 · v3.8.0 小纸条：修「最新一条不显示」+ 保留 16 条 / 一屏 8 条滚动
 
@@ -35,9 +70,11 @@
 
 **版本 / 打包 / 发布**
 - 版本号 3.7.0 → **3.8.0**：`src/Models.cs`（AppInfo.Version）、`src/AssemblyInfo.cs`、`package.ps1` 默认 `-Version`、`README.md` 顶部、`design/manual-poster.html` 版本 / 页脚。
-- 一图说明书同步「8 条 → 最多 16 条 / 一屏 8 条可滚动」并重出（2400 宽）。
-- 打包 + GitHub Release v3.8.0（双资产）；装机 `FileVersion 3.8.0.0`；更新链路 `test\UpdateProbe.exe` 实测（见下条提交）。
-
+- 一图说明书同步「8 条 → 最多 16 条 / 一屏 8 条可滚动」并重出：**2400×11386（4,501,016 B）**。
+- **打包**：`dist\上班工具箱-v3.8.0.zip`（**4,176,051 B / 4078.2 KB**）：`WorkCountdown.exe`（453,632 B / FileVersion 3.8.0.0）、一图说明书、使用说明、安装脚本。
+- **发布**：commit `604f053`（12 文件）→ push main + tag `v3.8.0` → GitHub Release **https://github.com/ocezeus/vibeZheyikuai/releases/tag/v3.8.0**（id 446701944），两个资产：`WorkCountdown-v3.8.0.zip`（4078.2 KB）+ `WorkCountdown.exe`（443 KB）；`package.ps1` 这次**一条命令跑完全流程**（上一版修的 stderr 假失败没再复现）。
+- **装机**：`.\tools\install-dev.ps1` → **FileVersion 3.8.0.0，PID 37360（14:58）**；装机后用 `test\note-history-shot.ps1` 真机点开历史页：8 行全部显示、最新一条在最后一行、标题「最近 8 条」；合成 16 条的离屏图验证滚动条定位。
+- **更新链路**：`test\UpdateProbe.exe` → 当前 3.8.0 / 最新 3.8.0 / `IsNewer=false`（已是最新）。注：这次匿名 GitHub API 正好被 60 次/小时限流，探针走了 HTML 兜底只拿到版本号、asset 为空；带 token 的 Release API 已确认双资产都在（zip 4078.2 KB + exe 443 KB）。限流只影响「全量更新」按钮在那一刻退化成「打开发布页」，不影响判断「有新版本 / 已是最新」。
 ### 2026-11-16 · v3.7.0 六套整体界面主题（默认 + 无垠/云母/宣纸/仪表/霓虹）
 
 用户从 `design/theme-packs/` 的 5 套方向稿里选定后，要求做成**能切换的整体界面主题**。落实为 **6 套「界面风格」**：默认（保留原来的 39 套配色主题 + 背景风格）+ 无垠 Quiet / 云母 Mica / 宣纸 Ink / 仪表 Instrument / 霓虹 Neon，在 **设置 →「外观」→「界面风格」** 切换；换的不只是配色，卡片 / 设置窗口 / 小纸条 / 右键胶囊 / 提醒整套一起换。

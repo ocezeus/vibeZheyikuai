@@ -3109,6 +3109,50 @@ class Check
                 }
             }
 
+            // ---- v3.8.1：群聊历史页 8 行不被输入框裁掉 + 未读左上角快闪 ----
+            {
+                var rs = new Settings();
+                rs.lark.enabled = false;
+                rs.calendarEnabled = false;
+                rs.note.id = "48372";
+                rs.note.AddConversation("MIKFU", "压测群");
+                for (int i = 0; i < 16; i++)
+                {
+                    rs.note.Append(new NoteMessage((i % 2 == 0) ? "93183" : "10825", "MIKFU",
+                        "群消息" + i, 1731400000 + i * 60, (i % 2 == 0) ? "阿哲" : "小满"), true);
+                }
+                using (var rp = new NotePanelForm(rs, Themes.Get("midnight"), card, true, null, null, null, null, null))
+                {
+                    var rt = rp.GetType().GetNestedType("PanelState", BindingFlags.NonPublic);
+                    Call(rp, "SelectContact", "MIKFU", false);
+                    float rdpi = (float)Get(rp, "scale");
+                    Set(rp, "heightAnimating", false);
+                    Set(rp, "heightNow", (float)Math.Round(282f * rdpi));
+                    Set(rp, "heightTo", (float)Math.Round(282f * rdpi));
+                    Call(rp, "BuildHits");
+                    Ok("聊天态：群聊名字行 + 两条气泡也在输入框上方",
+                        (int)Call(rp, "ChatBubblesBottomPx") <= (int)Call(rp, "BodyBottomPx"),
+                        "bubblesBottom=" + Call(rp, "ChatBubblesBottomPx") + " bodyBottom=" + Call(rp, "BodyBottomPx"));
+                    Call(rp, "SetState", Enum.Parse(rt, "History"), true);
+                    Set(rp, "heightAnimating", false);
+                    Set(rp, "heightNow", (float)Math.Round(476f * rdpi));
+                    Set(rp, "heightTo", (float)Math.Round(476f * rdpi));
+                    Call(rp, "BuildHits");
+                    Ok("历史页：群聊 8 行最后一行没被输入框裁掉（v3.8.1 修）",
+                        (int)Call(rp, "HistoryRowsBottomPx") <= (int)Call(rp, "BodyBottomPx"),
+                        "rowsBottom=" + Call(rp, "HistoryRowsBottomPx") + " bodyBottom=" + Call(rp, "BodyBottomPx"));
+                    var rbody = (Rectangle)Call(rp, "BodyRect");
+                    int r16 = (int)Call(rp, "S", 16f);
+                    Ok("群聊历史标题把名字/对话码并进第一行（不再单独占一行）",
+                        (int)Call(rp, "HistoryRowsTopPx") == rbody.Y + r16,
+                        "rowsTop=" + Call(rp, "HistoryRowsTopPx") + " bodyY+16=" + (rbody.Y + r16));
+                }
+                Ok("未读快闪：5 秒间隔 / 420ms 两下",
+                    WidgetForm.NoteBlinkIntervalMs == 5000 && WidgetForm.NoteBlinkSpanMs == 420
+                    && WidgetForm.CornerFlashAlpha(60) > 0.5 && WidgetForm.CornerFlashAlpha(200) == 0
+                    && WidgetForm.CornerFlashAlpha(300) > 0.5 && WidgetForm.CornerFlashAlpha(600) == 0,
+                    "interval=" + WidgetForm.NoteBlinkIntervalMs + " span=" + WidgetForm.NoteBlinkSpanMs);
+            }
             // 编辑窗样式：圆角；改备注编辑窗保持普通输入框样式（用户澄清：要放大/居中的是联系人名字，不是编辑窗）
             var edit = new Settings();
             edit.lark.enabled = false;

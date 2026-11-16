@@ -381,8 +381,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "3.8.0/3.8.0");
-            Check("程序集版本是 3.8.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "3.8.0.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "3.8.1/3.8.1");
+            Check("程序集版本是 3.8.1.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "3.8.1.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");
@@ -1033,6 +1033,18 @@ internal static class Test
             Check("未连接时刷新订阅安静返回", idleRelay.Connected.ToString(), "False");
         }
 
+        // ---- 21) v3.8.1 未读左上角每 5 秒快闪两下 ----
+        {
+            Check("未读快闪间隔 5 秒", WidgetForm.NoteBlinkIntervalMs.ToString(), "5000");
+            Check("一轮两次快闪 420ms 内结束", WidgetForm.NoteBlinkSpanMs.ToString(), "420");
+            Check("第 1 下：60ms 亮起", (WidgetForm.CornerFlashAlpha(60) > 0.5) ? "亮" : "灭", "亮");
+            Check("第 1 下：75ms 是峰值", (WidgetForm.CornerFlashAlpha(75) > 0.99) ? "亮" : "灭", "亮");
+            Check("第 1 下：120ms 仍亮着", (WidgetForm.CornerFlashAlpha(120) > 0.5) ? "亮" : "灭", "亮");
+            Check("两下中间有暗隙：200ms 不亮", WidgetForm.CornerFlashAlpha(200).ToString("0.00"), "0.00");
+            Check("第 2 下：300ms 又亮起", (WidgetForm.CornerFlashAlpha(300) > 0.5) ? "亮" : "灭", "亮");
+            Check("420ms 之后熄灭", WidgetForm.CornerFlashAlpha(420).ToString("0.00") + "/" + WidgetForm.CornerFlashAlpha(900).ToString("0.00"), "0.00/0.00");
+            Check("负数/超时也不亮", WidgetForm.CornerFlashAlpha(-5).ToString("0.00") + "/" + WidgetForm.CornerFlashAlpha(421).ToString("0.00"), "0.00/0.00");
+        }
         // ---- 20) v3.7.0 六套整体界面主题（皮肤）：表 / 默认与归一化 / 序列化 / 配色 / 令牌 ----
         {
             Func<Color, string> hex = delegate(Color c)
