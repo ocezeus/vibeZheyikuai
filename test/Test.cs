@@ -397,11 +397,11 @@ internal static class Test
             Check("长开额外高度 Theme/Clock/Schedule/Preview/Update",
                 BubbleMenuForm.ExtraHDip(BubbleAction.Theme) + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Clock)
                 + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Schedule) + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Preview)
-                + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Update), "168/130/222/208/216");
+                + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Update), "168/130/222/208/330");
             Check("长开后整颗高度 = 40 + 额外",
                 BubbleMenuForm.ItemHDip(BubbleAction.Theme) + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Clock)
                 + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Schedule) + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Preview)
-                + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Update), "208/170/262/248/256");
+                + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Update), "208/170/262/248/370");
 
             Check("预览通知 6 类 key", string.Join("/", BubbleMenuForm.PreviewKeys), "fixed/lunch/lark/outlook/local/off");
             Check("预览通知 名字 / 副标题 与 key 一一对应",
@@ -420,8 +420,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "3.8.1/3.8.1");
-            Check("程序集版本是 3.8.1.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "3.8.1.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "4.0.0/4.0.0");
+            Check("程序集版本是 4.0.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "4.0.0.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");
@@ -3322,6 +3322,79 @@ internal static class Test
                 Check("变化计划使用独立快照，不原地改调用者", original.note.contacts[0].remark, "阿哲");
             }
         }
+
+            // 26. 检查更新页的变更记录（v4.0.0）：每个大版本一条，新的在前
+            {
+                var entries = UpdateChangelog.Entries;
+                Check("26.1 变更记录非空", (entries != null && entries.Count > 0).ToString(), "True");
+
+                Func<string, int[]> parts = delegate(string v)
+                {
+                    string[] seg = v.Split('.');
+                    int[] n = new int[seg.Length];
+                    for (int i = 0; i < seg.Length; i++) n[i] = int.Parse(seg[i], CultureInfo.InvariantCulture);
+                    return n;
+                };
+                Func<string, string, int> cmp = delegate(string a, string b)
+                {
+                    int[] x = parts(a), y = parts(b);
+                    for (int i = 0; i < 3; i++)
+                    {
+                        int xa = i < x.Length ? x[i] : 0;
+                        int yb = i < y.Length ? y[i] : 0;
+                        if (xa != yb) return xa < yb ? -1 : 1;
+                    }
+                    return 0;
+                };
+                bool ordered = true, unique = true;
+                var seen = new List<string>();
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    if (i > 0 && cmp(entries[i - 1].Version, entries[i].Version) <= 0) ordered = false;
+                    if (seen.Contains(entries[i].Version)) unique = false;
+                    seen.Add(entries[i].Version);
+                }
+                Check("26.2 版本从新到旧", ordered.ToString(), "True");
+                Check("26.3 版本唯一", unique.ToString(), "True");
+                Check("26.4 Latest 就是当前版本", UpdateChangelog.Latest == null ? "" : UpdateChangelog.Latest.Version,
+                    AppInfo.Version);
+
+                bool allTitled = true, allBullets = true, allDates = true, allFormats = true;
+                for (int i = 0; i < entries.Count; i++)
+                {
+                    ChangelogEntry e = entries[i];
+                    if (string.IsNullOrEmpty(e.Title)) allTitled = false;
+                    if (e.Bullets == null || e.Bullets.Length < 2 || e.Bullets.Length > 5) allBullets = false;
+                    else for (int j = 0; j < e.Bullets.Length; j++) if (string.IsNullOrEmpty(e.Bullets[j])) allBullets = false;
+                    if (e.Date == null || e.Date.Length != 10 || e.Date[4] != '-' || e.Date[7] != '-') allDates = false;
+                    string[] seg = e.Version.Split('.');
+                    if (seg.Length != 2 && seg.Length != 3) allFormats = false;
+                    else for (int j = 0; j < seg.Length; j++)
+                    {
+                        int num;
+                        if (!int.TryParse(seg[j], out num) || num < 0) allFormats = false;
+                    }
+                }
+                Check("26.5 每条都有标题", allTitled.ToString(), "True");
+                Check("26.6 每条 2-5 条要点", allBullets.ToString(), "True");
+                Check("26.7 日期格式 yyyy-MM-dd", allDates.ToString(), "True");
+                Check("26.8 版本号格式 x.y 或 x.y.z", allFormats.ToString(), "True");
+
+                string[] required = new string[] { "4.0.0", "3.8", "3.7", "3.6", "3.5", "3.4", "3.3", "3.2" };
+                bool hasAll = true;
+                for (int i = 0; i < required.Length; i++)
+                    if (entries.FindIndex(delegate(ChangelogEntry e) { return e.Version == required[i]; }) < 0)
+                        hasAll = false;
+                Check("26.9 4.0.0 与 3.2~3.8 大版本都在", hasAll.ToString(), "True");
+
+                ChangelogEntry v4 = entries.Find(delegate(ChangelogEntry e) { return e.Version == "4.0.0"; });
+                string text4 = v4 == null ? "" : string.Join(" | ", v4.Bullets);
+                Check("26.10 4.0.0 记的是本轮重构（提醒 / 同步 / 更新记录）",
+                    (text4.IndexOf("ReminderEngine", StringComparison.Ordinal) >= 0
+                    && text4.IndexOf("SyncEngine", StringComparison.Ordinal) >= 0
+                    && text4.IndexOf("更新记录", StringComparison.Ordinal) >= 0).ToString(),
+                    "True");
+            }
 
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURES");

@@ -2078,14 +2078,14 @@ class Check
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Clock) == 130
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Schedule) == 222
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Preview) == 208
-                && BubbleMenuForm.ExtraHDip(BubbleAction.Update) == 216
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Update) == 330
                 && BubbleMenuForm.ItemHDip(BubbleAction.Theme) == 208
                 && BubbleMenuForm.ItemHDip(BubbleAction.Clock) == 170
                 && BubbleMenuForm.ItemHDip(BubbleAction.Schedule) == 262
                 && BubbleMenuForm.ItemHDip(BubbleAction.Preview) == 248
-                && BubbleMenuForm.ItemHDip(BubbleAction.Update) == 256,
+                && BubbleMenuForm.ItemHDip(BubbleAction.Update) == 370,
                 BubbleMenuForm.PillWDip + "x" + BubbleMenuForm.PillHDip + " 列高 " + BubbleMenuForm.ColumnHDip
-                + " 长开 168/130/222/208/216（+40 头 = 208/170/262/248/256）");
+                + " 长开 168/130/222/208/330（+40 头 = 208/170/262/248/370）");
 
             var bs = new Settings();
             bs.lark.enabled = false;
@@ -2245,6 +2245,71 @@ class Check
                         idleHasCheck && checking && avail && downloading && ready && upToDate && errored,
                         "idle=" + idleHasCheck + " checking=" + checking + " available=" + avail
                         + " downloading=" + downloading + " ready=" + ready + " upToDate=" + upToDate + " error=" + errored);
+
+                    // v4.0.0：检查更新页底部「更新记录」——一屏 5 行，滚轮看完所有大版本
+                    // （上面的状态断言已经把 Update 展开并停在 openExtra=openTo，这里不再 OpenItem，
+                    //   否则会命中「再点一次收起」而把面板关掉）
+                    Set(m, "animating", false);
+                    Set(m, "openExtra", (double)uExtra);
+                    Set(m, "openTo", (double)uExtra);
+                    Set(m, "closeExtra", 0.0);
+                    Set(m, "closeTo", 0.0);
+                    Call(m, "LayoutWindow");
+                    Set(m, "openedAt", Environment.TickCount - 5000);
+                    m.SetUpdateState(UpdatePhase.Available, "4.0.1", "有新版本", "4.0.0", 0, true);
+                    var uItem = (Rectangle)Call(m, "ItemRect", (int)BubbleAction.Update);
+                    var logView = (Rectangle)Call(m, "ChangelogView", uItem);
+                    int logMax = (int)Call(m, "ChangelogMaxScroll", logView);
+                    int logRows = BubbleMenuForm.UpdateLogViewHDip / BubbleMenuForm.UpdateLogRowHDip;
+                    Ok("检查更新卡片长高到能放下变更记录区（216 → 330）",
+                        BubbleMenuForm.ExtraHDip(BubbleAction.Update) > 216
+                        && uItem.Height == s(BubbleMenuForm.PillHDip + BubbleMenuForm.ExtraHDip(BubbleAction.Update))
+                        && uItem.Bottom <= m.Height,
+                        "extra=" + BubbleMenuForm.ExtraHDip(BubbleAction.Update)
+                        + " item=" + uItem.Width + "x" + uItem.Height + " window=" + m.Height);
+                    Ok("变更记录默认显示最近 5 行，按钮 / 链接都不压列表",
+                        logRows == 5 && UpdateChangelog.Entries.Count > logRows
+                        && logView.Top >= ((Rectangle)Call(m, "UpdateLinkRect", uItem)).Bottom
+                        && logView.Bottom <= uItem.Bottom && logMax > 0,
+                        logRows + " 行 / 条目 " + UpdateChangelog.Entries.Count + " / view=" + logView
+                        + " / max=" + logMax);
+
+                    int log0 = (int)Get(m, "changelogScroll");
+                    Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
+                        logView.Left + s(6), logView.Top + s(10), -120));
+                    int log1 = (int)Get(m, "changelogScroll");
+                    Ok("变更记录滚轮往下滚一行",
+                        log1 == log0 + s(BubbleMenuForm.UpdateLogRowHDip) && log1 > 0,
+                        log0 + " → " + log1 + "（期望 +" + s(BubbleMenuForm.UpdateLogRowHDip) + "）");
+
+                    for (int i = 0; i < 30; i++)
+                        Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
+                            logView.Left + s(6), logView.Top + s(10), -120));
+                    int logBottom = (int)Get(m, "changelogScroll");
+                    for (int i = 0; i < 30; i++)
+                        Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
+                            logView.Left + s(6), logView.Top + s(10), 120));
+                    int logTop = (int)Get(m, "changelogScroll");
+                    Ok("变更记录滚到底 / 滚到顶都 clamp 在 0..max",
+                        logBottom == logMax && logTop == 0 && logMax > 0,
+                        "bottom=" + logBottom + " / max=" + logMax + " / top=" + logTop);
+
+                    using (var log0Bmp = new Bitmap(m.Width, m.Height))
+                    using (var log1Bmp = new Bitmap(m.Width, m.Height))
+                    {
+                        using (var g = Graphics.FromImage(log0Bmp))
+                            Call(m, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, m.Width, m.Height)));
+                        for (int i = 0; i < 30; i++)
+                            Call(m, "OnMouseWheel", new MouseEventArgs(MouseButtons.None, 0,
+                                logView.Left + s(6), logView.Top + s(10), -120));
+                        using (var g = Graphics.FromImage(log1Bmp))
+                            Call(m, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, m.Width, m.Height)));
+                        int diff = 0;
+                        for (int y = logView.Top; y < logView.Bottom; y++)
+                            for (int x = logView.Left; x < logView.Right; x++)
+                                if (log0Bmp.GetPixel(x, y) != log1Bmp.GetPixel(x, y)) diff++;
+                        Ok("变更记录区真的画了内容，滚动会换行", diff > 100, diff + " 个像素不同");
+                    }
                 }
                 m.CloseMenu();
             }

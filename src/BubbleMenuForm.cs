@@ -48,7 +48,11 @@ namespace WorkCountdown
         public const int ClockExtraDip = 130;
         public const int ScheduleExtraDip = 222;
         public const int PreviewExtraDip = 208;
-        public const int UpdateExtraDip = 216;
+        public const int UpdateExtraDip = 330;
+
+        // 检查更新页底部的「更新记录」：一屏 5 行，多了用滚轮翻
+        public const int UpdateLogRowHDip = 22;
+        public const int UpdateLogViewHDip = 110;
 
         // 主题色卡：4 列 × 3 行 = 一屏 12 张，再多用滚轮滚
         public const int ThemeCols = 4;
@@ -128,6 +132,7 @@ namespace WorkCountdown
         private readonly List<ThemeDef> swatches = new List<ThemeDef>();
         private string selectedTheme;
         private int themeScroll;           // 主题列表滚动量（物理像素）
+        private int changelogScroll;       // 更新记录滚动量（物理像素），和主题列表各自独立
         private bool pinned;
         private string eventTitle = "临时日程";
         private string eventPlace = "";
@@ -534,6 +539,7 @@ namespace WorkCountdown
             animating = true;
             hoverKind = 0; hoverIndex = -1;
             if (index == (int)BubbleAction.Theme) ScrollThemeToSelected();
+            if (index == (int)BubbleAction.Update) changelogScroll = 0;
             // 更新面板一展开就去查一次（已经查过 / 正在下载就不重复查）
             if (index == (int)BubbleAction.Update && updatePhase == UpdatePhase.Idle && onUpdateCheck != null)
                 onUpdateCheck();
@@ -658,20 +664,34 @@ namespace WorkCountdown
             if (hoverKind != 0) { hoverKind = 0; hoverIndex = -1; Invalidate(); }
         }
 
-        /// <summary>主题列表上的滚轮：一格滚一行，滚到头就不动。</summary>
+        /// <summary>主题列表 / 更新记录上的滚轮：一格滚一行，滚到头就不动。</summary>
         protected override void OnMouseWheel(MouseEventArgs e)
         {
             base.OnMouseWheel(e);
-            if (activeIndex != (int)BubbleAction.Theme) return;
-            Rectangle view = ThemeView(ItemRectFinal(activeIndex));
-            if (!view.Contains(e.Location)) return;
-            int step = Math.Max(S(8), S(ChipHDip + ChipGapDip));
-            int max = ThemeMaxScroll(view);
-            int next = Math.Max(0, Math.Min(max, themeScroll - e.Delta * step / 120));
-            if (next == themeScroll) return;
-            themeScroll = next;
-            BuildHits();
-            Invalidate();
+            if (activeIndex == (int)BubbleAction.Theme)
+            {
+                Rectangle view = ThemeView(ItemRectFinal(activeIndex));
+                if (!view.Contains(e.Location)) return;
+                int step = Math.Max(S(8), S(ChipHDip + ChipGapDip));
+                int max = ThemeMaxScroll(view);
+                int next = Math.Max(0, Math.Min(max, themeScroll - e.Delta * step / 120));
+                if (next == themeScroll) return;
+                themeScroll = next;
+                BuildHits();
+                Invalidate();
+                return;
+            }
+            if (activeIndex == (int)BubbleAction.Update)
+            {
+                Rectangle view = ChangelogView(ItemRectFinal(activeIndex));
+                if (!view.Contains(e.Location)) return;
+                int step = S(UpdateLogRowHDip);
+                int max = ChangelogMaxScroll(view);
+                int next = Math.Max(0, Math.Min(max, changelogScroll - e.Delta * step / 120));
+                if (next == changelogScroll) return;
+                changelogScroll = next;
+                Invalidate();
+            }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -1245,6 +1265,18 @@ namespace WorkCountdown
 
         // ---------------- 检查更新 ----------------
 
+        /// <summary>「更新记录」列表的可视区（相对整颗长开的卡片）。</summary>
+        private Rectangle ChangelogView(Rectangle item)
+        {
+            return new Rectangle(item.X + S(12), item.Y + S(256), item.Width - S(24), S(UpdateLogViewHDip));
+        }
+
+        private int ChangelogMaxScroll(Rectangle view)
+        {
+            int total = UpdateChangelog.Entries.Count * S(UpdateLogRowHDip);
+            return Math.Max(0, total - view.Height);
+        }
+
         private Rectangle UpdatePrimaryRect(Rectangle item)
         {
             return new Rectangle(item.X + S(12), item.Y + S(150), item.Width - S(24), S(36));
@@ -1347,6 +1379,31 @@ namespace WorkCountdown
                 DrawTextMid(g, label, fChip, Alpha(apply ? OnAccent : Ink, a), btn.X, btn.Y + btn.Height / 2f, btn.Width);
             }
             DrawText(g, "打开发布页 →", fLink, Alpha(Accent, a), x, r.Y + S(213));
+
+            // 更新记录：按大版本从新到旧，一屏 5 行，滚轮看更早；最新一条用强调色
+            DrawText(g, "更新记录", fRowSub, Alpha(Dim, a), x, r.Y + S(238));
+            Rectangle logView = ChangelogView(r);
+            GraphicsState logState = g.Save();
+            g.SetClip(logView, CombineMode.Intersect);
+            for (int i = 0; i < UpdateChangelog.Entries.Count; i++)
+            {
+                ChangelogEntry entry = UpdateChangelog.Entries[i];
+                int rowTop = logView.Y + i * S(UpdateLogRowHDip) - changelogScroll;
+                bool isLatest = i == 0;
+                if (i < UpdateChangelog.Entries.Count - 1)
+                {
+                    using (var pen = new Pen(Alpha(theme.edge, (int)(a * 0.30)), Math.Max(1f, scale * 0.6f)))
+                        g.DrawLine(pen, logView.X, rowTop + S(UpdateLogRowHDip) - 1,
+                            logView.Right, rowTop + S(UpdateLogRowHDip) - 1);
+                }
+                float cy = rowTop + S(UpdateLogRowHDip) / 2f;
+                DrawTextMid(g, "v" + entry.Version, fChip, Alpha(isLatest ? Accent : Muted, a),
+                    logView.X, cy, S(48));
+                DrawTextMid(g, entry.Date, fRowSub, Alpha(Dim, a), logView.X + S(50), cy, S(62));
+                DrawTextMid(g, entry.Title, fRowSub, Alpha(isLatest ? Accent : Ink, a),
+                    logView.X + S(114), cy, logView.Width - S(114));
+            }
+            g.Restore(logState);
         }
 
         /// <summary>在浏览器里打开发布页（兜底：拿不到自动下载时用）。</summary>

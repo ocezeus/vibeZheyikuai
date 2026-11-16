@@ -119,6 +119,7 @@ $sources = @(
     (Join-Path $src 'Skins.cs'),
     (Join-Path $src 'Frost.cs'),
     (Join-Path $src 'Updates.cs'),
+    (Join-Path $src 'UpdateChangelog.cs'),
     (Join-Path $src 'Lark.cs'),
     (Join-Path $src 'Ics.cs'),
     (Join-Path $src 'OutlookGraph.cs'),
