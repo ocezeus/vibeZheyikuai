@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -163,9 +164,17 @@ namespace WorkCountdown
         void Delete(string path);
     }
 
-    /// <summary>生产存储：JSON + 同目录临时文件 + 原子提交（File.Replace / File.Move）。</summary>
+    /// <summary>生产存储：JSON + 同目录临时文件 + 同卷原子改名提交。</summary>
     public sealed class FileSettingsStorage : ISettingsStorage
     {
+        private const uint MoveFileReplaceExisting = 0x1;
+        private const uint MoveFileWriteThrough = 0x8;
+
+        // File.Replace 在 FAT 等便携盘文件系统上不可用；同卷 MoveFileEx 既能替换已有文件，
+        // 也能让首次保存原子出现，失败时目标文件保持原样。
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool MoveFileEx(string existingFileName, string newFileName, uint flags);
+
         public void EnsureDirectory(string path)
         {
             Directory.CreateDirectory(path);
@@ -203,10 +212,10 @@ namespace WorkCountdown
 
         public void Commit(string tempPath, string path)
         {
-            // 同目录、同卷：已有文件用 File.Replace 原子替换；首次保存用 File.Move 原子出现。
+            // 同目录、同卷的改名操作：已有文件直接替换，首次保存直接出现。
             // 失败时目标文件保持原样；调用方负责删除没提交的临时文件。
-            if (File.Exists(path)) File.Replace(tempPath, path, null);
-            else File.Move(tempPath, path);
+            if (!MoveFileEx(tempPath, path, MoveFileReplaceExisting | MoveFileWriteThrough))
+                throw new IOException("原子替换配置失败（Win32 " + Marshal.GetLastWin32Error() + "）。");
         }
 
         public void Delete(string path)
