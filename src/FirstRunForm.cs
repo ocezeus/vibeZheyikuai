@@ -312,12 +312,15 @@ namespace WorkCountdown
                 s.lark.chatId = tbChat.Text.Trim();
                 s.lark.enabled = cbLark.Checked && s.lark.chatId.Length > 0;
                 if (s.lark.enabled) s.calendarEnabled = true;
-                store.Save(s);
             }
-            else
+            var saved = store.Save(s);
+            if (saved.IsFailed)
             {
-                store.Save(s);   // 先落一份默认配置，下次不再弹
+                MessageBox.Show(this, "首次设置没有保存成功：\n" + saved.Message + "\n\n可以修正后重试，或稍后在设置里再改。", "保存失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
             }
+            // WC_NO_SAVE 的 Skipped 不弹“保存成功”，也不阻塞关闭：本次运行只在内存里生效。
             DialogResult = DialogResult.OK;
             Close();
         }

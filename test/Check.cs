@@ -1232,8 +1232,9 @@ class Check
 
             string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-" + Guid.NewGuid().ToString("N") + ".json");
             var store = new SettingsStore();
-            bool exported = store.Export(s, tmp);
-            var back = exported ? store.Import(tmp) : null;
+            var exported = store.Export(s, tmp);
+            var imported = exported.Succeeded ? store.Import(tmp) : null;
+            var back = imported == null ? null : imported.Settings;
             Ok("固定日程和自定义主题能存能读",
                 back != null && back.schedules != null && back.schedules.Count >= 4
                 && back.customThemes != null && back.customThemes.Count == 1
@@ -3963,6 +3964,37 @@ class Check
                 Ok("改昵称最多 12 个字",
                     nick.note.nickname.Length == 12 && nick.note.nickname == "一二三四五六七八九十十一",
                     nick.note.nickname.Length + "/" + nick.note.nickname);
+            }
+        }
+
+        // 配置保存反馈：后台保存失败只记日志、不弹窗（若弹窗，这条用例会被模态框卡住）
+        {
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-settings-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(dir);
+            try
+            {
+                var storage = new ControlledSettingsStorage();
+                storage.FailStage = "commit";
+                var store = new SettingsStore(storage, dir, false);
+                var s = new Settings();
+                s.Normalize();
+                using (var form = new WidgetForm(store, s))
+                {
+                    string previous = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+                    Environment.SetEnvironmentVariable("WC_NO_SAVE", "0");
+                    SettingsSaveResult result;
+                    try { result = form.SaveSettingsQuietly("轮询"); }
+                    finally { Environment.SetEnvironmentVariable("WC_NO_SAVE", previous); }
+                    bool logged = System.IO.File.Exists(store.LogPath)
+                        && System.IO.File.ReadAllText(store.LogPath).Contains("轮询");
+                    Ok("后台保存失败只记日志、不弹窗（否则本用例会被模态框卡住）",
+                        result.IsFailed && logged && !System.IO.File.Exists(store.SettingsPath),
+                        "failed=" + result.IsFailed + " logged=" + logged + " settings=" + System.IO.File.Exists(store.SettingsPath));
+                }
+            }
+            finally
+            {
+                try { System.IO.Directory.Delete(dir, true); } catch { }
             }
         }
 

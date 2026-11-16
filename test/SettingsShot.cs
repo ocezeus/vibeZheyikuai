@@ -22,7 +22,7 @@ class SettingsShot
         Directory.CreateDirectory(dir);
 
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.schedules.Add(FixedSchedule.Make("demo-standup", "custom", "每日站会", "10:30", "10:45", "zi-jiegeng"));
         s.schedules.Add(FixedSchedule.Make("demo-stretch", "custom", "拉伸一下", "15:30", "", "theme"));
         s.schedules.Add(FixedSchedule.Make("demo-weekly", "custom", "周会", "16:00", "17:00", "lan-yuming"));

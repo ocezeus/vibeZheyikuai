@@ -74,7 +74,7 @@ class Flow
     static Bitmap Frame(double t, bool exiting, out int height)
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reducedMotion = false;
         s.ui.reminderEffect = "glow";
         var snap = new AttendanceSnapshot();

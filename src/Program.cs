@@ -68,7 +68,7 @@ namespace WorkCountdown
 
                 var store = new SettingsStore();
                 bool firstRun = !store.Exists;
-                var settings = store.Load();
+                var settings = store.Load().Settings;
 
                 var form = new WidgetForm(store, settings);
                 form.EnableTray();

@@ -70,7 +70,7 @@ class ModeSheet
     static Bitmap Shot(int which, int col, out int height)
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.theme = "my-c6b7a3";   // 固定一套主题，三种做法才好比较
         s.ui.reducedMotion = true;
         s.ui.reminderEffect = "none";

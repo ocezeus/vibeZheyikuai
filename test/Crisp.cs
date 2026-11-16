@@ -70,7 +70,7 @@ class Crisp
     static Bitmap Card(out int height)
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         var snap = new AttendanceSnapshot();
         snap.ok = true;
         snap.clockIn = DateTime.Today.AddHours(9).AddMinutes(2);

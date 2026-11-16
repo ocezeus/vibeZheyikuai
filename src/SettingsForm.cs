@@ -2130,10 +2130,10 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
                 StoreSchedEditor();
                 if (!Save(false)) return;
-                bool ok = store.Export(s, dlg.FileName);
-                MessageBox.Show(this, ok ? "已导出到：\n" + dlg.FileName : "导出失败，日志里记录了原因。",
-                    ok ? "导出完成" : "导出失败", MessageBoxButtons.OK,
-                    ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+                var exported = store.Export(s, dlg.FileName);
+                MessageBox.Show(this, exported.Succeeded ? "已导出到：\n" + dlg.FileName : "导出失败：\n" + exported.Message,
+                    exported.Succeeded ? "导出完成" : "导出失败", MessageBoxButtons.OK,
+                    exported.Succeeded ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
             }
         }
 
@@ -2144,22 +2144,29 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 dlg.Title = "导入配置";
                 dlg.Filter = "配置文件 (*.json)|*.json";
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                var loaded = store.Import(dlg.FileName);
-                if (loaded == null)
+                var imported = store.Import(dlg.FileName);
+                if (!imported.Succeeded)
                 {
-                    MessageBox.Show(this, "这个文件读不出来，换一份试试。", "导入失败",
+                    MessageBox.Show(this, "这个文件读不出来，换一份试试。\n" + imported.Message, "导入失败",
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
-                s.CopyFrom(loaded);
+                s.CopyFrom(imported.Settings);
                 s.Normalize();
                 Themes.SetCustom(s.customThemes);
-                store.Save(s);
+                var saved = store.Save(s);
                 schedIndex = 0;
                 LoadValues();
                 ApplySkin();
-                MessageBox.Show(this, "配置已导入，重启悬浮窗后完全生效。", "导入完成",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                if (saved.IsFailed)
+                    MessageBox.Show(this, "配置已导入，但没有保存成功：\n" + saved.Message + "\n\n上一份有效配置没有被改动。", "导入后保存失败",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else if (saved.IsSkipped)
+                    MessageBox.Show(this, "配置已导入，但本次运行不写配置文件（WC_NO_SAVE=1）。", "配置已导入",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                else
+                    MessageBox.Show(this, "配置已导入，重启悬浮窗后完全生效。", "导入完成",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
@@ -2171,10 +2178,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             fresh.Normalize();
             s.CopyFrom(fresh);
             Themes.SetCustom(s.customThemes);
-            store.Save(s);
+            var saved = store.Save(s);
             schedIndex = 0;
             LoadValues();
             ApplySkin();
+            if (saved.IsFailed)
+                MessageBox.Show(this, "默认设置没有保存成功：\n" + saved.Message + "\n\n上一份有效配置没有被改动。", "保存失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         // ---------------- 载入 / 保存 ----------------
@@ -2397,7 +2407,15 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
             s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
             Themes.SetCustom(s.customThemes);
-            store.Save(s);
+            var saved = store.Save(s);
+            if (saved.IsFailed)
+            {
+                // 保存失败不得关窗 / 不得表现为成功：明确告知并保留上一份有效配置。
+                MessageBox.Show(this, "设置没有保存成功：\n" + saved.Message + "\n\n上一份有效配置没有被改动，可以修正后重试。", "保存失败",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+            // WC_NO_SAVE 的 Skipped 只在内存里生效，不弹“保存成功”，也不阻塞关闭。
             ApplySkin();            // 设置窗口自己立刻按新皮肤重画（不重启窗口；悬浮窗由 Widget 在 OK 后重建）
 
             if (closeAfter)
@@ -2828,8 +2846,10 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 s.outlook.account = "";
                 s.outlook.tokenAt = "";
                 s.outlook.lastError = "";
-                try { store.Save(s); } catch { }
-                lblState.Text = "已退出登录。";
+                var saved = store.Save(s);
+                lblState.Text = saved.IsFailed
+                    ? "已退出登录，但配置没有保存成功：" + saved.Message
+                    : saved.IsSkipped ? "已退出登录（本次运行不写配置）。" : "已退出登录。";
                 UpdateUi();
                 return;
             }
@@ -2878,9 +2898,12 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                         OutlookGraph.FetchMe(tk.accessToken, 15000, out name, out mail, out meErr);
                         s.outlook.account = mail.Length > 0 ? mail : name;
                         s.outlook.lastError = "";
-                        try { store.Save(s); } catch { }
+                        var saved = store.Save(s);
                         UpdateUi();
-                        lblState.Text = "登录成功。关闭后回到设置页点「立即同步」即可。";
+                        lblState.Text = saved.IsFailed
+                            ? "登录成功，但配置没有保存成功：" + saved.Message
+                            : saved.IsSkipped ? "登录成功（本次运行不写配置）。关闭后回到设置页点「立即同步」即可。"
+                            : "登录成功。关闭后回到设置页点「立即同步」即可。";
                     });
                 }
                 catch { }

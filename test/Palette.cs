@@ -71,7 +71,7 @@ class Palette
     static Bitmap Shot(string source, string role, double t, out int height)
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reducedMotion = true;
         s.ui.reminderEffect = "none";
         var snap = new AttendanceSnapshot();

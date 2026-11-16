@@ -30,7 +30,7 @@ class ScreenStatic
     {
         Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         Application.EnableVisualStyles();
-        var s = new SettingsStore().Load();
+        var s = new SettingsStore().Load().Settings;
         s.ui.reducedMotion = false;
         s.ui.edge = "free";
         s.ui.x = 1800; s.ui.y = 600;

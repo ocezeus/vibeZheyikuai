@@ -20,7 +20,7 @@ class PosProbe
             Console.WriteLine("  " + s.DeviceName + " bounds=" + s.Bounds + " working=" + s.WorkingArea);
 
         var store = new SettingsStore();
-        var st = store.Load();
+        var st = store.Load().Settings;
         st.ui.edge = "free";
         st.ui.x = 2154;
         st.ui.y = 958;

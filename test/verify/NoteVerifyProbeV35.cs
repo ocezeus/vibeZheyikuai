@@ -1025,7 +1025,7 @@ class NoteVerifyProbeV35
                 && string.Equals(store.SettingsPath, cfgPath, StringComparison.OrdinalIgnoreCase);
 
             // WC_NO_SAVE=1：内存里迁移，但不写盘
-            var loaded = store.Load();
+            var loaded = store.Load().Settings;
             var diskObj = ser.Deserialize<Settings>(File.ReadAllText(cfgPath, Encoding.UTF8));
             int diskVersion = (int)Get(diskObj, "version");
             Ok("M9 SettingsStore.Load（WC_NO_SAVE=1）：内存里迁移、但不写盘",
@@ -1038,7 +1038,7 @@ class NoteVerifyProbeV35
             // 允许写盘：Load 迁移后立刻落盘
             Environment.SetEnvironmentVariable("WC_NO_SAVE", null);
             File.WriteAllText(cfgPath, json, new UTF8Encoding(false));
-            var loaded2 = store.Load();
+            var loaded2 = store.Load().Settings;
             var diskObj2 = ser.Deserialize<Settings>(File.ReadAllText(cfgPath, Encoding.UTF8));
             var diskDays = (bool[])Get(diskObj2, "workdays");
             int diskVer2 = (int)Get(diskObj2, "version");
@@ -1050,7 +1050,7 @@ class NoteVerifyProbeV35
             // 已是 version=2：Load 不再重复写盘
             DateTime mtime = File.GetLastWriteTimeUtc(cfgPath);
             Thread.Sleep(40);
-            var loaded3 = store.Load();
+            var loaded3 = store.Load().Settings;
             DateTime mtime2 = File.GetLastWriteTimeUtc(cfgPath);
             Ok("M11 已是 version=2 的配置 Load 不再重复写盘（文件 mtime 不变）",
                 mtime == mtime2 && loaded3.version == 2,

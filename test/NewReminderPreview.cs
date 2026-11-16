@@ -26,7 +26,7 @@ class NewReminderPreview
         var store = new SettingsStore();
         foreach (string style in new string[] { "circle", "bar" })
         {
-            var s = store.Load();
+            var s = store.Load().Settings;
             s.ui.reducedMotion = false;
             s.ui.reminderSpread = "card";
             s.ui.reminderSpreadStyle = style;
@@ -58,7 +58,7 @@ class NewReminderPreview
 
         foreach (string style in new string[] { "circle", "bar" })
         {
-            var s = store.Load();
+            var s = store.Load().Settings;
             s.ui.reducedMotion = false;
             s.ui.reminderSpread = "screen";
             s.ui.reminderSpreadStyle = style;

@@ -31,7 +31,7 @@ class SkinCardShot
         Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         Application.EnableVisualStyles();
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
 
         // 探针要稳定：关掉动效抑制、固定流光相位；工资面板用一份假数据（只在本进程内存里）
         s.ui.reducedMotion = false;

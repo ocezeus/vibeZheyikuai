@@ -73,7 +73,7 @@ class ReminderMock
     static void Prepare()
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reducedMotion = false;
 
         DateTime start = DateTime.Today.AddHours(18);

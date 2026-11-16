@@ -75,7 +75,7 @@ class Soon
     static Bitmap Card(double minutesToOff, int staggerMs, out int height)
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reducedMotion = false;
         var snap = new AttendanceSnapshot();
         snap.ok = true;

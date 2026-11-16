@@ -16,7 +16,7 @@ class EdgeProbe
     static void Main()
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reminderEffect = "glow";
         s.ui.reducedMotion = false;
         var snap = new AttendanceSnapshot(); snap.ok = true; snap.clockIn = DateTime.Today.AddHours(9);

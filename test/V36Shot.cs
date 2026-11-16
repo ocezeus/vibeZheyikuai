@@ -243,7 +243,7 @@ class V36Shot
     static void SettingsPage(string dir)
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.theme = "ivory";
         s.ui.bgStyle = "glass";
         using (var dlg = new SettingsForm(store, s))

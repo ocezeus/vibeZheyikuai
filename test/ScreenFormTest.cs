@@ -24,7 +24,7 @@ class ScreenFormTest
     {
         Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         Application.EnableVisualStyles();
-        var s = new SettingsStore().Load();
+        var s = new SettingsStore().Load().Settings;
         s.ui.reducedMotion = false;
         s.ui.reminderSpread = "screen";
         s.ui.reminderSpreadStyle = "circle";

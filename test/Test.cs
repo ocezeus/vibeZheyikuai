@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.Web.Script.Serialization;
 using WorkCountdown;
 
 internal static class Test
@@ -13,6 +14,45 @@ internal static class Test
         bool ok = actual == expected;
         if (!ok) failures++;
         Console.WriteLine((ok ? "PASS  " : "FAIL  ") + name + "  => " + actual + (ok ? "" : "   (expected " + expected + ")"));
+    }
+
+    private static string NewTempDir()
+    {
+        string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-settings-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    private static void DeleteTempDir(string dir)
+    {
+        try { System.IO.Directory.Delete(dir, true); } catch { }
+    }
+
+    private static string ReadAllText(string path)
+    {
+        return System.IO.File.ReadAllText(path);
+    }
+
+    private static bool FileBytesEqual(string path, byte[] expected)
+    {
+        try
+        {
+            byte[] actual = System.IO.File.ReadAllBytes(path);
+            if (actual.Length != expected.Length) return false;
+            for (int i = 0; i < actual.Length; i++) if (actual[i] != expected[i]) return false;
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static int TempFileCount(string dir)
+    {
+        try { return System.IO.Directory.GetFiles(dir, "*.tmp-*").Length; } catch { return -1; }
+    }
+
+    private static SettingsStore StoreIn(string dir)
+    {
+        return new SettingsStore(new FileSettingsStorage(), dir, false);
     }
 
     private static void Main()
@@ -2175,6 +2215,412 @@ internal static class Test
                     + (prodSink.Updates.Count == 1 ? prodSink.Updates[0].Calendars[0].Succeeded.ToString() : "no-update"),
                     "True/1/True");
                 try { System.IO.File.Delete(icsPath); } catch { }
+            }
+        }
+
+        // 23. 配置模块：先锁定 SettingsStore 现有公开行为（只读路径信息 + 显式临时文件，不写用户真实配置）
+        {
+            string root = NewTempDir();
+            try
+            {
+                var store = new SettingsStore();
+                Check("现状 历史配置文件名保持不变", System.IO.Path.GetFileName(store.SettingsPath), "settings.json");
+                Check("现状 日志仍在配置目录", System.IO.Path.GetFileName(store.LogPath), "widget.log");
+                Check("现状 测试程序默认不是便携模式", store.Portable.ToString(), "False");
+
+                var cfg = new Settings();
+                cfg.Normalize();
+                cfg.mode = "flex";
+                cfg.flexMinutes = 615;
+                cfg.ui.theme = "ivory";
+                cfg.customThemes.Add(new CustomTheme { id = "my-keep", name = "保留", accent = "#6F9E6A" });
+                string export = System.IO.Path.Combine(root, "roundtrip.json");
+                var exported = store.Export(cfg, export);
+                Check("现状 导出显式路径成功", exported.Succeeded.ToString(), "True");
+                Check("现状 导出文件完整", System.IO.File.Exists(export) + "/" + ReadAllText(export).TrimEnd().EndsWith("}").ToString(), "True/True");
+                var imported = store.Import(export);
+                var back = imported.Succeeded ? imported.Settings : null;
+                Check("现状 导入导出往返保留日程/主题",
+                    (back != null) + "/" + (back == null ? -1 : back.schedules.Count) + "/" +
+                    (back == null || back.customThemes.Count != 1 ? "-" : back.customThemes[0].id),
+                    "True/3/my-keep");
+
+                // Normalize 的迁移/规范化现状（Save 以后要克隆快照，这些规则本身不变）
+                var fresh = new Settings();
+                fresh.Normalize();
+                Check("现状 固定日程从旧字段长出来", fresh.schedules.Count.ToString(), "3");
+                Check("现状 固定日程同步回旧字段", fresh.lunchStart + "/" + fresh.lunchEnd + "/" + fresh.eveningStart, "11:50/13:30/18:00");
+            }
+            finally
+            {
+                DeleteTempDir(root);
+            }
+        }
+
+        // 24. 配置模块：保存结果、快照规范化、安全写入、迁移与调用点反馈（工单 #4）
+        {
+            string savedNoSave = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+            Environment.SetEnvironmentVariable("WC_NO_SAVE", "0");
+            Func<bool[], string> Bits = delegate(bool[] a)
+            {
+                string text = "";
+                for (int i = 0; i < a.Length; i++) text += a[i] ? "1" : "0";
+                return text;
+            };
+            try
+            {
+                // 24.1 首次保存 / 已有文件：完整写入，保存成功即完整落盘
+                {
+                    string dir = NewTempDir();
+                    try
+                    {
+                        var store = StoreIn(dir);
+                        var first = new Settings();
+                        first.mode = "fixed";
+                        first.startTime = "08:30";
+                        first.endTime = "17:30";
+                        first.ui.theme = "ivory";
+                        first.note.nickname = "保存测试";
+                        var save1 = store.Save(first);
+                        Check("AC1 首次保存返回成功", save1.Status.ToString(), "Saved");
+                        Check("AC1 首次保存落盘完整",
+                            System.IO.File.Exists(store.SettingsPath) + "/" + ReadAllText(store.SettingsPath).TrimEnd().EndsWith("}").ToString(),
+                            "True/True");
+                        Check("AC1 首次保存无临时文件残留", TempFileCount(dir).ToString(), "0");
+                        var load1 = store.Load();
+                        Check("AC1 保存成功后 Load 结果一致",
+                            load1.Status + "/" + load1.Settings.mode + "/" + load1.Settings.startTime + "/" + load1.Settings.ui.theme,
+                            "Loaded/fixed/08:30/ivory");
+                        Check("AC1 成功代表完整配置已落盘",
+                            load1.Settings.schedules.Count + "/" + load1.Settings.note.nickname, "3/保存测试");
+                        var disk = new JavaScriptSerializer().Deserialize<Settings>(ReadAllText(store.SettingsPath));
+                        Check("AC2 持久化内容与 Load 结果一致",
+                            new JavaScriptSerializer().Serialize(disk) == new JavaScriptSerializer().Serialize(load1.Settings) ? "same" : "different",
+                            "same");
+
+                        var second = new Settings();
+                        second.mode = "flex";
+                        second.flexMinutes = 600;
+                        second.note.nickname = "第二份";
+                        var save2 = store.Save(second);
+                        Check("AC1 已有文件覆盖保存返回成功", save2.Status.ToString(), "Saved");
+                        var load2 = store.Load();
+                        Check("AC1 覆盖后是完整的新配置",
+                            load2.Settings.mode + "/" + load2.Settings.flexMinutes + "/" + load2.Settings.note.nickname,
+                            "flex/600/第二份");
+                        Check("AC1 覆盖后无临时文件残留", TempFileCount(dir).ToString(), "0");
+                    }
+                    finally { DeleteTempDir(dir); }
+                }
+
+                // 24.2 保存只写独立快照：不原地规范化调用者，落盘内容 = Load 结果
+                {
+                    string dir = NewTempDir();
+                    try
+                    {
+                        var store = StoreIn(dir);
+                        var cfg = new Settings();
+                        cfg.version = 1;
+                        cfg.mode = "bogus-mode";
+                        cfg.workdays = new bool[] { true, true, true, true, true, false, false };
+                        cfg.ui.opacity = 1;
+                        cfg.outlook.url = "https://example.com/legacy.ics";
+                        cfg.outlook.source = "url";
+                        cfg.outlook.enabled = true;
+                        cfg.schedules = null;
+                        object uiBefore = cfg.ui;
+                        object calendarsBefore = cfg.outlook.calendars;
+                        bool[] workdaysBefore = cfg.workdays;
+                        var result = store.Save(cfg);
+                        Check("AC2 Save 不改调用者顶层字段", result.Status + "/" + cfg.mode + "/" + cfg.version, "Saved/bogus-mode/1");
+                        Check("AC2 Save 不改调用者嵌套对象",
+                            cfg.ui.opacity + "/" + object.ReferenceEquals(cfg.ui, uiBefore) + "/" + (cfg.schedules == null),
+                            "1/True/True");
+                        Check("AC2 Save 不改调用者工作日数组",
+                            object.ReferenceEquals(cfg.workdays, workdaysBefore) + "/" + Bits(cfg.workdays), "True/1111100");
+                        Check("AC2 Save 不改调用者日历列表",
+                            object.ReferenceEquals(cfg.outlook.calendars, calendarsBefore) + "/" + cfg.outlook.calendars.Count,
+                            "True/0");
+                        var loaded = store.Load();
+                        Check("AC2 持久化的是规范化快照",
+                            loaded.Settings.version + "/" + loaded.Settings.mode + "/" + loaded.Settings.ui.opacity + "/" + Bits(loaded.Settings.workdays),
+                            "2/flex/94/0111110");
+                        Check("AC2 固定日程与历史日历来源在快照里补齐",
+                            loaded.Settings.schedules.Count + "/" + loaded.Settings.outlook.calendars.Count + "/" + loaded.Settings.outlook.calendars[0].url,
+                            "3/1/https://example.com/legacy.ics");
+                    }
+                    finally { DeleteTempDir(dir); }
+                }
+
+                // 24.3 序列化 / 临时写 / 替换失败：返回失败，旧配置字节不变；首次失败不留半文件
+                {
+                    string dir = NewTempDir();
+                    try
+                    {
+                        var writer = StoreIn(dir);
+                        var good = new Settings();
+                        good.mode = "fixed";
+                        good.note.nickname = "上一份有效";
+                        writer.Save(good);
+                        byte[] before = System.IO.File.ReadAllBytes(writer.SettingsPath);
+                        string[] stages = new string[] { "serialize", "temp", "commit" };
+                        for (int i = 0; i < stages.Length; i++)
+                        {
+                            var storage = new ControlledSettingsStorage();
+                            var store = new SettingsStore(storage, dir, false);
+                            storage.FailStage = stages[i];
+                            var changed = new Settings();
+                            changed.mode = "flex";
+                            changed.flexMinutes = 600;
+                            changed.note.nickname = "不该落盘";
+                            var result = store.Save(changed);
+                            Check("AC1 " + stages[i] + " 失败返回失败", result.Status.ToString(), "Failed");
+                            Check("AC1 " + stages[i] + " 失败旧配置字节不变", FileBytesEqual(writer.SettingsPath, before).ToString(), "True");
+                            Check("AC1 " + stages[i] + " 失败无临时文件残留", TempFileCount(dir).ToString(), "0");
+                        }
+
+                        for (int i = 0; i < stages.Length; i++)
+                        {
+                            string freshDir = NewTempDir();
+                            try
+                            {
+                                var storage = new ControlledSettingsStorage();
+                                var store = new SettingsStore(storage, freshDir, false);
+                                storage.FailStage = stages[i];
+                                var firstCfg = new Settings();
+                                firstCfg.note.nickname = "首次失败";
+                                var firstFail = store.Save(firstCfg);
+                                Check("AC1 首次保存 " + stages[i] + " 失败返回失败", firstFail.Status.ToString(), "Failed");
+                                Check("AC1 首次保存 " + stages[i] + " 失败不留目标文件", System.IO.File.Exists(store.SettingsPath).ToString(), "False");
+                                Check("AC1 首次保存 " + stages[i] + " 失败不留临时文件", TempFileCount(freshDir).ToString(), "0");
+                                var freshLoad = store.Load();
+                                Check("AC1 首次保存 " + stages[i] + " 失败不会被当成有效配置", freshLoad.Status.ToString(), "Fresh");
+                            }
+                            finally { DeleteTempDir(freshDir); }
+                        }
+
+                        string nullDir = NewTempDir();
+                        try
+                        {
+                            var store = StoreIn(nullDir);
+                            Check("AC1 没有配置对象时返回失败而不是抛异常", store.Save(null).Status.ToString(), "Failed");
+                            Check("AC1 没有配置对象时不产生文件", System.IO.File.Exists(store.SettingsPath).ToString(), "False");
+                        }
+                        finally { DeleteTempDir(nullDir); }
+
+                        string secretDir = NewTempDir();
+                        try
+                        {
+                            var storage = new ControlledSettingsStorage();
+                            storage.FailStage = "commit";
+                            storage.FailMessage = "refreshToken=SECRET-VALUE";
+                            var store = new SettingsStore(storage, secretDir, false);
+                            var secretCfg = new Settings();
+                            secretCfg.outlook.refreshToken = "dpapi:SECRET-VALUE";
+                            var result = store.Save(secretCfg);
+                            Check("AC1 失败信息不含凭据",
+                                (result.Message.IndexOf("SECRET-VALUE") < 0 && result.Message.IndexOf("dpapi:") < 0).ToString(), "True");
+                        }
+                        finally { DeleteTempDir(secretDir); }
+                    }
+                    finally { DeleteTempDir(dir); }
+                }
+
+                // 24.4 旧工作日 / 固定日程 / 日历来源迁移：临时目录内加载并落盘，重复加载不重复变更
+                {
+                    string dir = NewTempDir();
+                    try
+                    {
+                        var store = StoreIn(dir);
+                        var legacy = new Settings();
+                        legacy.version = 1;
+                        legacy.mode = "flex";
+                        legacy.workdays = new bool[] { true, true, true, true, true, false, false };
+                        legacy.outlook.url = "https://example.com/legacy.ics";
+                        legacy.outlook.source = "url";
+                        legacy.outlook.enabled = true;
+                        legacy.schedules = null;
+                        string legacyJson = new JavaScriptSerializer().Serialize(legacy);
+                        System.IO.File.WriteAllText(store.SettingsPath, legacyJson, new System.Text.UTF8Encoding(false));
+                        var first = store.Load();
+                        string afterFirst = ReadAllText(store.SettingsPath);
+                        Check("AC2 旧配置加载后迁移并落盘",
+                            first.Status + "/" + first.Settings.version + "/" + Bits(first.Settings.workdays),
+                            "Loaded/2/0111110");
+                        Check("AC2 迁移后文件被规范化为有效快照",
+                            (afterFirst != legacyJson) + "/" + first.Settings.outlook.calendars.Count,
+                            "True/1");
+                        string calendarId = first.Settings.outlook.calendars[0].id;
+                        int scheduleCount = first.Settings.schedules.Count;
+                        var second = store.Load();
+                        Check("AC2 迁移重复加载不重复变更",
+                            (ReadAllText(store.SettingsPath) == afterFirst) + "/" + (second.Settings.outlook.calendars[0].id == calendarId)
+                            + "/" + second.Settings.schedules.Count + "/" + Bits(second.Settings.workdays),
+                            "True/True/" + scheduleCount + "/0111110");
+                    }
+                    finally { DeleteTempDir(dir); }
+                }
+
+                // 24.4b 加载结果区分首次 / 已有 / 坏文件；坏文件不被当成有效配置覆盖
+                {
+                    string dir = NewTempDir();
+                    try
+                    {
+                        var store = StoreIn(dir);
+                        Check("AC2 没有配置时加载结果是首次", store.Load().Status.ToString(), "Fresh");
+                        System.IO.File.WriteAllText(store.SettingsPath, "{ not a config", new System.Text.UTF8Encoding(false));
+                        byte[] corrupt = System.IO.File.ReadAllBytes(store.SettingsPath);
+                        var fallback = store.Load();
+                        Check("AC2 坏配置加载回退默认值并标记",
+                            fallback.Status + "/" + fallback.Settings.mode, "Fallback/fixed");
+                        Check("AC2 坏配置加载不覆盖原文件", FileBytesEqual(store.SettingsPath, corrupt).ToString(), "True");
+                    }
+                    finally { DeleteTempDir(dir); }
+                }
+
+                // 24.5 普通 / 便携目录、历史文件名与导入导出（临时目录）
+                {
+                    string dir = NewTempDir();
+                    try
+                    {
+                        string exeDir = System.IO.Path.Combine(dir, "exe");
+                        string appData = System.IO.Path.Combine(dir, "appdata");
+                        System.IO.Directory.CreateDirectory(exeDir);
+                        System.IO.Directory.CreateDirectory(appData);
+                        System.IO.File.WriteAllText(System.IO.Path.Combine(exeDir, "portable.txt"), "portable", new System.Text.UTF8Encoding(false));
+                        Check("AC4 便携标记识别", SettingsStore.DetectPortable(exeDir).ToString(), "True");
+                        Check("AC4 便携目录", SettingsStore.ResolveSettingsDir(exeDir, appData, true), System.IO.Path.Combine(exeDir, "data"));
+                        Check("AC4 普通目录", SettingsStore.ResolveSettingsDir(exeDir, appData, false), System.IO.Path.Combine(appData, "WorkCountdown"));
+                        var portStore = new SettingsStore(new FileSettingsStorage(), System.IO.Path.Combine(exeDir, "data"), true);
+                        Check("AC4 历史配置文件名与便携目录保持",
+                            portStore.Portable + "/" + System.IO.Path.GetFileName(portStore.SettingsPath) + "/" + System.IO.Path.GetFileName(portStore.LogPath),
+                            "True/settings.json/widget.log");
+
+                        string configDir = System.IO.Path.Combine(dir, "config");
+                        System.IO.Directory.CreateDirectory(configDir);
+                        var store = StoreIn(configDir);
+                        var cfg = new Settings();
+                        cfg.mode = "bogus";
+                        cfg.schedules = null;
+                        cfg.customThemes.Add(new CustomTheme { id = "my-io", name = "导入导出", accent = "#6F9E6A" });
+                        string outPath = System.IO.Path.Combine(configDir, "export.json");
+                        var export = store.Export(cfg, outPath);
+                        Check("AC4 导出成功", export.Status.ToString(), "Exported");
+                        Check("AC4 导出不修改调用者",
+                            cfg.mode + "/" + (cfg.schedules == null) + "/" + cfg.customThemes.Count,
+                            "bogus/True/1");
+                        var imported = store.Import(outPath);
+                        Check("AC4 导入导出往返且内容已规范化",
+                            imported.Status + "/" + imported.Settings.mode + "/" + imported.Settings.schedules.Count + "/" + imported.Settings.customThemes[0].id,
+                            "Imported/flex/3/my-io");
+
+                        string badPath = System.IO.Path.Combine(configDir, "bad.json");
+                        System.IO.File.WriteAllText(badPath, "{ not json", new System.Text.UTF8Encoding(false));
+                        Check("AC4 导入坏文件返回失败", store.Import(badPath).Status.ToString(), "Failed");
+
+                        string oldExport = ReadAllText(outPath);
+                        var failStorage = new ControlledSettingsStorage();
+                        failStorage.FailStage = "commit";
+                        var failStore = new SettingsStore(failStorage, configDir, false);
+                        var exportFail = failStore.Export(cfg, outPath);
+                        Check("AC4 导出失败返回失败且旧导出文件不变",
+                            exportFail.Status + "/" + (ReadAllText(outPath) == oldExport) + "/" + TempFileCount(configDir),
+                            "Failed/True/0");
+                    }
+                    finally { DeleteTempDir(dir); }
+                }
+
+                // 24.6 WC_NO_SAVE：保存返回跳过，且完全不碰存储
+                {
+                    string dir = NewTempDir();
+                    try
+                    {
+                        var storage = new ControlledSettingsStorage();
+                        var store = new SettingsStore(storage, dir, false);
+                        string previous = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+                        Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
+                        try
+                        {
+                            var result = store.Save(new Settings());
+                            Check("AC6 WC_NO_SAVE 保存返回跳过而不是成功", result.Status.ToString(), "Skipped");
+                            Check("AC6 WC_NO_SAVE 不碰存储",
+                                storage.SerializeCalls + "/" + storage.TempWrites + "/" + storage.Commits, "0/0/0");
+                            Check("AC6 WC_NO_SAVE 不产生配置文件",
+                                System.IO.File.Exists(store.SettingsPath).ToString() + "/" + TempFileCount(dir), "False/0");
+
+                            var legacy = new Settings();
+                            legacy.version = 1;
+                            legacy.workdays = new bool[] { true, true, true, true, true, false, false };
+                            System.IO.File.WriteAllText(store.SettingsPath,
+                                new JavaScriptSerializer().Serialize(legacy), new System.Text.UTF8Encoding(false));
+                            byte[] probeBefore = System.IO.File.ReadAllBytes(store.SettingsPath);
+                            var probeLoad = store.Load();
+                            Check("AC6 探针加载只在内存迁移、不写盘",
+                                (probeLoad.Settings.version == 2) + "/" + FileBytesEqual(store.SettingsPath, probeBefore), "True/True");
+                        }
+                        finally { Environment.SetEnvironmentVariable("WC_NO_SAVE", previous); }
+                    }
+                    finally { DeleteTempDir(dir); }
+                }
+
+                // 24.7 并发保存被串行化；原子写入只保证单次完整，不仲裁旧快照
+                {
+                    string dir = NewTempDir();
+                    var storage = new ControlledSettingsStorage();
+                    try
+                    {
+                        var storeA = new SettingsStore(storage, dir, false);
+                        var storeB = new SettingsStore(storage, dir, false);
+                        storage.BlockCommit = new System.Threading.ManualResetEvent(false);
+                        storage.CommitEntered = new System.Threading.ManualResetEvent(false);
+                        SettingsSaveResult resultA = null;
+                        SettingsSaveResult resultB = null;
+                        var cfgA = new Settings();
+                        cfgA.mode = "flex";
+                        cfgA.flexMinutes = 600;
+                        cfgA.note.nickname = "并发 A";
+                        var cfgB = new Settings();
+                        cfgB.mode = "fixed";
+                        cfgB.endTime = "19:00";
+                        cfgB.note.nickname = "并发 B";
+                        var threadA = new System.Threading.Thread(delegate() { resultA = storeA.Save(cfgA); });
+                        threadA.IsBackground = true;
+                        threadA.Start();
+                        storage.CommitEntered.WaitOne(3000);
+                        var threadB = new System.Threading.Thread(delegate() { resultB = storeB.Save(cfgB); });
+                        threadB.IsBackground = true;
+                        threadB.Start();
+                        System.Threading.Thread.Sleep(120);
+                        string activeDuring = storage.MaxActiveWrites.ToString();
+                        storage.BlockCommit.Set();
+                        Check("AC5 并发保存被串行化", activeDuring, "1");
+                        Check("AC5 并发保存都能完成", (threadA.Join(3000) && threadB.Join(3000)).ToString()
+                            + "/" + (resultA == null ? "null" : resultA.Status.ToString())
+                            + "/" + (resultB == null ? "null" : resultB.Status.ToString()), "True/Saved/Saved");
+                        var loaded = storeA.Load();
+                        Check("AC5 并发后文件仍是完整配置", loaded.Status + "/" + loaded.Settings.schedules.Count, "Loaded/3");
+                        Check("AC5 并发后无临时文件残留", TempFileCount(dir).ToString(), "0");
+
+                        // 原子写入只保证单次写入不撕裂；旧快照覆盖新快照不由它解决（代次检查属于调用层 / ADR-0002）
+                        var newer = new Settings();
+                        newer.note.nickname = "新快照";
+                        var older = new Settings();
+                        older.note.nickname = "旧快照";
+                        storeA.Save(newer);
+                        storeA.Save(older);
+                        Check("AC5 原子写入不解决旧快照覆盖（后写覆盖先写是明确契约）",
+                            storeA.Load().Settings.note.nickname, "旧快照");
+                    }
+                    finally
+                    {
+                        storage.BlockCommit.Set();
+                        DeleteTempDir(dir);
+                    }
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("WC_NO_SAVE", savedNoSave);
             }
         }
 

@@ -37,7 +37,7 @@ class ScreenLive
         Directory.CreateDirectory(root);
 
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reducedMotion = false;
         s.ui.edge = "free";
         s.ui.x = 1800;

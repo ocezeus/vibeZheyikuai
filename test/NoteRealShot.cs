@@ -67,7 +67,7 @@ class NoteRealShot
         else
         {
             var store = new SettingsStore();
-            s = store.Load();
+            s = store.Load().Settings;
         }
         var note = s.note;
         if (note.Contact(id) == null)

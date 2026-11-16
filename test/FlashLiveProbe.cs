@@ -32,7 +32,7 @@ class FlashLiveProbe
         try
         {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.skin = s.ui.skin ?? "default";
         // 内存里造一条未读（不落盘）
         string first = null;

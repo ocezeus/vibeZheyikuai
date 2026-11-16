@@ -17,7 +17,7 @@ class LookShot
         Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         Application.EnableVisualStyles();
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reminderSpread = "screen";
         s.ui.reminderSpreadStyle = "bar";
         using (var dlg = new SettingsForm(store, s))

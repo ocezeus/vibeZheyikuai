@@ -700,7 +700,19 @@ namespace WorkCountdown
                 settings.outlook.refreshToken = update.RefreshToken;
                 settings.outlook.tokenAt = update.TokenAt ?? "";
             }
-            try { store.Save(settings); } catch { }
+            SaveSettingsQuietly("同步结果回写");
+        }
+
+        /// <summary>
+        /// 后台 / 轮询 / 悬浮窗快捷操作的保存策略：失败只记日志，绝不弹窗，避免每次轮询打扰。
+        /// 需要交互反馈的保存（设置确认、导入、导出）在自己的调用点检查结果。
+        /// </summary>
+        internal SettingsSaveResult SaveSettingsQuietly(string reason)
+        {
+            var result = store.Save(settings);
+            if (result.IsFailed)
+                store.Log("保存设置失败（" + reason + "）：" + result.Message);
+            return result;
         }
 
         private CalendarSource FindCalendarSource(string id)
@@ -3624,7 +3636,7 @@ namespace WorkCountdown
             }
             settings.ui.x = Left;
             settings.ui.y = Top;
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
         }
 
         public void OpenSettingsPublic()
@@ -3647,7 +3659,7 @@ namespace WorkCountdown
                 dlg.TopMost = true;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    settings = store.Load();
+                    settings = store.Load().Settings;
                     ApplySettings();
                     RequestRefresh(false);
                     RequestCalendar(false);
@@ -3785,7 +3797,7 @@ namespace WorkCountdown
                 return false;
             }
             settings.note.Append(new NoteMessage(settings.note.id, toId, text, NoteRelay.Now()), false);
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Invalidate();
             return true;
         }
@@ -3794,7 +3806,7 @@ namespace WorkCountdown
         {
             if (string.IsNullOrEmpty(contactId)) return;
             settings.note.MarkRead(contactId);
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Invalidate();
         }
 
@@ -3809,7 +3821,7 @@ namespace WorkCountdown
         {
             bool added = settings.note.AddConversation(id, remark);
             settings.note.Thread(NoteSettings.NormalizeCode(id));
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Invalidate();
             store.Log("小纸条新建对话: " + id + (settings.note.IsRoom(id) ? "（对话码）" : "") + (string.IsNullOrEmpty(remark) ? "" : " / " + remark));
             // 对话码要订阅对应主题；个人对话要订阅对方 presence（retained）拿昵称。顺便重发自己的 presence。
@@ -3828,7 +3840,7 @@ namespace WorkCountdown
                 {
                     if (settings.note == null) return;
                     if (!settings.note.SetContactNick(id, nick)) return;
-                    store.Save(settings);
+                    SaveSettingsQuietly("设置变化");
                     if (notePanel != null) notePanel.RefreshData();
                     Invalidate();
                     store.Log("小纸条昵称: " + id + " = " + nick);
@@ -3842,7 +3854,7 @@ namespace WorkCountdown
         {
             if (settings.note == null || string.IsNullOrEmpty(id)) return;
             settings.note.RemoveContact(id);
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Invalidate();
             store.Log("小纸条删除对话: " + id);
         }
@@ -3855,7 +3867,7 @@ namespace WorkCountdown
             remark = (remark ?? "").Trim();
             if (remark.Length > NoteSettings.MaxRemark) remark = remark.Substring(0, NoteSettings.MaxRemark);
             c.remark = remark;
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Invalidate();
             store.Log("小纸条改备注: " + id + (string.IsNullOrEmpty(remark) ? " (空)" : " / " + remark));
         }
@@ -3870,7 +3882,7 @@ namespace WorkCountdown
             nick = NoteSettings.CleanNick(nick);
             if (string.Equals(settings.note.nickname ?? "", nick, StringComparison.Ordinal)) return;
             settings.note.nickname = nick;
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             RestartNoteRelay();      // 昵称变化要立刻广播给已有联系人
             if (notePanel != null) notePanel.RefreshData();
             Invalidate();
@@ -3909,7 +3921,7 @@ namespace WorkCountdown
                     note.Append(m, true);
                     // 顺手把发送者昵称补到本机对话上（个人对话会显示成名字；群聊气泡里用消息自带的昵称）
                     if (!string.IsNullOrEmpty(msg.nick)) note.SetContactNick(msg.from, msg.nick);
-                    store.Save(settings);
+                    SaveSettingsQuietly("设置变化");
                     noteFlashAt = Environment.TickCount;
                     noteBlinkLast = Environment.TickCount;
                     noteBlinkAt = Environment.TickCount;
@@ -3918,7 +3930,7 @@ namespace WorkCountdown
                         if (notePanel.SelectedId == key)
                         {
                             note.MarkRead(key);
-                            store.Save(settings);
+                            SaveSettingsQuietly("设置变化");
                         }
                         notePanel.RefreshData();
                     }
@@ -4278,7 +4290,7 @@ namespace WorkCountdown
         {
             if (string.IsNullOrEmpty(id) || id == settings.ui.theme) return;
             settings.ui.theme = id;
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             ApplySettings();
             Invalidate();
             store.Log("胶囊菜单换主题: " + id);
@@ -4298,7 +4310,7 @@ namespace WorkCountdown
             Themes.SetCustom(settings.customThemes);
 
             settings.ui.theme = ct.id;
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             ApplySettings();
             Invalidate();
             store.Log("胶囊菜单新建主题: " + ct.name + " (" + ct.id + ")");
@@ -4310,7 +4322,7 @@ namespace WorkCountdown
         {
             settings.ui.alwaysOnTop = on;
             KeepTopMost();
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Invalidate();
             store.Log("胶囊菜单窗口置顶: " + (on ? "开" : "关"));
         }
@@ -4333,7 +4345,7 @@ namespace WorkCountdown
             e.leadMinutes = 0;
             if (settings.events == null) settings.events = new List<ReminderEvent>();
             settings.events.Add(e);
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Recompute();
             ShowBalloon("已添加：" + e.title + " " + start.ToString("HH:mm") + "–" + end.ToString("HH:mm") +
                 (string.IsNullOrEmpty(e.place) ? "" : "\r\n" + e.place));
@@ -4383,7 +4395,7 @@ namespace WorkCountdown
             {
                 settings.ui.alwaysOnTop = miTop.Checked;
                 KeepTopMost();
-                store.Save(settings);
+                SaveSettingsQuietly("设置变化");
             };
             var miStart = new ToolStripMenuItem("开机自动启动");
             miStart.CheckOnClick = true;
@@ -4442,10 +4454,11 @@ namespace WorkCountdown
                 dlg.Filter = "配置文件 (*.json)|*.json";
                 dlg.FileName = "上班工具箱配置.json";
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                if (store.Export(settings, dlg.FileName))
+                var exported = store.Export(settings, dlg.FileName);
+                if (exported.Succeeded)
                     ShowBalloon("配置已导出\r\n" + dlg.FileName);
                 else
-                    ShowBalloon("导出失败，详情见 widget.log");
+                    ShowBalloon("导出失败：" + exported.Message);
             }
         }
 
@@ -4456,19 +4469,24 @@ namespace WorkCountdown
                 dlg.Title = "导入配置";
                 dlg.Filter = "配置文件 (*.json)|*.json";
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                var loaded = store.Import(dlg.FileName);
-                if (loaded == null)
+                var imported = store.Import(dlg.FileName);
+                if (!imported.Succeeded)
                 {
-                    ShowBalloon("导入失败：文件不是有效的配置文件");
+                    ShowBalloon("导入失败：" + imported.Message);
                     return;
                 }
-                settings = loaded;
-                store.Save(settings);
+                settings = imported.Settings;
+                var saved = SaveSettingsQuietly("导入配置");
                 ApplySettings();
                 RequestRefresh(false);
                 RequestCalendar(false);
                 Invalidate();
-                ShowBalloon("配置已导入");
+                if (saved.IsFailed)
+                    ShowBalloon("配置已导入，但没有保存成功：\r\n" + saved.Message + "\r\n上一份有效配置没有被改动。");
+                else if (saved.IsSkipped)
+                    ShowBalloon("配置已导入（本次运行不写配置）");
+                else
+                    ShowBalloon("配置已导入");
             }
         }
 
@@ -4481,7 +4499,7 @@ namespace WorkCountdown
                 dlg.TopMost = true;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    settings = store.Load();
+                    settings = store.Load().Settings;
                     ApplySettings();
                     RequestRefresh(false);
                     RequestCalendar(false);
@@ -4555,7 +4573,7 @@ namespace WorkCountdown
                 var plan = Policy.Build(settings, DateTime.Today);
                 settings.exceptions.Add(new HolidayEntry { date = key, kind = plan.isWorkday ? "off" : "work" });
             }
-            store.Save(settings);
+            SaveSettingsQuietly("设置变化");
             Recompute();
         }
 

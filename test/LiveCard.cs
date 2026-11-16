@@ -21,7 +21,7 @@ class LiveCard
         Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
         Application.EnableVisualStyles();
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         var snap = new AttendanceSnapshot();
         snap.ok = true;
         snap.clockIn = DateTime.Today.AddHours(9).AddMinutes(2);

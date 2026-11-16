@@ -22,7 +22,7 @@ class GlowCard
         var store = new SettingsStore();
         foreach (string mode in new[] { "classic", "corner", "bar", "all" })
         {
-            var s = store.Load();
+            var s = store.Load().Settings;
             s.ui.edge = "free";
             s.ui.reducedMotion = false;
             s.ui.cardGlow = mode;

@@ -23,7 +23,7 @@ class CustomThemeShot
         Directory.CreateDirectory(dir);
 
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         var ct = new CustomTheme();
         ct.id = "my-test";
         ct.name = "夜航橙";

@@ -84,7 +84,7 @@ class FlowFade
     static Bitmap Card(double phase, int w, int h)
     {
         var store = new SettingsStore();
-        var s = store.Load();
+        var s = store.Load().Settings;
         s.ui.reducedMotion = false;
         var snap = new AttendanceSnapshot();
         snap.ok = true;
