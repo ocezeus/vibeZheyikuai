@@ -123,6 +123,8 @@ namespace WorkCountdown
         private int lastNickClickAt;              // 双击「昵称」胶囊：记上一次点的时间
         private bool lastMouseInside;             // 拿不到真实光标时（锁屏 / 无输入桌面）判断点击落点用
         private int contactScroll;                // 对话列表滚动窗口起点（抽屉横排 / 双栏竖排共用）
+        private int historyScroll;                // 历史页往上翻了几条（0 = 最新一屏）
+        private int historySettleMs = 420;        // 这次重画动画至少跑多久（历史页 760ms，其它 420ms）
         private string deleteId = "";             // 右键选中的对话：该对话上显示「删除」按钮
         private NoteWheelFilter wheelFilter;      // 面板开着时收滚轮（别的窗口拿到焦点也能滚）
 
@@ -227,6 +229,9 @@ namespace WorkCountdown
         public string DeleteId { get { return deleteId; } }
         /// <summary>对话列表滚动窗口的起点（0 = 最前面）。</summary>
         public int ContactScroll { get { return contactScroll; } }
+        public int HistoryScroll { get { return historyScroll; } }
+
+
         /// <summary>当前能同时显示多少个对话（抽屉 4 / 8 个，双栏按高度算）。</summary>
         public int VisibleContactCount { get { return columns ? ColumnsVisibleCount() : DrawerVisibleContacts * DrawerRows; } }
 
@@ -366,6 +371,7 @@ namespace WorkCountdown
                 int target = S(columns ? ColumnsHDip : DrawerContactsPanelHDip);
                 if (Math.Abs(target - heightTo) > 1) SetState(PanelState.Contacts, false);
             }
+            if (historyScroll > HistoryMaxScroll()) historyScroll = HistoryMaxScroll();
             BuildHits();
             Invalidate();
         }
@@ -410,8 +416,11 @@ namespace WorkCountdown
             }
             animTick++;
             Invalidate();
+            // 历史页 8 行按 45ms 一行错峰淡入，最后一行要 ~535ms 才全不透明；
+            // 以前 420ms 就停 anim，最后一行常停在半透明，看起来像「最新一条不显示」。
+            int settle = historySettleMs;
             int lastAct = Math.Max(stateAt, sentAt);
-            if (!closing && Environment.TickCount - lastAct > 420 && !heightAnimating) anim.Stop();
+            if (!closing && Environment.TickCount - lastAct > settle && !heightAnimating) anim.Stop();
         }
 
         /// <summary>
@@ -445,6 +454,8 @@ namespace WorkCountdown
         private void SetState(PanelState s, bool historyHeight)
         {
             state = s;
+            historyScroll = 0;
+            historySettleMs = s == PanelState.History ? 760 : 420;
             stateAt = Environment.TickCount;
             sentAt = 0;
             sentPrevCount = 0;
@@ -582,6 +593,29 @@ namespace WorkCountdown
             Invalidate();
         }
 
+        /// <summary>历史页还能往上翻几条（0 = 一屏装得下）。</summary>
+        internal int HistoryMaxScroll()
+        {
+            if (string.IsNullOrEmpty(selectedId) || note == null) return 0;
+            var t = note.Thread(selectedId);
+            int n = t == null ? 0 : t.messages.Count;
+            return Math.Max(0, n - NoteSettings.HistoryRows);
+        }
+
+        /// <summary>历史页翻一页（delta &gt; 0 = 看更早的）。到头上就不动，返回是否真的动了。</summary>
+        public bool ScrollHistory(int delta)
+        {
+            if (delta == 0) return false;
+            int before = historyScroll;
+            historyScroll += delta;
+            int max = HistoryMaxScroll();
+            if (historyScroll < 0) historyScroll = 0;
+            if (historyScroll > max) historyScroll = max;
+            if (before == historyScroll) return false;
+            Invalidate();
+            return true;
+        }
+
         /// <summary>右键某个对话：在该对话上显示「删除」按钮。</summary>
         public void ShowDelete(string id)
         {
@@ -633,13 +667,18 @@ namespace WorkCountdown
         {
             if (closing || IsDisposed || !Visible) return false;
             if (editingField || state == PanelState.Add) return false;
-            if (note.contacts.Count <= VisibleContactCount) return false;
             long lp = lParam.ToInt64();
             int x = (short)(lp & 0xffff);
             int y = (short)((lp >> 16) & 0xffff);
             if (!Bounds.Contains(new Point(x, y))) return false;
             int delta = (short)(((wParam.ToInt64() >> 16) & 0xffff));
             if (delta == 0) return false;
+            // 历史页：先在历史记录里往上翻（能看到更早的），翻到头再退回对话列表滚动
+            if (state == PanelState.History && HistoryMaxScroll() > 0)
+            {
+                if (ScrollHistory(delta > 0 ? 1 : -1)) return true;
+            }
+            if (note.contacts.Count <= VisibleContactCount) return false;
             ScrollContacts(delta > 0 ? -1 : 1);
             return true;
         }
@@ -728,6 +767,10 @@ namespace WorkCountdown
             base.OnMouseWheel(e);
             // 正常情况走消息过滤器（别的窗口拿焦点也能滚）；这里是焦点本来就在面板上的兜底
             if (closing || editingField || state == PanelState.Add) return;
+            if (state == PanelState.History && HistoryMaxScroll() > 0)
+            {
+                if (ScrollHistory(e.Delta > 0 ? 1 : -1)) return;
+            }
             if (note.contacts.Count <= VisibleContactCount) return;
             ScrollContacts(e.Delta > 0 ? -1 : 1);
         }
@@ -1028,6 +1071,7 @@ namespace WorkCountdown
                 status = "";
                 statusAt = Environment.TickCount;
                 sentPrevCount = prevCount;
+                historyScroll = 0;   // 发完自动回到最新一屏
                 sentAt = Environment.TickCount;
                 if (fieldEditor != null && !fieldEditor.IsDisposed) fieldEditor.ClearText();
                 anim.Start();
@@ -1557,25 +1601,47 @@ namespace WorkCountdown
                 }
                 return;
             }
-            // 历史：最近 8 条。固定行高 → 新消息从底部进来、老消息整体上移一位，不会整块重排
-            DrawText(g, "最近 8 条 · 更早的不再保留", fTiny, Alpha(Dim, (int)(255 * a)), body.X, top);
+            // 历史：一屏 8 条；本地最多留 NoteSettings.MaxMessages（16）条，更早的用滚轮往上翻。
+            // 固定行高 → 新消息从底部进来、老消息整体上移一位，不会整块重排。
+            int rowsShow = NoteSettings.HistoryRows;
+            int count = thread.messages.Count;
+            int maxScroll = Math.Max(0, count - rowsShow);
+            if (historyScroll > maxScroll) historyScroll = maxScroll;
+            if (historyScroll < 0) historyScroll = 0;
+            int endIdx = count - historyScroll;
+            int startIdx = Math.Max(0, endIdx - rowsShow);
+            string histTitle;
+            if (count <= rowsShow) histTitle = "最近 " + count + " 条";
+            else if (historyScroll == 0) histTitle = "最近 " + NoteSettings.MaxMessages + " 条 · 滚轮看更早";
+            else histTitle = "往上翻了 " + historyScroll + " 条 · 滚轮继续 / 翻到底看最新";
+            DrawText(g, histTitle, fTiny, Alpha(Dim, (int)(255 * a)), body.X, top);
             int rowTop = top + S(16);
-            int rowH2 = columns ? S(38) : S(36);
-            int show = Math.Min(NoteSettings.MaxMessages, Math.Max(1, (body.Height - S(20)) / rowH2));
-            int start = Math.Max(0, thread.messages.Count - show);
-            int lastIdx = thread.messages.Count - 1;
-            for (int i = start; i < thread.messages.Count; i++)
+            int rowH2 = columns ? S(34) : S(36);
+            int lastIdx = count - 1;
+            for (int i = startIdx; i < endIdx; i++)
             {
-                double rowA = Clamp01(((Environment.TickCount - stateAt) - (i - start) * 45.0) / 220.0);
+                double rowA = Clamp01(((Environment.TickCount - stateAt) - (i - startIdx) * 45.0) / 220.0);
                 int ra = (int)(255 * a * rowA);
                 if (ra <= 0) continue;
-                int y = rowTop + (i - start) * rowH2;
+                int y = rowTop + (i - startIdx) * rowH2;
                 if (enter < 1 && i == lastIdx)
                 {
                     y += (int)Math.Round(S(12) * (1 - Ease(enter)));
                     ra = (int)(ra * enter);
                 }
                 DrawHistoryRow(g, body, thread.messages[i], y, rowH2, ra);
+            }
+            if (maxScroll > 0)
+            {
+                int shown = Math.Max(1, endIdx - startIdx);
+                int trackH = Math.Max(S(20), shown * rowH2 - S(6));
+                int barH = Math.Max(S(14), trackH * rowsShow / Math.Max(1, count));
+                int barY = rowTop + (int)((trackH - barH) * (maxScroll - historyScroll) / (double)Math.Max(1, maxScroll));
+                int bx = body.Right - S(3);
+                using (var tb = new SolidBrush(Alpha(Ink, (int)(55 * a))))
+                    g.FillRectangle(tb, new Rectangle(bx, rowTop, S(3), trackH));
+                using (var bb = new SolidBrush(Alpha(Accent, (int)(210 * a))))
+                    g.FillRectangle(bb, new Rectangle(bx, barY, S(3), barH));
             }
         }
 

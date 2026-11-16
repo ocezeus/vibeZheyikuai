@@ -381,8 +381,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "3.7.0/3.7.0");
-            Check("程序集版本是 3.7.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "3.7.0.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "3.8.0/3.8.0");
+            Check("程序集版本是 3.8.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "3.8.0.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");
@@ -823,7 +823,7 @@ internal static class Test
                 "Microsoft YaHei UI/Microsoft YaHei");
         }
 
-        // ---- 小纸条：ID / 8 条 / 联系人 / MQTT / JSON ----
+        // ---- 小纸条：ID / 16 条 / 联系人 / MQTT / JSON ----
         {
             var n = new NoteSettings();
             n.Normalize();
@@ -840,14 +840,15 @@ internal static class Test
             Check("备注最多 8 个字", n.Contact("11788").remark.Length.ToString(), "8");
 
             var th = n.Thread("62015");
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < 20; i++)
             {
                 bool incoming = i % 2 == 0;
                 var noteMsg = new NoteMessage(incoming ? "62015" : "48372", incoming ? "48372" : "62015", "消息" + i, 1731400000 + i);
                 n.Append(noteMsg, incoming);
             }
-            Check("每对 ID 只留 8 条", th.messages.Count + "/" + th.messages[0].text + "/" + th.messages[7].text, "8/消息2/消息9");
-            Check("未读只算收到的", th.unread.ToString(), "5");
+            Check("每对 ID 只留 16 条", th.messages.Count + "/" + th.messages[0].text + "/" + th.messages[15].text, "16/消息4/消息19");
+            Check("历史页一屏 8 条", NoteSettings.HistoryRows.ToString(), "8");
+            Check("未读只算收到的", th.unread.ToString(), "10");
             n.MarkRead("62015");
             Check("读完未读清零", th.unread + "/" + n.TotalUnread(), "0/0");
 

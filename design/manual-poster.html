@@ -124,10 +124,10 @@
 <header>
   <div class="lead">
     <h1>上班工具箱 · 一图说明书</h1>
-    <p class="sub">一个贴在屏幕边缘的 Windows 悬浮窗：看下班、看日程、看工资，还能用 5 位数字找同事、用 5 位字符开一个对话发两句「小纸条」。接不接飞书都能用；不联网时按班次推算。v3.7.0 起可以整块换一套界面风格（六套）。</p>
+    <p class="sub">一个贴在屏幕边缘的 Windows 悬浮窗：看下班、看日程、看工资，还能用 5 位数字找同事、用 5 位字符开一个对话发两句「小纸条」。接不接飞书都能用；不联网时按班次推算。v3.7.0 起可以整块换一套界面风格（六套）；v3.8.0 小纸条历史保留 16 条、一屏 8 条可滚动。</p>
   </div>
   <div class="version">
-    <div class="v">v3.7.0</div>
+    <div class="v">v3.8.0</div>
     <div class="build">Windows · 单实例 · 150% DPI · 离线可用</div>
   </div>
 </header>
@@ -246,13 +246,13 @@
         </figure>
         <figure style="margin:0">
           <img src="../note-columns.png" style="width:262px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="小纸条 极简双栏">
-          <figcaption>极简双栏（C）：左边对话列表（名字 + 对方 ID），右边 8 条历史</figcaption>
+          <figcaption>极简双栏（C）：左边对话列表（名字 + 对方 ID），右边历史一屏 8 条（最多 16 条，滚轮往上翻）</figcaption>
         </figure>
       </div>
       <div class="shotwrap" style="margin-top:14px">
         <figure style="margin:0">
           <img src="../note-delete.png" style="width:372px;border-radius:14px;border:1px solid rgba(255,255,255,.06);display:block" alt="小纸条 对话多了 右键删除">
-          <figcaption>对话多了：滚轮往下翻；右键对话 → 红色「删除」，连本机 8 条一起删</figcaption>
+          <figcaption>对话多了：滚轮往下翻；右键对话 → 红色「删除」，连本机 16 条一起删</figcaption>
         </figure>
       </div>
       <div class="shotwrap" style="margin-top:14px">
@@ -273,9 +273,9 @@
         <div class="item"><b>备注优先</b><p>本机给对话写的备注优先级最高：备注 ＞ 对方昵称 ＞ ID / 对话码</p></div>
         <div class="item"><b>改名 / 备注</b><p>双击对话名字就地改（≤8 字）；这段备注会优先显示在对话列表和聊天头部</p></div>
         <div class="item"><b>保留 ID</b><p>历史行左边、双栏标题里始终能看到对方 ID，看到就能用「＋ 新建对话」按 5 位数字建一对一</p></div>
-        <div class="item"><b>看消息</b><p>点 / hover 对话看最后一条 + 输入框；点输入框长高看最近 8 条</p></div>
+        <div class="item"><b>看消息</b><p>点 / hover 对话看最后一条 + 输入框；点输入框长高看历史（一屏 8 条，最多 16 条，滚轮往上翻）</p></div>
         <div class="item"><b>对话多了</b><p>v3.6：抽屉式列表页一屏<b>两排</b>（4×2 = 8 个，≤4 个对话时还是一排），滚轮往下翻，右边有滚动提示；双栏竖排一屏 5 行</p></div>
-        <div class="item"><b>右键删除</b><p>右键某个对话 → 右半边出红色「删除」，点一下连本机这段 8 条消息一起删</p></div>
+        <div class="item"><b>右键删除</b><p>右键某个对话 → 右半边出红色「删除」，点一下连本机这段 16 条消息一起删</p></div>
         <div class="item"><b>发消息</b><p>回车发一行（最多 200 字），发完输入框留着可以接着打；未读角标同步</p></div>
         <div class="item"><b>收到时</b><p>卡片圆角边框连闪 2 次；没读时每 5 秒轻闪，读完即停</p></div>
         <div class="item"><b>两套样式</b><p>抽屉式 A / 极简双栏 C，设置 → 纸条 里切，数据一致</p></div>
@@ -289,7 +289,7 @@
         <span class="pill">边框</span> 卡片外描边 1.8 DIP（比之前粗一点，原来 1 DIP）<br>
         <span class="pill">主题</span> 一对一走对方 ID；对话码走房间主题 <span class="kbd">xzt/v1/room/&lt;hex&gt;</span><br>
         <span class="pill">中继</span> 默认 <span class="kbd">broker.hivemq.com:1883</span>，设置里可改地址 / 端口 + 测试连接<br>
-        <span class="pill">边界</span> 明文转发、不存离线消息；每个对话只留最近 8 条
+        <span class="pill">边界</span> 明文转发、不存离线消息；每个对话最多留最近 16 条（历史一屏 8 条）
       </div>
       <div class="note">对话码没有密码，谁输入同一个码谁就进这个对话，别用公司名 / 工号这类猜得到的码；公共中继明文、不存离线消息。</div>
     </div>
@@ -452,7 +452,7 @@
       <div class="li"><b>昵称</b><span>≤12 字，别人加你 / 群里发消息直接显示</span></div>
       <div class="li"><b>中继</b><span>地址 + 端口 + 测试连接</span></div>
       <div class="li"><b>对话</b><span>列表显示 名字 · 对话码 / ID；可改名 / 删除</span></div>
-      <div class="li"><b>存储</b><span>每个对话只留最近 8 条</span></div>
+      <div class="li"><b>存储</b><span>每个对话最多留最近 16 条（历史一屏 8 条）</span></div>
       <div class="li"><b>未读</b><span>面板角标 + 卡片边框闪</span></div>
     </div>
   </div>
@@ -659,7 +659,7 @@
 </section>
 
 <div class="footer">
-  <div><b>上班工具箱 v3.7.0</b> · 一图说明书 · 2026-11-16</div>
+  <div><b>上班工具箱 v3.8.0</b> · 一图说明书 · 2026-11-16</div>
   <div>设置入口：卡片右上角 ⚙ &nbsp;·&nbsp; 小纸条入口：右上角 ✈ &nbsp;·&nbsp; 工资入口：右上角 ¥ &nbsp;·&nbsp; 托盘：右键托盘图标</div>
 </div>
 

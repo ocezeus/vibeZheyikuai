@@ -11,7 +11,7 @@ namespace WorkCountdown
     /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
     public static class AppInfo
     {
-        public const string Version = "3.7.0";
+        public const string Version = "3.8.0";
     }
 
     public class HolidayEntry
@@ -872,7 +872,7 @@ namespace WorkCountdown
         }
     }
 
-    /// <summary>一条小纸条消息；本地只留最近 8 条。</summary>
+    /// <summary>一条小纸条消息；本地只留最近 16 条。</summary>
     public class NoteMessage
     {
         public string from { get; set; }        // 发送方 5 位 ID
@@ -901,7 +901,7 @@ namespace WorkCountdown
         }
     }
 
-    /// <summary>和某一个联系人的会话：最多 8 条消息 + 未读数。</summary>
+    /// <summary>和某一个联系人的会话：最多 16 条消息 + 未读数。</summary>
     public class NoteThread
     {
         public string contact { get; set; }
@@ -911,10 +911,13 @@ namespace WorkCountdown
         public NoteThread() { contact = ""; messages = new List<NoteMessage>(); unread = 0; }
     }
 
-    /// <summary>小纸条设置：本机 ID、面板样式、公共中继、对话（个人 ID / 对话码）、8 条消息。</summary>
+    /// <summary>小纸条设置：本机 ID、面板样式、公共中继、对话（个人 ID / 对话码）、16 条消息。</summary>
     public class NoteSettings
     {
-        public const int MaxMessages = 8;
+        public const int MaxMessages = 16;
+
+        /// <summary>历史页一屏显示几条（再多的地方用鼠标滚轮往上翻）。</summary>
+        public const int HistoryRows = 8;
         public const int MaxText = 200;
         public const int MaxRemark = 8;
         public const int MaxNick = 12;
@@ -1067,7 +1070,7 @@ namespace WorkCountdown
         }
 
         /// <summary>
-        /// 收到 / 发出时把消息塞进对应会话，超过 8 条从最旧的丢。返回 true 表示会话里新增了。
+        /// 收到 / 发出时把消息塞进对应会话，超过 16 条从最旧的丢。返回 true 表示会话里新增了。
         /// 对话码消息的 to 是 5 位码（from 仍是发送者的个人 ID），会话键就是那个码。
         /// </summary>
         public bool Append(NoteMessage m, bool incoming)

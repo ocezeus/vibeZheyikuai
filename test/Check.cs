@@ -3063,6 +3063,52 @@ class Check
                     (int)Get(p, "sentAt") != 0, "sentAt=" + Get(p, "sentAt"));
             }
 
+            // ---- v3.8.0：小纸条保留 16 条 + 历史页一屏 8 条、滚轮往上翻 ----
+            {
+                var hs = new Settings();
+                hs.lark.enabled = false;
+                hs.calendarEnabled = false;
+                hs.note.id = "48372";
+                hs.note.AddContact("62015", "阿哲");
+                var hth = hs.note.Thread("62015");
+                for (int i = 0; i < 20; i++)
+                {
+                    bool incM = i % 2 == 0;
+                    hs.note.Append(new NoteMessage(incM ? "62015" : "48372", incM ? "48372" : "62015", "消息" + i, 1731400000 + i), incM);
+                }
+                Ok("每个对话最多保留 16 条（从最旧的丢）",
+                    hth.messages.Count == 16 && hth.messages[0].text == "消息4" && hth.messages[15].text == "消息19",
+                    hth.messages.Count + " 条 / 首条 " + hth.messages[0].text);
+                Ok("历史页一屏固定 8 条", NoteSettings.HistoryRows == 8, "HistoryRows=" + NoteSettings.HistoryRows);
+
+                using (var hp = new NotePanelForm(hs, Themes.Get("midnight"), card, true, null, null, null, null, null))
+                {
+                    var stateType = hp.GetType().GetNestedType("PanelState", BindingFlags.NonPublic);
+                    Call(hp, "SelectContact", "62015", false);
+                    Ok("刚进历史页先显示最新一屏（滚动 0）",
+                        (int)Get(hp, "historyScroll") == 0, "scroll=" + Get(hp, "historyScroll"));
+                    Ok("16 条 → 最多能往上翻 8 条（一屏 8）",
+                        (int)Call(hp, "HistoryMaxScroll") == 8, "max=" + Call(hp, "HistoryMaxScroll"));
+                    Ok("往上翻一条：滚动 +1", (bool)Call(hp, "ScrollHistory", 1) && (int)Get(hp, "historyScroll") == 1,
+                        "scroll=" + Get(hp, "historyScroll"));
+                    Call(hp, "ScrollHistory", -99);
+                    Ok("往下翻到头夹到 0，且不重复触发", (int)Get(hp, "historyScroll") == 0 && !(bool)Call(hp, "ScrollHistory", -1),
+                        "scroll=" + Get(hp, "historyScroll"));
+                    Call(hp, "ScrollHistory", 99);
+                    Ok("往上翻到头夹到 8，且不重复触发", (int)Get(hp, "historyScroll") == 8 && !(bool)Call(hp, "ScrollHistory", 1),
+                        "scroll=" + Get(hp, "historyScroll"));
+                    Call(hp, "SetState", Enum.Parse(stateType, "History"), true);
+                    Ok("重新进历史页会回到最新一屏", (int)Get(hp, "historyScroll") == 0, "scroll=" + Get(hp, "historyScroll"));
+                    // 历史页动画要跑 760ms（8 行错峰淡入最后一行 ~535ms 才完成）；聊天态仍是 420ms
+                    Call(hp, "SetState", Enum.Parse(stateType, "History"), true);
+                    Ok("历史页动画跑 760ms（最后一行能淡入完成）",
+                        (int)Get(hp, "historySettleMs") == 760, "settle=" + Get(hp, "historySettleMs"));
+                    Call(hp, "SetState", Enum.Parse(stateType, "Chat"), false);
+                    Ok("聊天态动画仍是 420ms", (int)Get(hp, "historySettleMs") == 420,
+                        "settle=" + Get(hp, "historySettleMs"));
+                }
+            }
+
             // 编辑窗样式：圆角；改备注编辑窗保持普通输入框样式（用户澄清：要放大/居中的是联系人名字，不是编辑窗）
             var edit = new Settings();
             edit.lark.enabled = false;
