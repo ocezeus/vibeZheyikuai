@@ -329,7 +329,7 @@ namespace WorkCountdown
             tapeT.Interval = 50;
             tapeT.Tick += delegate { StepTapeFlow(); };
 
-            ApplySettingsChange(settings);
+            apply.Apply(settings);
             BackColor = theme.bgBottom;
             collapsed = settings.ui.edge != "free";
             Size = collapsed ? new Size(S(DesignCollapsedW), S(DesignCollapsedH)) : new Size(S(DesignExpandedW), ExpandedH);
@@ -1447,19 +1447,12 @@ namespace WorkCountdown
         }
 
         /// <summary>
-        /// 按当前 settings 重新走一次变化计划（构造 / UI 冒烟测试用）。
-        /// 生产调用点直接传下一份配置；这里不再手写字段比较或副作用顺序。
+        /// UI 冒烟入口：按当前 settings 重新走一次变化计划。生产调用点直接
+        /// apply.Apply(下一份配置)，这里只是让界面探针能重放「应用当前配置」。
         /// </summary>
-        private void ApplySettings()
+        internal void ApplySettings()
         {
-            ApplySettingsChange(settings);
-        }
-
-        /// <summary>按实际变化应用下一份规范化配置；提交失败时调用者不会走到这里。</summary>
-        private SettingsChangePlan ApplySettingsChange(Settings next)
-        {
-            if (next == null) return new SettingsChangePlan();
-            return apply.Apply(next);
+            apply.Apply(settings);
         }
 
         private static bool RelayDisabledByEnvironment()
@@ -3735,7 +3728,7 @@ namespace WorkCountdown
                 dlg.TopMost = true;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    ApplySettingsChange(store.Load().Settings);
+                    apply.Apply(store.Load().Settings);
                     RequestRefresh(false);
                     RequestCalendar(false);
                     RequestOutlook(false);
@@ -4605,7 +4598,7 @@ namespace WorkCountdown
                 dlg.TopMost = true;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    ApplySettingsChange(store.Load().Settings);
+                    apply.Apply(store.Load().Settings);
                     RequestRefresh(false);
                     RequestCalendar(false);
                     Invalidate();

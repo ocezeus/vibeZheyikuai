@@ -1709,7 +1709,7 @@ class Check
                         "初始置顶=" + on + " 摘掉后=" + (!lost) + " 补回=" + back);
 
                     s.ui.alwaysOnTop = false;
-                    Call(form, "ApplySettings");
+                    form.ApplySettings();
                     bool off = (GetWindowLong(h, GwlExStyle) & WsExTopMost) == 0;
                     Ok("关掉置顶后不再强制最上层", off, "WS_EX_TOPMOST=" + (!off));
                 }
@@ -3162,7 +3162,7 @@ class Check
                 Ok("卡片数字字体跟着设置走", big.FontFamily.Name == "Courier New", big.FontFamily.Name);
                 Ok("卡片中文字体跟着设置走", status.FontFamily.Name == "Microsoft YaHei UI", status.FontFamily.Name);
                 s.ui.numberFont = "Consolas";
-                Call(form, "ApplySettings");
+                form.ApplySettings();
                 var big2 = (Font)Get(form, "fontBig");
                 Ok("改字体后卡片即时重建", big2.FontFamily.Name == "Consolas", big2.FontFamily.Name);
             }
@@ -3991,13 +3991,13 @@ class Check
                     openedPanel == null ? "null" : "ok");
 
                 smokeSettings.ui.opacity = 55;
-                Call(smokeForm, "ApplySettings");
+                smokeForm.ApplySettings();
                 var afterAppearance = Get(smokeForm, "notePanel") as NotePanelForm;
                 Ok("外观变化只刷新面板、不关闭面板",
                     ReferenceEquals(openedPanel, afterAppearance) && afterAppearance != null && !afterAppearance.IsDisposed,
                     "same=" + ReferenceEquals(openedPanel, afterAppearance));
 
-                Call(smokeForm, "ApplySettings");
+                smokeForm.ApplySettings();
                 var afterRepeat = Get(smokeForm, "notePanel") as NotePanelForm;
                 Ok("相同配置重复应用不关闭面板",
                     ReferenceEquals(openedPanel, afterRepeat) && afterRepeat != null && !afterRepeat.IsDisposed,

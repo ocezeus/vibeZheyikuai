@@ -113,11 +113,6 @@ namespace WorkCountdown
         public bool LarkFetching { get; set; }
         public bool OutlookFetching { get; set; }
 
-        public string AttendanceError
-        {
-            get { return Attendance == null ? null : Attendance.error; }
-        }
-
         public SyncSnapshot()
         {
             LarkEvents = new List<ReminderEvent>();
@@ -175,16 +170,6 @@ namespace WorkCountdown
         public string Url = "";
         public string Path = "";
         public int LeadMinutes;
-
-        public bool HasSource
-        {
-            get
-            {
-                if (Kind == "file") return !string.IsNullOrWhiteSpace(Path);
-                if (Kind == "graph") return true;
-                return !string.IsNullOrWhiteSpace(Url);
-            }
-        }
     }
 
     internal class OutlookConfig
@@ -229,20 +214,17 @@ namespace WorkCountdown
                 config.Outlook.Account = source.account ?? "";
                 config.Outlook.RefreshToken = source.refreshToken ?? "";
                 config.Outlook.LeadMinutes = Math.Max(0, source.leadMinutes);
-                if (source.calendars != null)
+                // 启用且有来源的日历由 OutlookSettings.Active 统一判定，避免同步模块再写一份过滤规则
+                foreach (var c in source.Active)
                 {
-                    foreach (var c in source.calendars)
-                    {
-                        if (c == null || !c.enabled || !c.HasSource) continue;
-                        var item = new CalendarSourceConfig();
-                        item.Id = c.id ?? "";
-                        item.Name = c.name ?? "";
-                        item.Kind = c.source == "file" || c.source == "graph" ? c.source : "url";
-                        item.Url = c.url ?? "";
-                        item.Path = c.path ?? "";
-                        item.LeadMinutes = Math.Max(0, c.leadMinutes);
-                        config.Outlook.Sources.Add(item);
-                    }
+                    var item = new CalendarSourceConfig();
+                    item.Id = c.id ?? "";
+                    item.Name = c.name ?? "";
+                    item.Kind = c.source == "file" || c.source == "graph" ? c.source : "url";
+                    item.Url = c.url ?? "";
+                    item.Path = c.path ?? "";
+                    item.LeadMinutes = Math.Max(0, c.leadMinutes);
+                    config.Outlook.Sources.Add(item);
                 }
             }
             return config;

@@ -233,10 +233,8 @@ internal static class Test
         ev.start = "2026-11-04 10:05";
         ev.source = "local";
         Check("解析日程时间", Reminders.ParseStart(ev).ToString("HH:mm"), "10:05");
-        Check("提前量到点触发", Reminders.IsDue(s16, ev, new DateTime(2026, 11, 4, 10, 0, 0)).ToString(), "True");
-        Check("没到提醒时间", Reminders.IsDue(s16, ev, new DateTime(2026, 11, 4, 9, 59, 0)).ToString(), "False");
-        Check("开始后 1 分钟内仍提醒", Reminders.IsDue(s16, ev, new DateTime(2026, 11, 4, 10, 5, 30)).ToString(), "True");
-        Check("开始 1 分钟后过期", Reminders.IsDue(s16, ev, new DateTime(2026, 11, 4, 10, 7, 0)).ToString(), "False");
+        // 提前量窗口 / 开始后 60 秒的边界已由 20.2「提前量边界」「开始后 59 秒 / 满 60 秒」经
+        // ReminderEngine.Advance 覆盖；这里不再直接断言 IsDue 的同一规则。
         Check("倒计时说法", Reminders.CountdownText(s16, ev, new DateTime(2026, 11, 4, 10, 0, 0)), "还有 5 分钟");
         Check("倒计时-马上开始", Reminders.CountdownText(s16, ev, new DateTime(2026, 11, 4, 10, 4, 40)), "马上开始");
         s16.events.Add(ev);
@@ -729,22 +727,8 @@ internal static class Test
             try { System.IO.File.Delete(f1); System.IO.File.Delete(f2); } catch { }
         }
 
-        // 10) 同步晚于开始时间时补提醒（Outlook 会开始后才同步下来）
-        {
-            var late = new Settings();
-            late.Normalize();
-            var e = new ReminderEvent();
-            e.start = "2026-11-11 10:00";
-            e.end = "2026-11-11 11:00";
-            DateTime start = new DateTime(2026, 11, 11, 10, 0, 0);
-            Check("晚同步：开始 10 分钟后补提醒", Reminders.IsLateDue(late, e, start.AddMinutes(10)).ToString(), "True");
-            Check("正常提醒窗口内不算补提醒", Reminders.IsLateDue(late, e, start.AddSeconds(30)).ToString(), "False");
-            Check("会议结束后不补提醒", Reminders.IsLateDue(late, e, new DateTime(2026, 11, 11, 11, 1, 0)).ToString(), "False");
-            var noEnd = new ReminderEvent();
-            noEnd.start = "2026-11-11 10:00";
-            Check("没结束时间按 60 分钟兜底", Reminders.IsLateDue(late, noEnd, start.AddMinutes(59)).ToString(), "True");
-            Check("超过 60 分钟不补提醒", Reminders.IsLateDue(late, noEnd, start.AddMinutes(61)).ToString(), "False");
-        }
+        // 10) 同步晚于开始时间时补提醒：规则边界改由 20.2 经 ReminderEngine.Advance 断言
+        //（开始满 60 秒转补提醒、已结束不补、无结束时间 59 分补 / 60 分不补）。
 
         // 10.5) 工作日索引迁移（v3.5 修复：旧设置页把「周一..周日」直接按下标写，和内部 0=周日 差一天）
         {
@@ -1059,6 +1043,7 @@ internal static class Test
                 nz.Thread("62015").messages[0].fromNick.Length + "/" + nz.Thread("62015").messages[0].fromNick,
                 "12/" + new string('m', 12));
 
+            // 中继分发的业务验收只走 AcceptPublish（主题 → 收件箱 / 对话码 / 在线状态），不反射私有方法
             var pr = new NoteRelay(new NoteSettings());
             string profId = null, profNick = null;
             bool profOnline = false;
@@ -1066,11 +1051,33 @@ internal static class Test
             {
                 profId = pid; profNick = pnick; profOnline = ponline;
             };
-            var deliver = typeof(NoteRelay).GetMethod("DeliverPresence",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            deliver.Invoke(pr, new object[] { "62015", NoteRelay.PresenceJson("62015", " 阿哲 ") });
+            pr.AcceptPublish(NoteRelay.PresenceTopic("62015"), NoteRelay.PresenceJson("62015", " 阿哲 "));
             Check("收到在线状态时广播对方的 ID / 昵称 / 在线",
                 profId + "/" + profNick + "/" + profOnline, "62015/阿哲/True");
+
+            var rxSettings = new NoteSettings();
+            rxSettings.id = "48372";
+            var rx = new NoteRelay(rxSettings);
+            NoteIncoming got = null;
+            rx.Message += delegate(NoteIncoming incoming) { got = incoming; };
+            bool inboxRouted = rx.AcceptPublish(NoteRelay.InboxTopic("48372"),
+                NoteRelay.BuildMessageJson("62015", "48372", "你好", 1, "老李"));
+            Check("收件箱主题分发给本机并带发送者昵称",
+                inboxRouted + "/" + (got == null ? "-" : got.from + "/" + got.text + "/" + got.nick),
+                "True/62015/你好/老李");
+
+            var roomRelay = new NoteRelay(rxSettings);
+            NoteIncoming roomGot = null;
+            roomRelay.Message += delegate(NoteIncoming incoming) { roomGot = incoming; };
+            string roomCodeTopic = NoteRelay.RoomTopic("甲乙丙丁戊");
+            bool crossed = roomRelay.AcceptPublish(roomCodeTopic,
+                NoteRelay.BuildMessageJson("62015", "00000", "串台", 2));
+            bool roomed = roomRelay.AcceptPublish(roomCodeTopic,
+                NoteRelay.BuildMessageJson("62015", "甲乙丙丁戊", "进群", 3));
+            Check("对话码主题拒绝串台、接受同码",
+                crossed + "/" + (roomed && roomGot != null ? roomGot.text : "-"), "False/进群");
+            Check("无关主题不分发", rx.AcceptPublish("xzt/v1/other/1", "{}").ToString(), "False");
+
             var idleRelay = new NoteRelay(new NoteSettings());
             idleRelay.RefreshSubscriptions();
             Check("未连接时刷新订阅安静返回", idleRelay.Connected.ToString(), "False");
@@ -1365,13 +1372,12 @@ internal static class Test
             Check("预览只停最短停留",
                 holdEngine.HoldUntil(sHold, Ev("preview", "预览", "2026-11-16 10:00", "", "local"), hBase).ToString("HH:mm:ss"), "10:00:06");
 
-            // 20.4 预览不写真实提醒决策状态
+            // 20.4 预览不写真实提醒决策状态：按之后的实际行为断言，不看关闭返回的标志位
             var pvEngine = new ReminderEngine();
-            var pvFb = pvEngine.Dismiss(Ev("preview", "预览", "2026-11-16 10:00", "", "alert"), hBase);
-            var normalFb = pvEngine.Dismiss(Ev("local:dismiss", "普通", "2026-11-16 10:00", "2026-11-16 10:30", "local"), hBase);
-            Check("预览关闭不写状态、普通关闭写状态",
-                pvFb.MarkedNotified + "/" + pvFb.MutedOffWork + "/" + normalFb.MarkedNotified + "/" + pvEngine.NotifiedCount,
-                "False/False/True/1");
+            pvEngine.Dismiss(Ev("preview", "预览", "2026-11-16 10:00", "", "alert"), hBase);
+            Check("预览关闭不写去重状态", pvEngine.NotifiedCount.ToString(), "0");
+            pvEngine.Dismiss(Ev("local:dismiss", "普通", "2026-11-16 10:00", "2026-11-16 10:30", "local"), hBase);
+            Check("普通关闭写去重状态", pvEngine.NotifiedCount.ToString(), "1");
             var sPv = new Settings();
             sPv.Normalize();
             foreach (var f in sPv.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
@@ -1483,9 +1489,8 @@ internal static class Test
 
             var engMute = new ReminderEngine();
             var muteStart = engMute.Advance(sOff, emptySnap, t0, offSig);
-            var muteFb = engMute.Dismiss(muteStart.Decisions[0].Event, t0);
-            Check("关闭下班提醒 = 忽略今天",
-                muteFb.MutedOffWork + "/" + muteFb.MarkedNotified, "True/True");
+            engMute.Dismiss(muteStart.Decisions[0].Event, t0);
+            Check("关闭下班提醒记入去重", engMute.NotifiedCount.ToString(), "1");
             Check("忽略今天后不再弹",
                 engMute.Advance(sOff, emptySnap, t0.AddMinutes(1), offSig).Started.ToString(), "False");
             var nextDay = engMute.Advance(sOff, emptySnap, t0.AddDays(1), offSig);
@@ -1500,16 +1505,15 @@ internal static class Test
             sDis.events.Add(Ev("local:dis", "要关掉的会", "2026-11-16 10:00", "2026-11-16 11:00", "local"));
             var engDis = new ReminderEngine();
             var disOut = engDis.Advance(sDis, emptySnap, new DateTime(2026, 11, 16, 9, 50, 0), noSignals);
-            var disFb = engDis.Dismiss(disOut.Decisions[0].Event, new DateTime(2026, 11, 16, 9, 50, 0));
-            Check("关闭普通提醒记入去重",
-                disFb.MarkedNotified + "/" + disFb.MutedOffWork + "/" + engDis.NotifiedCount, "True/False/1");
+            engDis.Dismiss(disOut.Decisions[0].Event, new DateTime(2026, 11, 16, 9, 50, 0));
+            Check("关闭普通提醒记入去重", engDis.NotifiedCount.ToString(), "1");
             Check("关闭后同一日程不再产生",
                 engDis.Advance(sDis, emptySnap, new DateTime(2026, 11, 16, 9, 51, 0), noSignals).Started.ToString(), "False");
             var engFd = new ReminderEngine();
             var fdOut = engFd.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 50, 20), noSignals);
-            var fdFb = fdOut.Decisions.Count > 0 ? engFd.Dismiss(fdOut.Decisions[0].Event, new DateTime(2026, 11, 16, 11, 50, 20)) : new ReminderFeedback();
-            Check("关闭固定日程提醒只说记入去重",
-                fdFb.MarkedNotified + "/" + fdFb.MutedOffWork, "True/False");
+            int fdBefore = engFd.NotifiedCount;
+            if (fdOut.Decisions.Count > 0) engFd.Dismiss(fdOut.Decisions[0].Event, new DateTime(2026, 11, 16, 11, 50, 20));
+            Check("关闭固定日程提醒记入去重", (engFd.NotifiedCount - fdBefore).ToString(), "1");
             Check("关闭后固定日程不重复",
                 engFd.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 50, 40), noSignals).Started.ToString(), "False");
 
@@ -1796,7 +1800,8 @@ internal static class Test
                 sched.RunAll();
                 Check("AC1 后台异常转为失败结果并清掉在途",
                     (pubs.Count == 1 ? pubs[0].Status : "count") + "/"
-                    + (eng.Snapshot().AttendanceError != null && eng.Snapshot().AttendanceError.IndexOf("adapter 崩了") >= 0)
+                    + (eng.Snapshot().Attendance != null && eng.Snapshot().Attendance.error != null
+                        && eng.Snapshot().Attendance.error.IndexOf("adapter 崩了") >= 0)
                     + "/" + eng.Snapshot().AttendanceFetching,
                     "failed/True/False");
                 att.Respond = delegate(AttendanceReadRequest r) { return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 6, 0)); };
@@ -2916,7 +2921,7 @@ internal static class Test
                         int displayBefore = target.DisplayCalls;
                         var failed = commit.Commit(edited, "测试失败");
                         Check("AC4 保存失败不应用、不切换已应用配置",
-                            failed.IsFailed + "/" + failed.Applied + "/" + failed.ShouldKeepEditing
+                            failed.IsFailed + "/" + failed.Applied + "/" + (!failed.IsSuccess)
                             + "/" + (target.AdoptCalls == adoptBefore) + "/" + (target.DisplayCalls == displayBefore),
                             "True/False/True/True/True");
                         Check("AC4 保存失败保留待修改内容",

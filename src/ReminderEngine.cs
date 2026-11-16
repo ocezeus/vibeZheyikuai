@@ -77,16 +77,6 @@ namespace WorkCountdown
         }
     }
 
-    /// <summary>用户关闭一条提醒之后需要窗口知道的业务反馈。</summary>
-    public class ReminderFeedback
-    {
-        /// <summary>已记入去重，同一事项今天不再提醒。</summary>
-        public bool MarkedNotified { get; set; }
-
-        /// <summary>这次关闭等于「忽略今天的下班提醒」。</summary>
-        public bool MutedOffWork { get; set; }
-    }
-
     /// <summary>
     /// 拥有提醒决策状态的深模块：日程选择、固定日程、补提醒、去重与关闭反馈都在这里。
     /// 输入是明确时间、业务配置和日程快照，输出是 ReminderDecision；窗口只负责展示与交互。
@@ -113,16 +103,10 @@ namespace WorkCountdown
             get { return notified.Count; }
         }
 
-        /// <summary>合并后的日程视图（已排序、已过滤来源）。</summary>
-        public List<ReminderEvent> Agenda(Settings settings, ReminderScheduleSnapshot snapshot)
-        {
-            return BuildAgenda(settings, snapshot);
-        }
-
         /// <summary>最早一个还没开始的日程；调用方不需要先排序。</summary>
         public ReminderEvent NextEvent(Settings settings, ReminderScheduleSnapshot snapshot, DateTime now)
         {
-            foreach (var e in BuildAgenda(settings, snapshot))
+            foreach (var e in Agenda(settings, snapshot))
                 if (Reminders.ParseStart(e) > now) return e;
             return null;
         }
@@ -195,7 +179,7 @@ namespace WorkCountdown
             }
 
             // 3. 日程：正常提前提醒 / 补提醒；同一 tick 只起一条
-            foreach (var e in BuildAgenda(settings, snapshot))
+            foreach (var e in Agenda(settings, snapshot))
             {
                 string key = EventKey(e);
                 if (notified.ContainsKey(key)) continue;
@@ -213,22 +197,22 @@ namespace WorkCountdown
             return outcome;
         }
 
-        /// <summary>用户关闭当前提醒（卡片 ×、全屏关闭、右键关闭都走这里）。</summary>
-        public ReminderFeedback Dismiss(ReminderEvent e, DateTime now)
+        /// <summary>
+        /// 用户关闭当前提醒（卡片 ×、全屏关闭、右键关闭都走这里）。
+        /// 关闭的两种含义都在模块内生效：记入去重（同一事项不再提醒）与下班提醒的「忽略今天」；
+        /// 调用方不需要读返回标志位，下一次 Advance 的结果就是行为。
+        /// </summary>
+        public void Dismiss(ReminderEvent e, DateTime now)
         {
-            var feedback = new ReminderFeedback();
-            if (e == null || e.id == "preview") return feedback;   // 预览不写真实提醒决策状态
-            feedback.MarkedNotified = true;
+            if (e == null || e.id == "preview") return;   // 预览不写真实提醒决策状态
             Remember(EventKey(e), EventExpiry(e));
             if (e.source == "alert")
             {
                 // 下班提醒的 × = 忽略今天（第二天自动恢复）
-                feedback.MutedOffWork = true;
                 mutedOffWorkDay = now.Date;
                 offWorkActive = false;
                 offWorkNext = DateTime.MinValue;
             }
-            return feedback;
         }
 
         /// <summary>右键「忽略今天的下班提醒」。</summary>
@@ -320,7 +304,8 @@ namespace WorkCountdown
             return true;
         }
 
-        private List<ReminderEvent> BuildAgenda(Settings settings, ReminderScheduleSnapshot snapshot)
+        /// <summary>合并后的日程视图：来源过滤、无效项过滤与开始时间排序都在这里，调用方不用先排序。</summary>
+        public List<ReminderEvent> Agenda(Settings settings, ReminderScheduleSnapshot snapshot)
         {
             var list = new List<ReminderEvent>();
             if (settings == null) return list;

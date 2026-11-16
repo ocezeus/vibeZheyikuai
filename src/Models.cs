@@ -304,17 +304,6 @@ namespace WorkCountdown
                 return list;
             }
         }
-
-        public int CachedCount
-        {
-            get
-            {
-                int n = 0;
-                if (calendars != null)
-                    foreach (var c in calendars) if (c != null && c.cached != null) n += c.cached.Count;
-                return n;
-            }
-        }
     }
 
     /// <summary>读一份日历来源的请求：字段是请求时的快照，后台不引用共享 Settings。</summary>

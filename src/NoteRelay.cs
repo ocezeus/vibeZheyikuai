@@ -193,34 +193,47 @@ namespace WorkCountdown
                 string topic;
                 string payload;
                 if (!ParsePublish(flags, body, out topic, out payload)) return;
-                if (topic == InboxTopic(Cfg.id))
-                {
-                    NoteIncoming msg = DecodeMessage(payload);
-                    if (msg != null && Message != null)
-                    {
-                        try { Message(msg); } catch { }
-                    }
-                }
-                else if (topic.StartsWith(RoomTopicPrefix, StringComparison.Ordinal))
-                {
-                    // 对话码对话：payload 里的 to 必须就是这个主题对应的码，防止串台
-                    string code;
-                    if (!ParseRoomTopic(topic, out code)) return;
-                    NoteIncoming msg = DecodeMessage(payload);
-                    if (msg == null || !string.Equals(msg.to, code, StringComparison.Ordinal)) return;
-                    if (Message != null)
-                    {
-                        try { Message(msg); } catch { }
-                    }
-                }
-                else if (topic.StartsWith(PresenceTopicPrefix, StringComparison.Ordinal))
-                {
-                    string pid = topic.Substring(PresenceTopicPrefix.Length);
-                    DeliverPresence(pid, payload);
-                }
+                AcceptPublish(topic, payload);
                 return;
             }
             // SUBACK / PINGRESP / 其它：不影响
+        }
+
+        /// <summary>
+        /// 一条 PUBLISH 的业务分发：收件箱 / 对话码 / 在线状态。网络循环只负责解包，
+        /// 这里同时是测试可走的分发入口（不需要真实连接）：返回 false 表示主题与本模块无关或被拒绝。
+        /// </summary>
+        internal bool AcceptPublish(string topic, string payload)
+        {
+            if (string.IsNullOrEmpty(topic)) return false;
+            if (topic == InboxTopic(Cfg.id))
+                return DeliverMessage(payload, null);
+
+            if (topic.StartsWith(RoomTopicPrefix, StringComparison.Ordinal))
+            {
+                // 对话码对话：payload 里的 to 必须就是这个主题对应的码，防止串台
+                string code;
+                if (!ParseRoomTopic(topic, out code)) return false;
+                return DeliverMessage(payload, code);
+            }
+
+            if (topic.StartsWith(PresenceTopicPrefix, StringComparison.Ordinal))
+            {
+                DeliverPresence(topic.Substring(PresenceTopicPrefix.Length), payload);
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>解出一条小纸条并交给 Message；roomCode 非空时要求 to 等于该码。</summary>
+        private bool DeliverMessage(string payload, string roomCode)
+        {
+            NoteIncoming msg = DecodeMessage(payload);
+            if (msg == null) return false;
+            if (roomCode != null && !string.Equals(msg.to, roomCode, StringComparison.Ordinal)) return false;
+            if (Message == null) return true;
+            try { Message(msg); } catch { }
+            return true;
         }
 
         private void RaiseConnected(bool on)

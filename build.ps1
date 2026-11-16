@@ -105,6 +105,8 @@ $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path $csc)) { throw "找不到 .NET Framework 编译器：$csc" }
 
 $exe = Join-Path $dist 'WorkCountdown.exe'
+# 生产编译需要显式清单（顺序可读、打包审计也看它）。清单和 src\*.cs 不一致时直接失败，
+# 避免新增源码只在 build-tests 的 glob 里编过、正式构建却漏掉。
 $sources = @(
     (Join-Path $src 'Program.cs'),
     (Join-Path $src 'AssemblyInfo.cs'),
@@ -130,6 +132,13 @@ $sources = @(
     (Join-Path $src 'SettingsForm.cs'),
     (Join-Path $src 'FirstRunForm.cs')
 )
+
+$listed = @($sources | ForEach-Object { Split-Path -Leaf $_ })
+$unlisted = @(Get-ChildItem -Path (Join-Path $src '*.cs') | Where-Object { $listed -notcontains $_.Name })
+if ($unlisted.Count -gt 0) {
+    $names = ($unlisted | ForEach-Object { $_.Name }) -join ', '
+    throw ('build.ps1 的源码清单漏了：' + $names + '（加进 $sources，或从 src 移除）')
+}
 
 $cscArgs = @(
     '/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', '/codepage:65001',

@@ -386,7 +386,6 @@ namespace WorkCountdown
         public bool IsSuccess { get { return Save != null && Save.Succeeded && Applied; } }
         public bool IsFailed { get { return Save == null || Save.IsFailed; } }
         public bool IsSkipped { get { return Save != null && Save.IsSkipped; } }
-        public bool ShouldKeepEditing { get { return !IsSuccess; } }
         public string Message { get { return Save == null ? "" : Save.Message; } }
     }
 

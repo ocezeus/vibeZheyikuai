@@ -58,7 +58,6 @@ namespace WorkCountdown
         public Settings Settings { get; private set; }
         public SettingsLoadStatus Status { get; private set; }
         public string Message { get; private set; }
-        public bool IsFallback { get { return Status == SettingsLoadStatus.Fallback; } }
 
         private SettingsLoadResult(Settings settings, SettingsLoadStatus status, string message)
         {

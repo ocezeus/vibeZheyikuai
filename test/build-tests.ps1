@@ -8,6 +8,7 @@
 #   .\test\build-tests.ps1 -NoRun    只编译，不跑
 #
 # 跑之前请确认没有 WorkCountdown 正在写配置；探针都带 WC_NO_SAVE=1，不会回写用户设置。
+# 截图 / 交互 / 历史验收探针不在这两套套件里：用 .\test\build-probes.ps1 逐个编译验证。
 
 param(
     [switch]$NoRun
