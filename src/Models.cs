@@ -120,34 +120,6 @@ namespace WorkCountdown
             return Math.Max(0, s.eventLeadMinutes);
         }
 
-        /// <summary>手动日程 + 飞书日程 + Outlook 日程，按开始时间排序。</summary>
-        public static List<ReminderEvent> Merge(Settings s, List<ReminderEvent> larkEvents)
-        {
-            return Merge(s, larkEvents, null);
-        }
-
-        public static List<ReminderEvent> Merge(Settings s, List<ReminderEvent> larkEvents, List<ReminderEvent> outlookEvents)
-        {
-            var list = new List<ReminderEvent>();
-            if (s.events != null)
-            {
-                foreach (var e in s.events)
-                    if (e != null && ParseStart(e) != DateTime.MinValue) list.Add(e);
-            }
-            if (s.calendarEnabled && larkEvents != null)
-            {
-                foreach (var e in larkEvents)
-                    if (e != null && ParseStart(e) != DateTime.MinValue) list.Add(e);
-            }
-            if (s.outlook != null && s.outlook.HasEnabled && outlookEvents != null)
-            {
-                foreach (var e in outlookEvents)
-                    if (e != null && ParseStart(e) != DateTime.MinValue) list.Add(e);
-            }
-            list.Sort(delegate (ReminderEvent a, ReminderEvent b) { return ParseStart(a).CompareTo(ParseStart(b)); });
-            return list;
-        }
-
         /// <summary>提醒窗口：从「开始时间 - 提前量」到「开始后 1 分钟」（提前量为 0 时也留个窗口）。</summary>
         public static bool IsDue(Settings s, ReminderEvent e, DateTime now)
         {
@@ -171,14 +143,6 @@ namespace WorkCountdown
             if (end == DateTime.MinValue || end <= start) end = start.AddMinutes(60);
             if (now >= end) return false;                       // 已经结束了，不补
             return (now - start).TotalMinutes <= 60;
-        }
-
-        public static ReminderEvent Next(Settings s, List<ReminderEvent> all, DateTime now)
-        {
-            if (all == null) return null;
-            foreach (var e in all)
-                if (ParseStart(e) > now) return e;
-            return null;
         }
 
         /// <summary>「还有 5 分钟」这种说法。</summary>

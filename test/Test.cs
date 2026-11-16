@@ -200,8 +200,9 @@ internal static class Test
         Check("倒计时说法", Reminders.CountdownText(s16, ev, new DateTime(2026, 11, 4, 10, 0, 0)), "还有 5 分钟");
         Check("倒计时-马上开始", Reminders.CountdownText(s16, ev, new DateTime(2026, 11, 4, 10, 4, 40)), "马上开始");
         s16.events.Add(ev);
-        Check("手动日程进入待提醒", Reminders.Merge(s16, null).Count.ToString(), "1");
-        Check("下一个日程", Reminders.Next(s16, Reminders.Merge(s16, null), new DateTime(2026, 11, 4, 10, 0, 0)).title, "产品部周会");
+        var eng16 = new ReminderEngine();
+        Check("手动日程进入待提醒", eng16.Agenda(s16, new ReminderScheduleSnapshot()).Count.ToString(), "1");
+        Check("下一个日程", eng16.NextEvent(s16, new ReminderScheduleSnapshot(), new DateTime(2026, 11, 4, 10, 0, 0)).title, "产品部周会");
         ev.leadMinutes = 30;
         Check("单条日程可覆盖提前量", Reminders.IsDue(s16, ev, new DateTime(2026, 11, 4, 9, 40, 0)).ToString(), "True");
         ev.leadMinutes = 0;
@@ -214,9 +215,9 @@ internal static class Test
         le.start = "2026-11-04 10:30";
         le.source = "lark";
         larkList.Add(le);
-        Check("飞书日程并入待提醒", Reminders.Merge(s16, larkList).Count.ToString(), "2");
+        Check("飞书日程并入待提醒", eng16.Agenda(s16, new ReminderScheduleSnapshot(larkList, null)).Count.ToString(), "2");
         s16.calendarEnabled = false;
-        Check("关掉飞书日程后只剩手动", Reminders.Merge(s16, larkList).Count.ToString(), "1");
+        Check("关掉飞书日程后只剩手动", eng16.Agenda(s16, new ReminderScheduleSnapshot(larkList, null)).Count.ToString(), "1");
 
         // 17. 完全没接飞书的人：按班次推算，不能显示「还没打卡」
         var s17 = new Settings();
@@ -1224,6 +1225,296 @@ internal static class Test
                 + hex(Skins.GlowColor(skinInstrument, midnightTheme)) + "/"
                 + hex(Skins.GlowColor(skinNeon, midnightTheme)),
                 "#3E3F35/#FFB02E/#FF3CAC");
+        }
+
+        // 20. 提醒引擎：日程视图、提醒候选、去重与展示反馈（业务测试只走模块接口）
+        {
+            Func<string, string, string, string, string, ReminderEvent> Ev = delegate(string id, string title, string start, string end, string source)
+            {
+                var e = new ReminderEvent();
+                e.id = id; e.title = title; e.start = start; e.end = end; e.source = source;
+                return e;
+            };
+            var emptySnap = new ReminderScheduleSnapshot();
+            var noSignals = new ReminderSignals();
+            var engine = new ReminderEngine();
+
+            // 20.1 日程视图：调用方不排序、不先 Merge 再 Next
+            var sAgenda = new Settings();
+            sAgenda.Normalize();
+            sAgenda.events.Add(Ev("local:2", "下午", "2026-11-16 15:00", "2026-11-16 15:30", "local"));
+            sAgenda.events.Add(Ev("local:1", "上午", "2026-11-16 10:00", "2026-11-16 10:30", "local"));
+            sAgenda.events.Add(Ev("local:bad", "没有开始", "", "", "local"));
+            var lark = new List<ReminderEvent>();
+            lark.Add(Ev("lark:2", "午后", "2026-11-16 14:00", "2026-11-16 14:30", "lark"));
+            lark.Add(Ev("lark:1", "最早", "2026-11-16 09:30", "2026-11-16 10:00", "lark"));
+            var ol = new List<ReminderEvent>();
+            ol.Add(Ev("ol:1", "更早", "2026-11-16 08:45", "2026-11-16 09:15", "outlook"));
+            sAgenda.outlook.calendars.Add(new CalendarSource { id = "cal-1", name = "工作日历", source = "url", url = "https://example.com/x.ics", enabled = true });
+            sAgenda.outlook.enabled = true;
+            var snapAgenda = new ReminderScheduleSnapshot(lark, ol);
+            string order = "";
+            foreach (var e in engine.Agenda(sAgenda, snapAgenda)) order += (order.Length == 0 ? "" : "/") + e.title;
+            Check("无序输入下 Agenda 仍按开始时间排序并过滤无效项", order, "更早/最早/上午/午后/下午");
+            var next = engine.NextEvent(sAgenda, snapAgenda, new DateTime(2026, 11, 16, 8, 0, 0));
+            Check("无序输入下 NextEvent 返回最早的未来日程", next == null ? "null" : next.title, "更早");
+            next = engine.NextEvent(sAgenda, snapAgenda, new DateTime(2026, 11, 16, 9, 45, 0));
+            Check("NextEvent 跳过已经开始的事项", next == null ? "null" : next.title, "上午");
+            sAgenda.calendarEnabled = false;
+            next = engine.NextEvent(sAgenda, snapAgenda, new DateTime(2026, 11, 16, 9, 0, 0));
+            Check("关掉飞书日程后 NextEvent 只剩手动 + Outlook", next == null ? "null" : next.title, "上午");
+
+            // 20.2 提前量边界、开始后 60 秒、补提醒 60 分钟上限、无结束时间兜底
+            var sDue = new Settings();
+            sDue.Normalize();
+            sDue.eventLeadMinutes = 10;
+            sDue.events.Add(Ev("local:due", "周会", "2026-11-16 10:00", "2026-11-16 11:00", "local"));
+            var engDue = new ReminderEngine();
+            bool beforeDue = engDue.Advance(sDue, emptySnap, new DateTime(2026, 11, 16, 9, 49, 59), noSignals).Started;
+            var dueOut = engDue.Advance(sDue, emptySnap, new DateTime(2026, 11, 16, 9, 50, 0), noSignals);
+            Check("提前量边界：差 1 秒不提醒、正点提醒",
+                beforeDue + "/" + dueOut.Decisions.Count + "/" + (dueOut.Decisions.Count > 0 ? dueOut.Decisions[0].Reason : "-"), "False/1/due");
+            Check("重复推进不重复产生同一提醒",
+                engDue.Advance(sDue, emptySnap, new DateTime(2026, 11, 16, 9, 50, 0), noSignals).Started.ToString(), "False");
+            Check("开始后 59 秒仍在提前提醒窗口",
+                new ReminderEngine().Advance(sDue, emptySnap, new DateTime(2026, 11, 16, 10, 0, 59), noSignals).Started.ToString(), "True");
+            var lateOut = new ReminderEngine().Advance(sDue, emptySnap, new DateTime(2026, 11, 16, 10, 1, 0), noSignals);
+            Check("开始满 60 秒转为补提醒",
+                lateOut.Decisions.Count + "/" + (lateOut.Decisions.Count > 0 ? lateOut.Decisions[0].Reason : "-"), "1/late");
+            var sNoEnd = new Settings();
+            sNoEnd.Normalize();
+            sNoEnd.eventLeadMinutes = 10;
+            sNoEnd.events.Add(Ev("local:noend", "取快递", "2026-11-16 10:00", "", "local"));
+            bool noEndBefore = new ReminderEngine().Advance(sNoEnd, emptySnap, new DateTime(2026, 11, 16, 10, 59, 59), noSignals).Started;
+            bool noEndAfter = new ReminderEngine().Advance(sNoEnd, emptySnap, new DateTime(2026, 11, 16, 11, 0, 0), noSignals).Started;
+            Check("补提醒：无结束时间 60 分钟兜底（59 分补、60 分不补）", noEndBefore + "/" + noEndAfter, "True/False");
+            var sEnded = new Settings();
+            sEnded.Normalize();
+            sEnded.events.Add(Ev("local:ended", "已结束的会", "2026-11-16 10:00", "2026-11-16 10:30", "local"));
+            bool endedOnly = new ReminderEngine().Advance(sEnded, emptySnap, new DateTime(2026, 11, 16, 10, 31, 0), noSignals).Started;
+            var sStillOn = new Settings();
+            sStillOn.Normalize();
+            sStillOn.events.Add(Ev("local:on", "还开着的会", "2026-11-16 10:20", "2026-11-16 10:50", "local"));
+            bool stillOn = new ReminderEngine().Advance(sStillOn, emptySnap, new DateTime(2026, 11, 16, 10, 31, 0), noSignals).Started;
+            Check("已结束事项不再提醒、未结束事项仍补", endedOnly + "/" + stillOn, "False/True");
+            var sLead = new Settings();
+            sLead.Normalize();
+            sLead.eventLeadMinutes = 5;
+            var leadEv = Ev("local:lead", "单条提前", "2026-11-16 10:00", "2026-11-16 10:30", "local");
+            leadEv.leadMinutes = 30;
+            sLead.events.Add(leadEv);
+            Check("单条日程提前量覆盖默认值",
+                new ReminderEngine().Advance(sLead, emptySnap, new DateTime(2026, 11, 16, 9, 30, 0), noSignals).Started.ToString(), "True");
+
+            // 20.3 常驻时长（展示所需的业务信息，由模块给出）
+            var sHold = new Settings();
+            sHold.Normalize();
+            sHold.ui.reminderHoldSeconds = 6;
+            var holdEngine = new ReminderEngine();
+            var hBase = new DateTime(2026, 11, 16, 10, 0, 0);
+            Check("常驻到日程结束",
+                holdEngine.HoldUntil(sHold, Ev("lark:h", "会", "2026-11-16 09:50", "2026-11-16 11:00", "lark"), hBase).ToString("HH:mm:ss"), "11:00:00");
+            Check("无结束时间按 30 分钟",
+                holdEngine.HoldUntil(sHold, Ev("local:h", "取快递", "2026-11-16 10:00", "", "local"), hBase).ToString("HH:mm:ss"), "10:30:00");
+            Check("休息结束提醒只停最短停留",
+                holdEngine.HoldUntil(sHold, Ev("fix:lunch:end", "午休结束", "2026-11-16 13:30", "", "break"), hBase).ToString("HH:mm:ss"), "10:00:06");
+            Check("下班提醒一直常驻到打卡",
+                holdEngine.HoldUntil(sHold, Ev("alert:offwork", "该下班啦", "2026-11-16 18:00", "", "alert"), hBase).ToString(), DateTime.MaxValue.ToString());
+            Check("预览只停最短停留",
+                holdEngine.HoldUntil(sHold, Ev("preview", "预览", "2026-11-16 10:00", "", "local"), hBase).ToString("HH:mm:ss"), "10:00:06");
+
+            // 20.4 预览不写真实提醒决策状态
+            var pvEngine = new ReminderEngine();
+            var pvFb = pvEngine.Dismiss(Ev("preview", "预览", "2026-11-16 10:00", "", "alert"), hBase);
+            var normalFb = pvEngine.Dismiss(Ev("local:dismiss", "普通", "2026-11-16 10:00", "2026-11-16 10:30", "local"), hBase);
+            Check("预览关闭不写状态、普通关闭写状态",
+                pvFb.MarkedNotified + "/" + pvFb.MutedOffWork + "/" + normalFb.MarkedNotified + "/" + pvEngine.NotifiedCount,
+                "False/False/True/1");
+            var sPv = new Settings();
+            sPv.Normalize();
+            foreach (var f in sPv.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
+            var pvSig = new ReminderSignals();
+            pvSig.OffWorkDue = true;
+            pvSig.OffWorkTarget = "2026-11-16T20:04";
+            Check("预览关闭不会静音真实下班提醒",
+                pvEngine.Advance(sPv, emptySnap, hBase, pvSig).Started.ToString(), "True");
+        }
+
+        // 21. 提醒引擎：固定日程、下班提醒状态机、关闭反馈与去重清理
+        {
+            Func<string, string, string, string, string, ReminderEvent> Ev = delegate(string id, string title, string start, string end, string source)
+            {
+                var e = new ReminderEvent();
+                e.id = id; e.title = title; e.start = start; e.end = end; e.source = source;
+                return e;
+            };
+            var emptySnap = new ReminderScheduleSnapshot();
+            var noSignals = new ReminderSignals();
+
+            // 21.1 固定日程：开始 / 结束 / 中途启动恢复
+            var sFix = new Settings();
+            sFix.Normalize();
+            sFix.workdays = new bool[] { true, true, true, true, true, true, true };
+            sFix.exceptions.Clear();
+            sFix.ScheduleOf("lunch").start = "11:50";
+            sFix.ScheduleOf("lunch").end = "13:30";
+            sFix.ScheduleOf("lunch").notify = true;
+            sFix.ScheduleOf("lunch").endNotify = true;
+            sFix.ScheduleOf("lunch").enabled = true;
+            sFix.ScheduleOf("evening").enabled = false;
+            sFix.NormalizeSchedules();
+            var engFix = new ReminderEngine();
+            var fixStart = engFix.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 50, 20), noSignals);
+            Check("固定日程开始提醒",
+                fixStart.Decisions.Count + "/" + (fixStart.Decisions.Count > 0 ? fixStart.Decisions[0].Reason : "-")
+                + "/" + (fixStart.Decisions.Count > 0 ? fixStart.Decisions[0].Event.title : "-")
+                + "/" + (fixStart.Decisions.Count > 0 ? fixStart.Decisions[0].Event.end : "-"),
+                "1/fixed-start/午休时间到/2026-11-16 13:30");
+            Check("固定日程同一天不重复",
+                engFix.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 50, 40), noSignals).Started.ToString(), "False");
+            Check("固定日程未到点不响",
+                new ReminderEngine().Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 49, 0), noSignals).Started.ToString(), "False");
+            var fixEnd = engFix.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 13, 30, 0), noSignals);
+            Check("固定日程结束提醒",
+                fixEnd.Decisions.Count + "/" + (fixEnd.Decisions.Count > 0 ? fixEnd.Decisions[0].Reason : "-")
+                + "/" + (fixEnd.Decisions.Count > 0 ? fixEnd.Decisions[0].Event.title : "-"),
+                "1/fixed-end/午休结束");
+            var engResume = new ReminderEngine();
+            var fixResume = engResume.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 55, 0), noSignals);
+            Check("固定日程中途启动恢复",
+                fixResume.Decisions.Count + "/" + (fixResume.Decisions.Count > 0 ? fixResume.Decisions[0].Reason : "-")
+                + "/" + (fixResume.Decisions.Count > 0 ? fixResume.Decisions[0].Event.title : "-"),
+                "1/fixed-resume/午休中");
+            Check("中途启动同一天不重复",
+                engResume.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 56, 0), noSignals).Started.ToString(), "False");
+            var sRest = new Settings();
+            sRest.Normalize();
+            sRest.workdays = new bool[] { false, false, false, false, false, false, false };
+            sRest.ScheduleOf("lunch").start = "11:50";
+            sRest.ScheduleOf("lunch").end = "13:30";
+            sRest.ScheduleOf("evening").enabled = false;
+            Check("休息日固定日程不响",
+                new ReminderEngine().Advance(sRest, emptySnap, new DateTime(2026, 11, 16, 11, 50, 20), noSignals).Started.ToString(), "False");
+
+            // 21.2 常驻下班提醒：5 分钟重播 / 被普通日程打断后恢复 / 打卡同步收起
+            var sOff = new Settings();
+            sOff.Normalize();
+            foreach (var f in sOff.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
+            var t0 = new DateTime(2026, 11, 16, 18, 30, 0);
+            var offSig = new ReminderSignals();
+            offSig.OffWorkDue = true;
+            offSig.OffWorkTarget = "2026-11-16T20:04";
+            var engOff = new ReminderEngine();
+            var offStart = engOff.Advance(sOff, emptySnap, t0, offSig);
+            Check("下班提醒开始",
+                offStart.Decisions.Count + "/" + (offStart.Decisions.Count > 0 ? offStart.Decisions[0].Reason : "-")
+                + "/" + (offStart.Decisions.Count > 0 ? offStart.Decisions[0].Event.title : "-")
+                + "/" + (offStart.Decisions.Count > 0 ? offStart.Decisions[0].Event.start : "-"),
+                "1/offwork-start/该下班啦/2026-11-16 20:04");
+            var showSig = new ReminderSignals();
+            showSig.OffWorkDue = true;
+            showSig.OffWorkTarget = "2026-11-16T20:04";
+            showSig.Showing = true;
+            Check("下班提醒 5 分钟内不重播",
+                engOff.Advance(sOff, emptySnap, t0.AddMinutes(4), showSig).Started.ToString(), "False");
+            var offRepeat = engOff.Advance(sOff, emptySnap, t0.AddMinutes(5), showSig);
+            Check("下班提醒每 5 分钟重播",
+                offRepeat.Decisions.Count + "/" + (offRepeat.Decisions.Count > 0 ? offRepeat.Decisions[0].Reason : "-"),
+                "1/offwork-repeat");
+            Check("被普通日程打断时不重立常驻",
+                engOff.Advance(sOff, emptySnap, t0.AddMinutes(6), showSig).Started.ToString(), "False");
+            var endedSig = new ReminderSignals();
+            endedSig.OffWorkDue = true;
+            endedSig.OffWorkTarget = "2026-11-16T20:04";
+            endedSig.Showing = false;
+            var offResume = engOff.Advance(sOff, emptySnap, t0.AddMinutes(6), endedSig);
+            Check("普通日程结束恢复常驻下班提醒",
+                offResume.Decisions.Count + "/" + (offResume.Decisions.Count > 0 ? offResume.Decisions[0].Reason : "-"),
+                "1/offwork-resume");
+            var noOffSig = new ReminderSignals();
+            var offStop = engOff.Advance(sOff, emptySnap, t0.AddMinutes(7), noOffSig);
+            Check("下班打卡同步后收起常驻",
+                offStop.Decisions.Count + "/" + (offStop.Decisions.Count > 0 ? offStop.Decisions[0].Reason : "-"),
+                "1/offwork-stopped");
+            Check("收起后不再出现",
+                engOff.Advance(sOff, emptySnap, t0.AddMinutes(8), noOffSig).Started.ToString(), "False");
+
+            var engMute = new ReminderEngine();
+            var muteStart = engMute.Advance(sOff, emptySnap, t0, offSig);
+            var muteFb = engMute.Dismiss(muteStart.Decisions[0].Event, t0);
+            Check("关闭下班提醒 = 忽略今天",
+                muteFb.MutedOffWork + "/" + muteFb.MarkedNotified, "True/True");
+            Check("忽略今天后不再弹",
+                engMute.Advance(sOff, emptySnap, t0.AddMinutes(1), offSig).Started.ToString(), "False");
+            var nextDay = engMute.Advance(sOff, emptySnap, t0.AddDays(1), offSig);
+            Check("第二天自动恢复下班提醒",
+                nextDay.Decisions.Count + "/" + (nextDay.Decisions.Count > 0 ? nextDay.Decisions[0].Reason : "-"),
+                "1/offwork-start");
+
+            // 21.3 关闭普通 / 固定提醒的反馈与去重
+            var sDis = new Settings();
+            sDis.Normalize();
+            sDis.eventLeadMinutes = 10;
+            sDis.events.Add(Ev("local:dis", "要关掉的会", "2026-11-16 10:00", "2026-11-16 11:00", "local"));
+            var engDis = new ReminderEngine();
+            var disOut = engDis.Advance(sDis, emptySnap, new DateTime(2026, 11, 16, 9, 50, 0), noSignals);
+            var disFb = engDis.Dismiss(disOut.Decisions[0].Event, new DateTime(2026, 11, 16, 9, 50, 0));
+            Check("关闭普通提醒记入去重",
+                disFb.MarkedNotified + "/" + disFb.MutedOffWork + "/" + engDis.NotifiedCount, "True/False/1");
+            Check("关闭后同一日程不再产生",
+                engDis.Advance(sDis, emptySnap, new DateTime(2026, 11, 16, 9, 51, 0), noSignals).Started.ToString(), "False");
+            var engFd = new ReminderEngine();
+            var fdOut = engFd.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 50, 20), noSignals);
+            var fdFb = fdOut.Decisions.Count > 0 ? engFd.Dismiss(fdOut.Decisions[0].Event, new DateTime(2026, 11, 16, 11, 50, 20)) : new ReminderFeedback();
+            Check("关闭固定日程提醒只说记入去重",
+                fdFb.MarkedNotified + "/" + fdFb.MutedOffWork, "True/False");
+            Check("关闭后固定日程不重复",
+                engFd.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 50, 40), noSignals).Started.ToString(), "False");
+
+            // 21.4 同刻多事项：一次推进只起一条，重复推进不重复
+            var sSame = new Settings();
+            sSame.Normalize();
+            sSame.eventLeadMinutes = 10;
+            sSame.events.Add(Ev("local:same-a", "同刻 A", "2026-11-16 10:00", "2026-11-16 10:30", "local"));
+            sSame.events.Add(Ev("local:same-b", "同刻 B", "2026-11-16 10:00", "2026-11-16 10:30", "local"));
+            var engSame = new ReminderEngine();
+            var same1 = engSame.Advance(sSame, emptySnap, new DateTime(2026, 11, 16, 10, 0, 0), noSignals);
+            var same2 = engSame.Advance(sSame, emptySnap, new DateTime(2026, 11, 16, 10, 0, 0), noSignals);
+            var same3 = engSame.Advance(sSame, emptySnap, new DateTime(2026, 11, 16, 10, 0, 0), noSignals);
+            string sameTitles = same1.Decisions.Count == 1 && same2.Decisions.Count == 1
+                ? same1.Decisions[0].Event.title + "/" + same2.Decisions[0].Event.title : "count";
+            Check("同刻多事项每 tick 只起一条、各起一次",
+                (sameTitles == "同刻 A/同刻 B" || sameTitles == "同刻 B/同刻 A").ToString(), "True");
+            Check("同刻多事项重复推进不重复", same3.Started.ToString(), "False");
+
+            // 21.5 去重清理：跨日、超过阈值都只删已经不可能再触发的键
+            var engDay = new ReminderEngine();
+            var day1 = engDay.Advance(sFix, emptySnap, new DateTime(2026, 11, 16, 11, 50, 20), noSignals);
+            var day2 = engDay.Advance(sFix, emptySnap, new DateTime(2026, 11, 17, 11, 50, 20), noSignals);
+            Check("固定日程跨日仍会提醒", day1.Started + "/" + day2.Started, "True/True");
+            Check("跨日清理只删过期键", engDay.NotifiedCount.ToString(), "1");
+
+            var sMany = new Settings();
+            sMany.Normalize();
+            sMany.eventLeadMinutes = 10;
+            for (int i = 0; i < 300; i++)
+                sMany.events.Add(Ev("local:many" + i, "批量 " + i, "2026-11-16 10:00", "2026-11-16 10:30", "local"));
+            var engMany = new ReminderEngine();
+            for (int i = 0; i < 300; i++)
+                engMany.Advance(sMany, emptySnap, new DateTime(2026, 11, 16, 10, 0, 0), noSignals);
+            Check("批量提醒都记入去重", engMany.NotifiedCount.ToString(), "300");
+            sMany.events.Add(Ev("local:midnight", "跨夜会", "2026-11-16 23:59", "2026-11-17 01:00", "local"));
+            engMany.Advance(sMany, emptySnap, new DateTime(2026, 11, 16, 23, 50, 0), noSignals);
+            Check("跨夜补提醒进入去重", engMany.NotifiedCount.ToString(), "301");
+            engMany.Advance(sMany, emptySnap, new DateTime(2026, 11, 16, 23, 55, 0), noSignals);
+            Check("超过阈值只清理过期键、保留仍有效键", engMany.NotifiedCount.ToString(), "1");
+            var midnightOut = engMany.Advance(sMany, emptySnap, new DateTime(2026, 11, 17, 0, 30, 0), noSignals);
+            Check("清理后仍有效的事项不重新提醒",
+                midnightOut.Started + "/" + engMany.NotifiedCount, "False/1");
+
+            Check("没有未来日程时 NextEvent 返回 null",
+                (new ReminderEngine().NextEvent(sDis, emptySnap, new DateTime(2026, 11, 16, 23, 0, 0)) == null).ToString(), "True");
+
         }
 
         Console.WriteLine();

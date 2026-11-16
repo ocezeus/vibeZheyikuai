@@ -101,7 +101,7 @@ class OutlookProbe
             Ok("提前量按设置补上", e.leadMinutes == 10, e.leadMinutes.ToString());
             Ok("分类到 Outlook", Reminders.KindOf(e) == Reminders.KindOutlook, Reminders.KindOf(e));
 
-            var merged = Reminders.Merge(s, null, events);
+            var merged = new ReminderEngine().Agenda(s, new ReminderScheduleSnapshot(null, events));
             Ok("进提醒池", merged.Count == 1 && merged[0].source == "outlook", merged.Count + " 条");
             Ok("现在就该提醒（提前 10 分钟）", Reminders.IsDue(s, e, DateTime.Now), "start " + e.start);
             Ok("缓存写回了设置", s.outlook.cached != null && s.outlook.cached.Count == 1,

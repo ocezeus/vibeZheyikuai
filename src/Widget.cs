@@ -72,7 +72,7 @@ namespace WorkCountdown
         private bool olFetching;
         private string larkEventError;
         private bool calFetching;
-        private readonly HashSet<string> notified = new HashSet<string>();
+        private readonly ReminderEngine engine = new ReminderEngine();
         private bool reminding;
         private DateTime remindAt;
         private ReminderEvent remindEvent;
@@ -81,11 +81,7 @@ namespace WorkCountdown
         private const int RemindOutMs = 960;   // 两块色块扫出
 
         // 常驻「该下班啦」：到点没打卡就一直在，每 5 分钟重播一次入场动画
-        private const int OffAlertRepeatMs = 5 * 60 * 1000;
         private const int OffAlertAnimMs = 1100;   // 只有这段需要 30fps，其余时间静止不耗 CPU
-        private bool offAlertOn;
-        private DateTime offAlertNext;
-        private DateTime offAlertMutedDay = DateTime.MinValue;   // 手动「忽略今天」
         private DateTime remindUntil = DateTime.MaxValue;        // 常驻到什么时候（时段结束）
         private bool remindExiting;
         private DateTime remindExitAt;
@@ -259,9 +255,8 @@ namespace WorkCountdown
                     RequestCalendar(false);
                 }
                 Recompute();
-                CheckOffWork();
                 CheckSticky();
-                CheckReminders();
+                AdvanceReminders(DateTime.Now);
                 if (drawer != null) drawer.RefreshText();
                 MaybeBlinkUnread();
             };
@@ -641,10 +636,14 @@ namespace WorkCountdown
             });
         }
 
+        private ReminderScheduleSnapshot ScheduleSnapshot()
+        {
+            return new ReminderScheduleSnapshot(larkEvents, outlookEvents);
+        }
+
         private string NextEventText()
         {
-            var all = Reminders.Merge(settings, larkEvents, outlookEvents);
-            var next = Reminders.Next(settings, all, DateTime.Now);
+            var next = engine.NextEvent(settings, ScheduleSnapshot(), DateTime.Now);
             if (next == null) return "没有待提醒的日程";
             DateTime start = Reminders.ParseStart(next);
             return start.ToString("HH:mm") + " " + next.title;
@@ -730,51 +729,26 @@ namespace WorkCountdown
         }
 
         /// <summary>
-        /// 每秒检查一次：到点（开始时间 - 提前量）就放一次提醒动画。
-        /// 另外，日历同步 / 程序启动晚于开始时间时（严格窗口已经错过），
-        /// 只要这条日程是「刚看到」且还没结束、开始不超过 60 分钟，就补放一次。
-        /// 之前 Outlook 在会开始后才同步下来，会整场会都没有提醒。
+        /// 每秒推进一次提醒决策：常驻下班提醒、固定日程、普通日程与补提醒都在
+        /// ReminderEngine 里；窗口只把决定应用成动画 / 全屏 / 抽屉 / 托盘气泡。
         /// </summary>
-        private void CheckReminders()
+        internal bool AdvanceReminders(DateTime now)
         {
-            DateTime now = DateTime.Now;
-            if (CheckBreaks(now)) return;
-            var all = Reminders.Merge(settings, larkEvents, outlookEvents);
-            if (all.Count == 0) return;
-            if (notified.Count > 300) notified.Clear();
-            foreach (var e in all)
-            {
-                DateTime start = Reminders.ParseStart(e);
-                string key = (e.id ?? e.title) + "@" + start.Ticks;
-                if (notified.Contains(key)) continue;
-                bool due = Reminders.IsDue(settings, e, now);
-                // 晚同步 / 程序刚启动 / 电脑睡眠醒来都算：只要还没结束、开始不超过 60 分钟就补一次
-                bool late = !due && Reminders.IsLateDue(settings, e, now);
-                if (due || late)
-                {
-                    notified.Add(key);
-                    if (late)
-                        store.Log("补提醒（错过开始时间）: " + e.title + " @" + start.ToString("yyyy-MM-dd HH:mm"));
-                    StartReminder(e);
-                    return;
-                }
-            }
+            var signals = new ReminderSignals();
+            signals.OffWorkDue = status != null && status.offAlert;
+            signals.OffWorkTarget = status == null ? null : status.targetIso;
+            signals.Showing = reminding;
+            var outcome = engine.Advance(settings, ScheduleSnapshot(), now, signals);
+            foreach (var d in outcome.Decisions) ApplyReminderDecision(d, now);
+            return outcome.Started;
         }
 
-        /// <summary>
-        /// 到了下班时间还没打卡：常驻「注意 / 该下班啦」，每 5 分钟重播一次动画，
-        /// 飞书同步到下班打卡（或跨天）就自动收掉。
-        /// </summary>
-        private void CheckOffWork()
+        /// <summary>把一条提醒决定落到窗口的展示状态上（决定本身不带动画标志）。</summary>
+        private void ApplyReminderDecision(ReminderDecision d, DateTime now)
         {
-            DateTime now = DateTime.Now;
-            var offSched = settings.ScheduleOf("offwork");
-            bool offOk = offSched == null || (offSched.enabled && offSched.notify && offSched.OccursOn(now));
-            bool need = status != null && status.offAlert && offOk && offAlertMutedDay != DateTime.Today;
-            if (!need)
+            if (d == null) return;
+            if (d.Reason == ReminderReasons.OffWorkStopped)
             {
-                if (!offAlertOn) return;
-                offAlertOn = false;
                 if (remindEvent != null && remindEvent.source == "alert")
                 {
                     remindT.Stop();
@@ -786,51 +760,34 @@ namespace WorkCountdown
                 }
                 return;
             }
-            if (!offAlertOn)
+            if (d.Event == null) return;
+            if (d.Reason == ReminderReasons.OffWorkRepeat)
             {
-                offAlertOn = true;
-                offAlertNext = now.AddMilliseconds(OffAlertRepeatMs);
-                StartOffAlert();
-                return;
-            }
-            // 中间插进来的会议/日程播完后，回到常驻提醒
-            if (!reminding && (remindEvent == null || remindEvent.source != "alert"))
-            {
-                StartOffAlert();
-                return;
-            }
-            if (now >= offAlertNext)
-            {
-                offAlertNext = now.AddMilliseconds(OffAlertRepeatMs);
-                remindEvent = BuildOffAlertEvent(now);
-                remindAt = now;                 // 原地重播入场：色块不动，文字重淡入 + 扫光
+                // 原地重播入场：色块不动，文字重淡入 + 扫光
+                remindEvent = d.Event;
+                remindAt = now;
                 reminding = true;
                 autoCollapse.Stop();
-                remindT.Interval = 33; remindT.Start();
+                remindT.Interval = 33;
+                remindT.Start();
                 Invalidate();
                 store.Log("该下班啦: 重新提醒 @ " + now.ToString("HH:mm"));
+                return;
             }
-        }
-
-        private ReminderEvent BuildOffAlertEvent(DateTime now)
-        {
-            var e = new ReminderEvent();
-            e.id = "alert:offwork";
-            e.source = "alert";
-            e.title = "该下班啦";
-            e.detail = "在飞书发「2」打卡后自动消失";
-            e.place = "";
-            string target = status != null ? status.targetIso : null;
-            DateTime t;
-            if (!string.IsNullOrEmpty(target) && DateTime.TryParse(target, out t)) e.start = Reminders.FormatStart(t);
-            else e.start = Reminders.FormatStart(now);
-            return e;
+            if (d.Reason == ReminderReasons.OffWorkStart || d.Reason == ReminderReasons.OffWorkResume)
+            {
+                StartOffAlert(d.Event);
+                return;
+            }
+            if (d.Reason == ReminderReasons.Late)
+                store.Log("补提醒（错过开始时间）: " + d.Event.title + " @" + Reminders.ParseStart(d.Event).ToString("yyyy-MM-dd HH:mm"));
+            StartReminder(d.Event);
         }
 
         /// <summary>右键「忽略今天的下班提醒」：今天不再弹，第二天自动恢复。</summary>
         private void MuteOffAlert()
         {
-            offAlertMutedDay = DateTime.Today;
+            engine.MuteOffWork(DateTime.Now);
             if (remindEvent != null && remindEvent.source == "alert")
             {
                 remindT.Stop();
@@ -842,10 +799,10 @@ namespace WorkCountdown
             store.Log("手动忽略今天的下班提醒");
         }
 
-        private void StartOffAlert()
+        private void StartOffAlert(ReminderEvent e)
         {
             if (animating) { animT.Stop(); animating = false; SetBounds(animToX, Top, animToW, animToH); collapsed = animToW == S(DesignCollapsedW); ApplyRegion(); }
-            remindEvent = BuildOffAlertEvent(DateTime.Now);
+            remindEvent = e;
             remindUntil = DateTime.MaxValue;      // 直到打卡
             remindExiting = false;
             remindAt = DateTime.Now;
@@ -859,84 +816,13 @@ namespace WorkCountdown
             ShowBalloon("该下班啦\r\n还没同步到下班打卡，每 5 分钟提醒一次");
         }
 
-        /// <summary>固定日程（午休 / 晚休 / 自己加的）：到点用提醒动画提示，每天各一次。</summary>
-        private bool CheckBreaks(DateTime now)
-        {
-            settings.NormalizeSchedules();       // 兜底：手改的 Settings 也保证有三条固定日程
-            if (settings.schedules == null) return false;
-            if (!Policy.Build(settings, now).isWorkday) return false;
-            foreach (var f in settings.schedules)
-            {
-                if (f == null || !f.enabled || !f.notify || f.IsOffWork) continue;
-                if (!f.OccursOn(now)) continue;
-                if (TryBreak(f, now, false)) return true;
-            }
-            foreach (var f in settings.schedules)
-            {
-                if (f == null || !f.enabled || !f.notify || f.IsOffWork) continue;
-                if (!f.OccursOn(now)) continue;
-                if (TryBreak(f, now, true)) return true;
-            }
-            // 中途才打开/重启：正处在某个固定日程里，就直接立起常驻卡片（每天仍然只一次）
-            foreach (var f in settings.schedules)
-            {
-                if (f == null || !f.enabled || !f.notify || f.IsOffWork) continue;
-                if (!f.OccursOn(now)) continue;
-                if (ResumeBreak(f, now)) return true;
-            }
-            return false;
-        }
-
-        /// <summary>已经处在时段中间（比如刚开机）：直接把「xx中」的常驻提醒立起来。</summary>
-        private bool ResumeBreak(FixedSchedule f, DateTime now)
-        {
-            DateTime start = f.StartAt(now), end = f.EndAt(now);
-            if (start == DateTime.MinValue || end == DateTime.MinValue) return false;
-            if (end <= start) return false;
-            if (now < start.AddSeconds(50) || now >= end) return false;    // 正点那一下交给 TryBreak
-            if (!notified.Add("fix:" + f.id + "@" + now.ToString("yyyyMMdd"))) return false;
-            var e = new ReminderEvent();
-            e.id = "fix:" + f.id;
-            e.title = f.name + "中";
-            e.detail = f.role == "lunch" ? "去吃饭，先歇一会儿" : f.role == "evening" ? "吃个晚饭再继续" : "现在是在这段时间里";
-            e.place = "";
-            e.source = "break";
-            e.start = Reminders.FormatStart(start);
-            e.end = Reminders.FormatStart(end);
-            StartReminder(e);
-            return true;
-        }
-
-        /// <summary>开始提醒（ending=false）或结束提醒（ending=true）。</summary>
-        private bool TryBreak(FixedSchedule f, DateTime now, bool ending)
-        {
-            if (ending && (!f.endNotify || string.IsNullOrWhiteSpace(f.end))) return false;
-            DateTime at = ending ? f.EndAt(now) : f.StartAt(now);
-            if (at == DateTime.MinValue) return false;
-            if (now.Hour * 60 + now.Minute != at.Hour * 60 + at.Minute) return false;
-            string key = "fix:" + f.id + (ending ? ":end" : "") + "@" + now.ToString("yyyyMMdd");
-            if (!notified.Add(key)) return false;
-            var e = new ReminderEvent();
-            e.id = "fix:" + f.id + (ending ? ":end" : "");
-            e.title = ending ? f.name + "结束" : (f.IsOffWork ? "下班时间到" : f.name + "时间到");
-            e.detail = ending ? "该回来继续上班了"
-                : f.role == "lunch" ? "去吃饭，先歇一会儿" : f.role == "evening" ? "吃个晚饭再继续" : "到点了";
-            e.place = "";
-            e.source = "break";
-            e.start = Reminders.FormatStart(at);
-            if (ending) e.end = "";
-            else if (!string.IsNullOrWhiteSpace(f.end)) e.end = Reminders.FormatStart(f.EndAt(now));
-            StartReminder(e);
-            return true;
-        }
-
         private void StartReminder(ReminderEvent e)
         {
             CloseBubbleMenu();
             if (screenReminder) ExitScreenMode();
             if (animating) { animT.Stop(); animating = false; SetBounds(animToX, Top, animToW, animToH); collapsed = animToW == S(DesignCollapsedW); ApplyRegion(); }
             remindEvent = e;
-            remindUntil = ComputeRemindUntil(e, DateTime.Now);
+            remindUntil = engine.HoldUntil(settings, e, DateTime.Now);
             remindExiting = false;
             AccessibleDescription = e.title + " · " + Reminders.TimeRange(e) + " · " + e.place + " · " + e.detail +
                 "（常驻提醒，右上角可关闭）";
@@ -968,29 +854,6 @@ namespace WorkCountdown
             if (e.id != "preview")      // 预览通知不弹托盘气泡，免得以为真来了个日程
                 ShowBalloon("日程提醒 · " + e.title + "\r\n" + Reminders.ParseStart(e).ToString("HH:mm") +
                     " 开始，" + Reminders.CountdownText(settings, e, DateTime.Now));
-        }
-
-        /// <summary>
-        /// 提醒要常驻到什么时候：日程/会议到结束时间，休息到休息结束，下班到打卡。
-        /// 至少停留「提醒停留」里设的秒数，免得时段已经过去还闪一下就消失。
-        /// </summary>
-        private DateTime ComputeRemindUntil(ReminderEvent e, DateTime now)
-        {
-            DateTime min = now.AddMilliseconds(RemindHoldMs);
-            if (e == null) return min;
-            // 预览通知（含「下班提醒」这种常驻样式）：只放一遍，按最短停留退场
-            if (e.id == "preview") return min;
-            if (e.source == "alert") return DateTime.MaxValue;
-            DateTime end = Reminders.ParseEnd(e);
-            if (e.source == "break")
-            {
-                // 休息「结束」那一刻的提醒没有结束时间：按最短停留放一下就走
-                if (end == DateTime.MinValue) return min;
-                return end > min ? end : min;
-            }
-            if (end == DateTime.MinValue) end = now.AddMinutes(30);
-            if (end <= now) return min;
-            return end > min ? end : min;
         }
 
         /// <summary>提醒动画的虚拟时钟：入场 → 冻住常驻 → 退场继续走。</summary>
@@ -1254,7 +1117,7 @@ namespace WorkCountdown
                 if (DateTime.Now >= remindUntil) BeginExitReminder();
                 return;
             }
-            if (remindEvent.source == "alert") return;      // 下班提醒由 CheckOffWork 管
+            if (remindEvent.source == "alert") return;      // 下班提醒由 AdvanceReminders / 常驻状态机管
             if (DateTime.Now < remindUntil) return;
             store.Log("提醒时段结束: 收起「" + remindEvent.title + "」");
             BeginExitReminder();
@@ -1265,7 +1128,7 @@ namespace WorkCountdown
         {
             if (!reminding || remindEvent == null) return;
             var e = remindEvent;
-            notified.Add((e.id ?? e.title) + "@" + Reminders.ParseStart(e).Ticks);
+            engine.Dismiss(e, DateTime.Now);
             store.Log("手动关闭提醒: " + e.title);
             drawerDismissed = true;
             CloseDrawer();
@@ -1277,8 +1140,7 @@ namespace WorkCountdown
             }
             if (e.source == "alert")
             {
-                offAlertMutedDay = DateTime.Today;     // 今天不再弹
-                offAlertOn = false;
+                // 下班提醒的 × = 忽略今天（状态在 ReminderEngine 里）
                 EndReminder();
                 return;
             }
@@ -3802,7 +3664,7 @@ namespace WorkCountdown
                     RequestRefresh(false);
                     RequestCalendar(false);
                     RequestOutlook(false);
-                    var next = Reminders.Next(settings, Reminders.Merge(settings, larkEvents, outlookEvents), DateTime.Now);
+                    var next = engine.NextEvent(settings, ScheduleSnapshot(), DateTime.Now);
                     if (next != null)
                     {
                         DateTime startTime = Reminders.ParseStart(next);

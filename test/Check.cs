@@ -308,28 +308,29 @@ class Check
             s.breakNotify = true;
             using (var form = new WidgetForm(new SettingsStore(), s))
             {
+                Set(form, "status", null);     // 这一节只验固定日程，别让下班常驻状态参与
                 Set(form, "reminding", false);
-                object moved = Call(form, "CheckBreaks", DateTime.Today.AddHours(11).AddMinutes(50).AddSeconds(20));
+                object moved = Call(form, "AdvanceReminders", DateTime.Today.AddHours(11).AddMinutes(50).AddSeconds(20));
                 var ev = (ReminderEvent)Get(form, "remindEvent");
                 Ok("午休开始触发", (bool)moved && ev != null && ev.title == "午休时间到" && ev.source == "break",
                     "title=" + (ev == null ? "null" : ev.title) + " source=" + (ev == null ? "" : ev.source));
 
                 Set(form, "reminding", false);
-                object again = Call(form, "CheckBreaks", DateTime.Today.AddHours(11).AddMinutes(50).AddSeconds(40));
+                object again = Call(form, "AdvanceReminders", DateTime.Today.AddHours(11).AddMinutes(50).AddSeconds(40));
                 Ok("同一天不重复响", !(bool)again, "再次检查 => " + again);
 
                 Set(form, "reminding", false);
-                object early = Call(form, "CheckBreaks", DateTime.Today.AddHours(11).AddMinutes(49));
+                object early = Call(form, "AdvanceReminders", DateTime.Today.AddHours(11).AddMinutes(49));
                 Ok("未到点不响", !(bool)early, "11:49 => " + early);
 
                 Set(form, "reminding", false);
-                object lunchEnd = Call(form, "CheckBreaks", DateTime.Today.AddHours(13).AddMinutes(30));
+                object lunchEnd = Call(form, "AdvanceReminders", DateTime.Today.AddHours(13).AddMinutes(30));
                 var evEnd = (ReminderEvent)Get(form, "remindEvent");
                 Ok("午休结束触发", (bool)lunchEnd && evEnd != null && evEnd.title == "午休结束",
                     "title=" + (evEnd == null ? "null" : evEnd.title));
 
                 Set(form, "reminding", false);
-                object evening = Call(form, "CheckBreaks", DateTime.Today.AddHours(18));
+                object evening = Call(form, "AdvanceReminders", DateTime.Today.AddHours(18));
                 var evEve = (ReminderEvent)Get(form, "remindEvent");
                 Ok("晚休开始触发", (bool)evening && evEve != null && evEve.title == "晚休时间到",
                     "title=" + (evEve == null ? "null" : evEve.title));
@@ -339,7 +340,7 @@ class Check
                 s.ScheduleOf("evening").enabled = false;
                 Set(form, "settings", s);
                 Set(form, "reminding", false);
-                object noEvening = Call(form, "CheckBreaks", DateTime.Today.AddHours(18).AddMinutes(45));
+                object noEvening = Call(form, "AdvanceReminders", DateTime.Today.AddHours(18).AddMinutes(45));
                 Ok("关掉晚休后不响", !(bool)noEvening, "18:45 => " + noEvening);
 
                 // 自己加的固定日程（非午休/晚休）也要能响，并且用这条自己的名字和颜色
@@ -350,7 +351,7 @@ class Check
                 Set(form, "settings", s);
                 Set(form, "reminding", false);
                 Set(form, "remindEvent", null);
-                object custom = Call(form, "CheckBreaks", DateTime.Today.AddHours(10).AddMinutes(30).AddSeconds(5));
+                object custom = Call(form, "AdvanceReminders", DateTime.Today.AddHours(10).AddMinutes(30).AddSeconds(5));
                 var evCustom = (ReminderEvent)Get(form, "remindEvent");
                 Ok("自建固定日程也会响", (bool)custom && evCustom != null && evCustom.title == "站会时间到"
                     && evCustom.source == "break" && evCustom.id.StartsWith("fix:my-standup"),
@@ -359,6 +360,96 @@ class Check
                 Ok("提醒带的是这条日程的配色", schedOf != null && schedOf.styleId == "zi-jiegeng",
                     schedOf == null ? "找不到日程" : schedOf.styleId);
 
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+        // ---- 3b. 特征测试：同刻多事项、普通日程打断下班提醒、全屏/卡片关闭路径 ----
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.calendarEnabled = false;
+            s.ui.edge = "free";
+            s.ui.reminderEffect = "none";
+            s.ui.reducedMotion = true;
+            s.Normalize();
+            foreach (var f in s.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
+            DateTime now = DateTime.Now;
+            var a = new ReminderEvent();
+            a.id = "local:same-a"; a.source = "local"; a.title = "同刻事项 A";
+            a.start = Reminders.FormatStart(now.AddMinutes(-2));
+            a.end = Reminders.FormatStart(now.AddMinutes(20));
+            var b = new ReminderEvent();
+            b.id = "local:same-b"; b.source = "local"; b.title = "同刻事项 B";
+            b.start = a.start; b.end = a.end;
+            s.events.Add(a);
+            s.events.Add(b);
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Call(form, "AdvanceReminders", DateTime.Now);
+                var first = (ReminderEvent)Get(form, "remindEvent");
+                Call(form, "AdvanceReminders", DateTime.Now);
+                var second = (ReminderEvent)Get(form, "remindEvent");
+                bool distinct = first != null && second != null && first.title != second.title
+                    && (first.title == "同刻事项 A" || first.title == "同刻事项 B")
+                    && (second.title == "同刻事项 A" || second.title == "同刻事项 B");
+                Ok("同刻多事项：每 tick 只起一条，两条各起一次", distinct,
+                    (first == null ? "-" : first.title) + " / " + (second == null ? "-" : second.title));
+                Call(form, "AdvanceReminders", DateTime.Now);
+                var third = (ReminderEvent)Get(form, "remindEvent");
+                Ok("同刻多事项：重复推进不重复产生", third != null && third.title == second.title,
+                    third == null ? "null" : third.title);
+
+                // 常驻下班提醒被普通日程打断后，日程收起要能恢复
+                Call(form, "EndReminder");
+                var st = (CardStatus)Get(form, "status");
+                if (st != null)
+                {
+                    st.offAlert = true;
+                    st.targetIso = now.Date.ToString("yyyy-MM-dd") + "T20:04";
+                    Call(form, "AdvanceReminders", DateTime.Now);
+                    var firstAlert = (ReminderEvent)Get(form, "remindEvent");
+                    bool alertOn = (bool)Get(form, "reminding") && firstAlert != null && firstAlert.source == "alert";
+                    var meet = new ReminderEvent();
+                    meet.id = "local:interrupt"; meet.source = "local"; meet.title = "插进来的会";
+                    meet.start = Reminders.FormatStart(now.AddMinutes(-1));
+                    meet.end = Reminders.FormatStart(now.AddMinutes(30));
+                    Call(form, "StartReminder", meet);
+                    var meetShown = (ReminderEvent)Get(form, "remindEvent");
+                    bool interrupted = meetShown != null && meetShown.title == "插进来的会";
+                    Call(form, "EndReminder");
+                    Call(form, "AdvanceReminders", DateTime.Now);
+                    var back = (ReminderEvent)Get(form, "remindEvent");
+                    Ok("普通日程打断下班提醒后恢复常驻", alertOn && interrupted
+                        && (bool)Get(form, "reminding") && back != null && back.source == "alert",
+                        "常驻=" + alertOn + " 打断=" + interrupted + " 恢复=" + (back == null ? "null" : back.source));
+                }
+
+                // 全屏与卡片两条关闭路径的展示差异
+                var card = new ReminderEvent();
+                card.id = "local:card"; card.source = "local"; card.title = "卡片提醒";
+                card.start = Reminders.FormatStart(now.AddMinutes(-1));
+                card.end = Reminders.FormatStart(now.AddMinutes(30));
+                Call(form, "StartReminder", card);
+                Call(form, "DismissReminder");
+                bool cardExit = (bool)Get(form, "reminding") && (bool)Get(form, "remindExiting");
+                Set(form, "remindExitAt", now.AddSeconds(-3));
+                Call(form, "StepReminder");
+                Ok("卡片关闭：先退场再收起", cardExit && !(bool)Get(form, "reminding")
+                    && Get(form, "remindEvent") == null, "cardExit=" + cardExit);
+
+                s.ui.reducedMotion = false;
+                s.SetStyleOf(Reminders.KindLocal, new ReminderStyleDef("screen", "circle", ReminderStyles.Follow));
+                Set(form, "settings", s);
+                var full = new ReminderEvent();
+                full.id = "local:screen"; full.source = "local"; full.title = "全屏提醒";
+                full.start = Reminders.FormatStart(now.AddMinutes(-1));
+                full.end = Reminders.FormatStart(now.AddMinutes(30));
+                Call(form, "StartReminder", full);
+                bool opened = Get(form, "screenForm") != null;
+                Call(form, "DismissReminder");
+                Ok("全屏关闭：立即结束，不走卡片退场", opened && !(bool)Get(form, "reminding")
+                    && Get(form, "remindEvent") == null, "opened=" + opened);
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
         }
@@ -857,11 +948,12 @@ class Check
                 form.MinimumSize = Size.Empty;
                 form.Size = new Size(420, 273);
                 Call(form, "Recompute");
+                foreach (var f in s.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
 
                 var st = (CardStatus)Get(form, "status");
                 st.offAlert = true;
                 st.targetIso = DateTime.Today.ToString("yyyy-MM-dd") + "T20:04";
-                Call(form, "CheckOffWork");
+                Call(form, "AdvanceReminders", DateTime.Now);
 
                 bool reminding = (bool)Get(form, "reminding");
                 var ev = (ReminderEvent)Get(form, "remindEvent");
@@ -926,26 +1018,34 @@ class Check
                     bmp.Save(System.IO.Path.Combine(vdir2, "lunch-evening-row.png"));
                 }
 
-                // 下一次重播安排在 5 分钟后
-                var next = (DateTime)Get(form, "offAlertNext");
-                double minutes = (next - DateTime.Now).TotalMinutes;
-                Ok("下一次重播在 5 分钟内", minutes > 4.5 && minutes <= 5.1, minutes.ToString("0.0") + " 分钟");
+                // 下一次重播安排在 5 分钟后：4 分钟不动，6 分钟重播
+                DateTime repeatBase = DateTime.Now;
+                st.offAlert = true;
+                Set(form, "remindEvent", ev);
+                Set(form, "reminding", true);
+                DateTime repeatMarker = repeatBase.AddMinutes(-10);
+                Set(form, "remindAt", repeatMarker);
+                Call(form, "AdvanceReminders", repeatBase.AddMinutes(4));
+                bool earlyRepeat = (DateTime)Get(form, "remindAt") != repeatMarker;
+                Call(form, "AdvanceReminders", repeatBase.AddMinutes(6));
+                double replayed = ((DateTime)Get(form, "remindAt") - repeatBase).TotalMinutes;
+                Ok("每 5 分钟重播一次（4 分钟不重播、6 分钟重播）", !earlyRepeat && replayed > 5.5 && replayed < 6.5,
+                    "4 分钟=" + (earlyRepeat ? "重播" : "没动") + "，6 分钟偏差 " + (replayed - 6).ToString("0.0") + " 分");
 
                 // 打卡后收起
                 st.offAlert = false;
-                Call(form, "CheckOffWork");
+                Call(form, "AdvanceReminders", DateTime.Now);
                 Ok("打卡后收起常驻提醒",
                     !(bool)Get(form, "reminding") && Get(form, "remindEvent") == null, "reminding=False");
 
                 // 手动「忽略今天」也能收掉，且第二天自动恢复
                 st.offAlert = true;
-                Call(form, "CheckOffWork");
+                Call(form, "AdvanceReminders", DateTime.Now);
                 Call(form, "MuteOffAlert");
                 bool muted = !(bool)Get(form, "reminding");
-                Call(form, "CheckOffWork");
+                Call(form, "AdvanceReminders", DateTime.Now);
                 Ok("忽略今天后不再弹", muted && !(bool)Get(form, "reminding"), "reminding=False");
-                Set(form, "offAlertMutedDay", DateTime.Today.AddDays(-1));
-                Call(form, "CheckOffWork");
+                Call(form, "AdvanceReminders", DateTime.Now.AddDays(1));
                 Ok("第二天自动恢复", (bool)Get(form, "reminding"), "reminding=True");
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
@@ -968,6 +1068,7 @@ class Check
                 Call(form, "Recompute");
 
                 DateTime now = DateTime.Now;
+                foreach (var f in s.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
 
                 // 会议：还有 50 分钟结束，到点提醒后应当撑到结束，而不是 6 秒
                 var meet = new ReminderEvent();
@@ -1015,6 +1116,7 @@ class Check
                 var noEnd = new ReminderEvent();
                 noEnd.id = "local:9"; noEnd.source = "local"; noEnd.title = "取快递";
                 noEnd.start = Reminders.FormatStart(now);
+                s.events.Add(noEnd);
                 Call(form, "StartReminder", noEnd);
                 var half = ((DateTime)Get(form, "remindUntil") - DateTime.Now).TotalMinutes;
                 Ok("没有结束时间的日程给 30 分钟", half > 29 && half <= 30, half.ToString("0") + " 分钟");
@@ -1029,10 +1131,11 @@ class Check
                 Call(form, "StepReminder");
                 Ok("关掉后回到普通卡片", !(bool)Get(form, "reminding") && Get(form, "remindEvent") == null, "reminding=False");
 
-                var notified = (System.Collections.Generic.IEnumerable<string>)Get(form, "notified");
-                bool recorded = false;
-                foreach (var k in notified) if (k.StartsWith("local:9@")) recorded = true;
-                Ok("关掉后今天不再重复弹", recorded, "已记入 notified");
+                var stNoAlert = (CardStatus)Get(form, "status");
+                stNoAlert.offAlert = false;
+                Call(form, "AdvanceReminders", now.AddSeconds(1));
+                Ok("关掉后今天不再重复弹",
+                    !(bool)Get(form, "reminding") && Get(form, "remindEvent") == null, "去重生效");
 
                 // 中途启动（比如刚开机）正处在午休里：直接立起「午休中」的常驻卡片
                 var s2 = new Settings();
@@ -1043,11 +1146,11 @@ class Check
                 s2.lunchEnd = DateTime.Now.AddMinutes(30).ToString("HH:mm");
                 s2.eveningEnabled = false;
                 Set(form, "settings", s2);
-                bool fired = (bool)Call(form, "CheckBreaks", DateTime.Now);
+                bool fired = (bool)Call(form, "AdvanceReminders", DateTime.Now);
                 var rev = (ReminderEvent)Get(form, "remindEvent");
                 Ok("休息中途启动也有常驻卡片", fired && rev != null && rev.title == "午休中",
                     rev == null ? "没触发" : rev.title);
-                bool again = (bool)Call(form, "CheckBreaks", DateTime.Now);
+                bool again = (bool)Call(form, "AdvanceReminders", DateTime.Now);
                 Ok("同一天不会重复立卡片", !again, "第二次 " + again);
                 Set(form, "reminding", false);
                 Set(form, "remindEvent", null);
@@ -1057,11 +1160,17 @@ class Check
                 var st2 = (CardStatus)Get(form, "status");
                 st2.offAlert = true;
                 st2.targetIso = now.Date.ToString("yyyy-MM-dd") + "T20:04";
-                Call(form, "CheckOffWork");
+                Call(form, "AdvanceReminders", DateTime.Now);
                 Call(form, "DismissReminder");
                 Ok("下班提醒 × = 忽略今天",
-                    !(bool)Get(form, "reminding") && (DateTime)Get(form, "offAlertMutedDay") == DateTime.Today,
-                    "muted=" + ((DateTime)Get(form, "offAlertMutedDay")).ToString("MM-dd"));
+                    !(bool)Get(form, "reminding") && Get(form, "remindEvent") == null, "reminding=False");
+                Call(form, "AdvanceReminders", DateTime.Now);
+                Ok("忽略今天后不再弹", !(bool)Get(form, "reminding"), "reminding=False");
+                Call(form, "AdvanceReminders", DateTime.Now.AddDays(1));
+                var nextDayAlert = (ReminderEvent)Get(form, "remindEvent");
+                Ok("第二天自动恢复下班提醒",
+                    (bool)Get(form, "reminding") && nextDayAlert != null && nextDayAlert.source == "alert",
+                    nextDayAlert == null ? "没恢复" : nextDayAlert.source);
 
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
@@ -2396,6 +2505,17 @@ class Check
                 Ok("预览「午休提醒」换成休息类临时日程",
                     prevEv2 != null && prevEv2.id == "preview" && prevEv2.source == "break",
                     "id=" + (prevEv2 == null ? "-" : prevEv2.id) + " source=" + (prevEv2 == null ? "-" : prevEv2.source));
+                // 关闭预览只结束展示，不写真实提醒决策状态（真实下班提醒仍会弹）
+                var stPv = (CardStatus)Get(form, "status");
+                stPv.offAlert = true;
+                stPv.targetIso = DateTime.Today.ToString("yyyy-MM-dd") + "T20:04";
+                foreach (var f in pv.schedules) if (!f.IsOffWork) { f.enabled = false; f.notify = false; }
+                Call(form, "DismissReminder");
+                Call(form, "AdvanceReminders", DateTime.Now);
+                var pvAlert = (ReminderEvent)Get(form, "remindEvent");
+                Ok("关闭预览不会静音真实下班提醒",
+                    (bool)Get(form, "reminding") && pvAlert != null && pvAlert.source == "alert",
+                    pvAlert == null ? "没弹" : pvAlert.source);
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
         }
@@ -2809,7 +2929,7 @@ class Check
             s.outlook.enabled = true;
             using (var form = new WidgetForm(new SettingsStore(), s))
             {
-                Call(form, "CheckReminders");
+                Call(form, "AdvanceReminders", DateTime.Now);
                 var shown = (ReminderEvent)Get(form, "remindEvent");
                 Ok("同步晚于开始的日程会补提醒",
                     (bool)Get(form, "reminding") && shown != null && shown.title == "迟到的同步",
