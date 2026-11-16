@@ -91,6 +91,7 @@ namespace WorkCountdown
         public string Id { get; internal set; }
         public string Scope { get; internal set; }
         public bool Manual { get; internal set; }
+        /// <summary>请求所属范围的配置代次；判断结果是否过期只看它。</summary>
         public long ConfigVersion { get; internal set; }
         public DateTime RequestedAt { get; internal set; }
         public bool Cancelled { get; internal set; }
@@ -100,6 +101,7 @@ namespace WorkCountdown
     /// <summary>同步模块对外发布的只读状态快照；窗口只读它，不再自己合并来源。</summary>
     public class SyncSnapshot
     {
+        /// <summary>全局单调修订号：任一范围变化即自增，只供观测，不用于判断结果是否过期。</summary>
         public long ConfigVersion { get; set; }
         public AttendanceSnapshot Attendance { get; set; }
         public DateTime AttendanceLastSuccess { get; set; }
@@ -187,17 +189,28 @@ namespace WorkCountdown
         }
     }
 
+    /// <summary>一个同步范围的配置代次：只有该范围的指纹变化才推进并作废它在途请求。</summary>
+    internal class SyncScopeState
+    {
+        public readonly string Scope;
+        public string Fingerprint = "";
+        public long Version;
+
+        public SyncScopeState(string scope)
+        {
+            Scope = scope;
+        }
+    }
+
     internal class SyncConfig
     {
-        public long Version;
         public readonly LarkConfig Lark = new LarkConfig();
         public bool LarkCalendarEnabled;
         public readonly OutlookConfig Outlook = new OutlookConfig();
 
-        public static SyncConfig Capture(Settings settings, long version)
+        public static SyncConfig Capture(Settings settings)
         {
             var config = new SyncConfig();
-            config.Version = version;
             if (settings == null) return config;
             if (settings.lark != null)
             {
@@ -231,17 +244,39 @@ namespace WorkCountdown
         }
 
         /// <summary>
-        /// 只把「会改变同步结果」的配置算进去；主题、窗口位置等变化不会让在途结果作废。
-        /// 缓存 / 最后同步时间 / 错误不参与，否则每次接受结果都会把自己判成过期。
+        /// 考勤范围的指纹：正好是 AttendanceReadRequest 读取的 command / chatId，
+        /// 再加上“要不要读考勤”的启用开关。飞书凭证变化会同时影响考勤与飞书日程。
         /// </summary>
-        public string Fingerprint()
+        public string AttendanceFingerprint()
         {
             var sb = new StringBuilder();
-            Field(sb, "sync-v1");
+            Field(sb, "attendance-v1");
             Field(sb, Lark.Enabled ? "1" : "0");
             Field(sb, Lark.Command);
             Field(sb, Lark.ChatId);
+            return sb.ToString();
+        }
+
+        /// <summary>飞书日程范围的指纹：BuildLarkRequest 读取的飞书字段 + 该范围是否启用。</summary>
+        public string LarkCalendarFingerprint()
+        {
+            var sb = new StringBuilder();
+            Field(sb, "lark-calendar-v1");
             Field(sb, LarkCalendarEnabled ? "1" : "0");
+            Field(sb, Lark.Command);
+            Field(sb, Lark.ChatId);
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Outlook 范围的指纹：BuildOutlookRequest 读取的账号级凭据、默认提前量，
+        /// 以及每份启用来源的 id / 名称 / 类型 / 地址 / 路径 / 提前量。
+        /// 与飞书配置无关，所以改飞书不会推进这一范围的代次。
+        /// </summary>
+        public string OutlookFingerprint()
+        {
+            var sb = new StringBuilder();
+            Field(sb, "outlook-v1");
             Field(sb, Outlook.ClientId);
             Field(sb, Outlook.Tenant);
             Field(sb, Outlook.Account);
@@ -257,6 +292,21 @@ namespace WorkCountdown
                 Field(sb, c.Path);
                 Field(sb, c.LeadMinutes.ToString(CultureInfo.InvariantCulture));
             }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 三个范围指纹的合计：配置变化计划只关心“同步配置整体有没有变”，
+        /// 所以对外仍保留一个稳定字符串；是否作废在途请求由每个范围自己的指纹决定。
+        /// 缓存 / 最后同步时间 / 错误不参与，否则每次接受结果都会把自己判成过期。
+        /// </summary>
+        public string Fingerprint()
+        {
+            var sb = new StringBuilder();
+            Field(sb, "sync-v2");
+            Field(sb, AttendanceFingerprint());
+            Field(sb, LarkCalendarFingerprint());
+            Field(sb, OutlookFingerprint());
             return sb.ToString();
         }
 
@@ -291,9 +341,13 @@ namespace WorkCountdown
         private readonly Dictionary<string, SyncTicket> tickets = new Dictionary<string, SyncTicket>();
         private readonly Dictionary<string, CalendarCache> calendarCaches = new Dictionary<string, CalendarCache>();
 
+        private readonly SyncScopeState attendanceScope = new SyncScopeState(SyncScopes.Attendance);
+        private readonly SyncScopeState larkCalendarScope = new SyncScopeState(SyncScopes.LarkCalendar);
+        private readonly SyncScopeState outlookScope = new SyncScopeState(SyncScopes.Outlook);
+
         private SyncConfig config = new SyncConfig();
         private string configFingerprint = "";
-        private long configVersion;
+        private long configRevision;
         private volatile bool released;
 
         private AttendanceSnapshot attendance;
@@ -319,9 +373,10 @@ namespace WorkCountdown
 
         public ISyncConfigSink ConfigSink { get; set; }
 
+        /// <summary>全局单调修订号：任一范围变化即自增，只供观测；结果是否过期按范围代次判断。</summary>
         public long ConfigVersion
         {
-            get { return configVersion; }
+            get { return configRevision; }
         }
 
         /// <summary>同步模块当前实际使用的配置指纹；配置变化计划用它避免重复通知。</summary>
@@ -341,28 +396,41 @@ namespace WorkCountdown
         /// </summary>
         public static string Fingerprint(Settings settings)
         {
-            return SyncConfig.Capture(settings, 0).Fingerprint();
+            return SyncConfig.Capture(settings).Fingerprint();
         }
 
-        /// <summary>设置页保存 / 启动 / 导入配置后调用；只有同步相关配置变化才推进代次。</summary>
+        /// <summary>
+        /// 设置页保存 / 启动 / 导入配置后调用；按考勤 / 飞书日程 / Outlook 三个范围各自比较指纹，
+        /// 只有指纹真的变了的范围才推进代次并作废该范围的在途请求，其它范围照常完成。
+        /// </summary>
         public void Configure(Settings settings)
         {
             if (released || settings == null) return;
-            SyncConfig next = SyncConfig.Capture(settings, 0);
+            SyncConfig next = SyncConfig.Capture(settings);
             string fingerprint = next.Fingerprint();
-            bool changed = fingerprint != configFingerprint;
-            if (changed)
+            lock (gate)
             {
-                configVersion++;
-                next.Version = configVersion;
+                if (released) return;
+                bool anyChanged = false;
+                if (AdvanceScope(attendanceScope, next.AttendanceFingerprint()))
+                {
+                    CancelScopeLocked(attendanceScope.Scope);
+                    anyChanged = true;
+                }
+                if (AdvanceScope(larkCalendarScope, next.LarkCalendarFingerprint()))
+                {
+                    CancelScopeLocked(larkCalendarScope.Scope);
+                    anyChanged = true;
+                }
+                if (AdvanceScope(outlookScope, next.OutlookFingerprint()))
+                {
+                    CancelScopeLocked(outlookScope.Scope);
+                    anyChanged = true;
+                }
+                if (anyChanged) configRevision++;
                 configFingerprint = fingerprint;
-                CancelAllTickets();
+                config = next;
             }
-            else
-            {
-                next.Version = configVersion;
-            }
-            config = next;
             ApplyConfig(settings);
             snapshot = BuildSnapshot();
         }
@@ -412,6 +480,8 @@ namespace WorkCountdown
 
         private SyncTicket StartTicket(string scope, bool manual)
         {
+            SyncScopeState state = ScopeStateFor(scope);
+            if (state == null) return null;
             SyncTicket ticket;
             lock (gate)
             {
@@ -421,7 +491,7 @@ namespace WorkCountdown
                 ticket.Id = Guid.NewGuid().ToString("N");
                 ticket.Scope = scope;
                 ticket.Manual = manual;
-                ticket.ConfigVersion = config.Version;
+                ticket.ConfigVersion = state.Version;
                 ticket.RequestedAt = clock();
                 ticket.Config = config;
                 tickets[scope] = ticket;
@@ -490,12 +560,15 @@ namespace WorkCountdown
         private void Accept(SyncTicket ticket, SyncResult result)
         {
             if (released || ticket == null || result == null) return;
+            SyncScopeState state = ScopeStateFor(ticket.Scope);
+            if (state == null) return;
             lock (gate)
             {
                 SyncTicket current;
                 if (!tickets.TryGetValue(ticket.Scope, out current) || current == null || current.Id != ticket.Id)
                     return;
-                if (ticket.ConfigVersion != config.Version)
+                // 只和该请求所属范围的代次比较：别的范围配置变化不会让这份结果过期。
+                if (ticket.ConfigVersion != state.Version)
                 {
                     tickets.Remove(ticket.Scope);
                     snapshot = BuildSnapshot();
@@ -531,9 +604,11 @@ namespace WorkCountdown
                 update = ApplyOutlook(result, out errorChanged);
                 if (update != null && update.RefreshToken != null)
                 {
-                    // 令牌轮换后，本会话后续刷新继续用新令牌；配置代次不变，窗口稍后保存到 Settings。
+                    // 令牌轮换后，本会话后续刷新继续用新令牌；代次不变，窗口稍后保存到 Settings。
+                    // 范围指纹跟着当前配置一起走，避免保存完成前的下一次 Configure 误判成账号变更。
                     config.Outlook.RefreshToken = update.RefreshToken;
                     configFingerprint = config.Fingerprint();
+                    outlookScope.Fingerprint = config.OutlookFingerprint();
                 }
             }
 
@@ -793,7 +868,7 @@ namespace WorkCountdown
         private SyncSnapshot BuildSnapshot()
         {
             var state = new SyncSnapshot();
-            state.ConfigVersion = configVersion;
+            state.ConfigVersion = configRevision;
             state.Attendance = attendance;
             state.AttendanceLastSuccess = attendanceLastSuccess;
             state.AttendanceFetching = HasTicket(SyncScopes.Attendance);
@@ -866,14 +941,30 @@ namespace WorkCountdown
             return newest;
         }
 
-        private void CancelAllTickets()
+        private SyncScopeState ScopeStateFor(string scope)
         {
-            lock (gate)
-            {
-                foreach (var ticket in tickets.Values)
-                    if (ticket != null) ticket.Cancelled = true;
-                tickets.Clear();
-            }
+            if (scope == SyncScopes.Attendance) return attendanceScope;
+            if (scope == SyncScopes.LarkCalendar) return larkCalendarScope;
+            if (scope == SyncScopes.Outlook) return outlookScope;
+            return null;
+        }
+
+        /// <summary>只有指纹真的变了的范围才推进代次；返回 false 表示该范围配置没变。</summary>
+        private static bool AdvanceScope(SyncScopeState state, string fingerprint)
+        {
+            if (fingerprint == state.Fingerprint) return false;
+            state.Fingerprint = fingerprint;
+            state.Version++;
+            return true;
+        }
+
+        /// <summary>只作废指定范围的在途请求；调用者必须持有 gate。</summary>
+        private void CancelScopeLocked(string scope)
+        {
+            SyncTicket ticket;
+            if (!tickets.TryGetValue(scope, out ticket)) return;
+            if (ticket != null) ticket.Cancelled = true;
+            tickets.Remove(scope);
         }
 
         private static string FormatTime(DateTime time)

@@ -18,7 +18,9 @@
   测试不再反射私有 `DeliverPresence`，并顺带覆盖主题路由与对话码串台拒绝。
 - 测试替换：9 条旧的 `Reminders.IsDue / IsLateDue` 直接断言改由 `ReminderEngine.Advance` 的行为断言覆盖
   （逐条映射见 §4）；没有删除任何仍然独立有效的规则或 UI 回归断言。
-- 最终基线：`Test` **540** 条 / `Check` **350** 条，全绿；`build.ps1` 生产编译通过；
+- 后续定向补丁（#5 AC3）：`SyncEngine` 的配置代次从全局一个改为按 `attendance` / `lark-calendar` /
+  `outlook` 三个范围各自维护；只改一个范围不再取消其它范围的在途结果（见 §6.4）。
+- 最终基线：`Test` **556** 条 / `Check` **350** 条，全绿；`build.ps1` 生产编译通过；
   72 个探针入口逐个编译 **72 OK / 0 FAIL**。
 - 倒计时、午休、调休、工资估算的样例输出整理前后 **逐字节一致**（47 行，见 §5）；
   在岗时长与计薪时长的三种口径差异作为事实记录，未统一（见 §6）。
@@ -35,15 +37,15 @@
 | 工资估算 | `SalaryCalc`（纯计算） | `SalaryCalc.Compute(settings, snapshot, now)`：显式 `now`，返回 `SalarySnapshot` | `test/Test.cs:768-830`（应出勤 / 日薪 / 时薪 / 今日 / 本月 / 发薪日 / 封顶 / 亚秒累计） |
 | 提醒：提前提醒、补提醒、固定日程、常驻下班提醒、去重、关闭提醒 | `ReminderEngine`（`notified`、`mutedOffWorkDay`、`offWorkActive`、`offWorkNext`） | `Advance(settings, snapshot, now, signals)` 返回有序 `ReminderDecision`；`Dismiss(e, now)` 只改模块状态；`HoldUntil` / `Agenda` / `NextEvent` 只读 | `test/Test.cs:1279-1565`（20/21 全部用例：边界、去重、关闭、跨日清理） |
 | 日程合并与日历来源过滤 | `ReminderEngine`（合并视图）+ `SyncEngine`（每份日历缓存） | `Agenda(settings, ReminderScheduleSnapshot)`：调用方不排序；`NextEvent` 直接给最早未来项 | `test/Test.cs:1291-1315`（乱序输入、来源关停）、`test/Test.cs:1575-1627`（启动缓存 / 来源过滤） |
-| 同步生命周期：请求代次、在途去重、有效结果发布、令牌轮换 | `SyncEngine`（`tickets`、`configVersion`、`calendarCaches`） | `Configure` / `RequestAttendance` / `RequestLarkCalendar` / `RequestOutlook` / `Snapshot` / `Published`；过期结果不发布 | `test/Test.cs:1566-2225`（22.1–22.6） |
-| 外部考勤与日历读取 | `IAttendanceReader` / `ICalendarSourceReader` 的生产 adapter（`src/SyncAdapters.cs`）与测试 adapter（`test/SyncFakes.cs`） | 请求是快照，结果自带错误 / 缓存 / 受保护令牌，不写共享配置 | `test/Test.cs:2081-2162`（adapter 只读快照）、`test/Test.cs:2163-2225`（`CalendarSync.Fetch` 不写配置） |
-| 配置加载、迁移、保存、导入导出 | `SettingsStore` + `ISettingsStorage`（生产 `FileSettingsStorage` / 测试 fake） | `Load` 返回 `SettingsLoadResult`；`Save` 只规范化独立快照并返回 `SettingsSaveResult` | `test/Test.cs:2226-2631`（23/24）、`test/Check.cs:4060-4095`（保存失败的用户可见反馈） |
-| 配置变化应用 | `SettingsChangePlanner`（纯比较）+ `SettingsApplyCoordinator`（`applied` 快照与副作用顺序） | `Plan(previous, next, state)` → `SettingsChangePlan`；`Apply(next)` 只调有变化的 `ISettingsApplyTarget` 方法 | `test/Test.cs:2632-3019`（25.1–25.11）、`test/Check.cs:3986-4006`（重复应用不关闭面板） |
-| 配置提交（保存成功才应用） | `SettingsCommitCoordinator` | `Commit(candidate, reason)` → `SettingsCommitResult`；失败 / `WC_NO_SAVE` 不应用 | `test/Test.cs:2883-2950`（25.9）、`test/Check.cs:4085` |
+| 同步生命周期：按范围代次、在途去重、有效结果发布、令牌轮换 | `SyncEngine`（`tickets`、每范围 `SyncScopeState.Version/Fingerprint`、`configRevision`、`calendarCaches`） | `Configure` / `RequestAttendance` / `RequestLarkCalendar` / `RequestOutlook` / `Snapshot` / `Published`；结果只与所属范围当前代次比较，过期不发布 | `test/Test.cs:1566-2520`（22.1–22.6，含 22.3a–22.3d 范围失效） |
+| 外部考勤与日历读取 | `IAttendanceReader` / `ICalendarSourceReader` 的生产 adapter（`src/SyncAdapters.cs`）与测试 adapter（`test/SyncFakes.cs`） | 请求是快照，结果自带错误 / 缓存 / 受保护令牌，不写共享配置 | `test/Test.cs:2376-2457`（adapter 只读快照）、`test/Test.cs:2458-2520`（`CalendarSync.Fetch` 不写配置） |
+| 配置加载、迁移、保存、导入导出 | `SettingsStore` + `ISettingsStorage`（生产 `FileSettingsStorage` / 测试 fake） | `Load` 返回 `SettingsLoadResult`；`Save` 只规范化独立快照并返回 `SettingsSaveResult` | `test/Test.cs:2521-2926`（23/24）、`test/Check.cs:4060-4095`（保存失败的用户可见反馈） |
+| 配置变化应用 | `SettingsChangePlanner`（纯比较）+ `SettingsApplyCoordinator`（`applied` 快照与副作用顺序） | `Plan(previous, next, state)` → `SettingsChangePlan`；`Apply(next)` 只调有变化的 `ISettingsApplyTarget` 方法 | `test/Test.cs:2927-3323`（25.1–25.11）、`test/Check.cs:3986-4006`（重复应用不关闭面板） |
+| 配置提交（保存成功才应用） | `SettingsCommitCoordinator` | `Commit(candidate, reason)` → `SettingsCommitResult`；失败 / `WC_NO_SAVE` 不应用 | `test/Test.cs:3178-3245`（25.9）、`test/Check.cs:4085` |
 | 小纸条连接、对话 / 对话码、在线状态 | `NoteRelay`（连接、订阅、主题分发） | `Start/Stop`、`SendMessage`、`RefreshSubscriptions`、`AcceptPublish(topic, payload)` + `Message/Profile/ConnectedChanged` 事件 | `test/Test.cs:1046-1085`（在线状态 / 收件箱 / 对话码 / 无关主题） |
 | 主题、界面风格、提醒配色 | `Themes` / `Skins` / `ReminderStyles`（静态表 + 纯函数） | 按 id 取配色；非法值回退 | `test/Test.cs:207-224`、`test/Test.cs:1091-1270` |
 | 字体 | `UiFont`（进程级字体选择） | `Configure` / `Make` / `MakeNumber`；变化由 `SettingsChangePlan.FontsChanged` 触发 | `test/Test.cs:832+`、`test/Check.cs:3149-3169` |
-| 模型与 JSON | `Settings` 及嵌套类型（数据）；`SettingsExtensions.Normalize`（迁移） | 所有入口先 `Normalize`，模型不自带 I/O | `test/Test.cs:733-782`（工作日迁移）、`test/Test.cs:2434-2485`（临时目录迁移） |
+| 模型与 JSON | `Settings` 及嵌套类型（数据）；`SettingsExtensions.Normalize`（迁移） | 所有入口先 `Normalize`，模型不自带 I/O | `test/Test.cs:733-782`（工作日迁移）、`test/Test.cs:2729-2780`（临时目录迁移） |
 
 一句话归属：**窗口（`WidgetForm`、`SettingsForm`、`NotePanelForm`、`DrawerForm`、`ScreenReminderForm`）
 只拥有绘制、动画、输入和界面线程调度**；规则与生命周期在 `ReminderEngine`、`SyncEngine`、
@@ -63,14 +65,14 @@ fde2587:`src/Models.cs:363` 直接写 `cached/lastSync/lastError`）。
 **优化后**：
 - 提醒的全部决策状态在 `src/ReminderEngine.cs:115 Advance`；窗口只按 `Reason` 走展示分支
   （`src/Widget.cs:725 AdvanceReminders` → `src/Widget.cs:737 ApplyReminderDecision`）。
-- 同步的结果合并、来源过滤、代次校验在 `src/SyncEngine.cs:490 Accept` 与
-  `src/SyncEngine.cs:793 BuildSnapshot`；窗口只读 `SyncSnapshot`（`src/Widget.cs:615 OnSyncPublished`）。
+- 同步的结果合并、来源过滤、按范围代次校验在 `src/SyncEngine.cs:558 Accept` 与
+  `src/SyncEngine.cs:866 BuildSnapshot`；窗口只读 `SyncSnapshot`（`src/Widget.cs:615 OnSyncPublished`）。
 - 配置应用不再由一个 52 行的 `ApplySettings`（fde2587:`src/Widget.cs:1594-1645`）一次性重建，
   而是 `SettingsChangePlanner.Plan`（`src/SettingsApplyPlan.cs:70`）比较、
   `SettingsApplyCoordinator.Apply`（`src/SettingsApplyPlan.cs:333`）排序。
 
-**证据**：`test/Test.cs:1279-1565`（提醒，无需创建 Form）、`test/Test.cs:1566-2225`（同步）、
-`test/Test.cs:2632-3019`（配置应用）。同样的验收在窗口层由 `test/Check.cs:936-1178`
+**证据**：`test/Test.cs:1279-1565`（提醒，无需创建 Form）、`test/Test.cs:1566-2520`（同步）、
+`test/Test.cs:2927-3323`（配置应用）。同样的验收在窗口层由 `test/Check.cs:936-1178`
 （常驻下班提醒 / 常驻到时段结束）只验证“决定被应用成动画与像素”。
 
 ### 2.2 shallow 接口
@@ -138,9 +140,10 @@ seam 清单（都同时有生产实现与测试实现/多个来源，不是为�
 - 提醒：`Advance` 接收显式 `now` 与 `ReminderSignals`，返回可检查的 `ReminderOutcome`；
   5 分钟重播、跨日清理、300 条阈值都能在 `test/Test.cs:1447-1565` 直接推进时间验证。
 - 同步：`SyncEngine` 注入调度器 / 投递器 / 时钟；`test/Test.cs:1713-1822` 用可控队列验证
-  “A 在途时再请求同来源”“不同来源并发”“异常后清掉在途”，`test/Test.cs:1823-2002` 验证
-  “请求 A 期间配置变化 → 旧结果不发布、不写缓存、不改令牌”。
-- 配置：`SettingsApplyFakes` 记录每个副作用；`test/Test.cs:2632-3019` 验证“相同配置零副作用、
+  “A 在途时再请求同来源”“不同来源并发”“异常后清掉在途”，`test/Test.cs:1823-2005` 验证
+  “请求 A 期间配置变化 → 旧结果不发布、不写缓存、不改令牌”，`test/Test.cs:2006-2297` 验证
+  “只改一个范围只作废该范围，其它范围照常发布”。
+- 配置：`SettingsApplyFakes` 记录每个副作用；`test/Test.cs:2927-3323` 验证“相同配置零副作用、
   外观只刷显示、字体只重建字体、保存失败不应用”。
 - 仍难测：真实网络 / 真实飞书账号 / 真实 Outlook 登录 / 真实用户配置。本工单**没有**触碰这些，
   也没有宣称验证过；桌面像素与输入在 `Check` 里用离屏绘制 + 注入坐标完成。
@@ -164,7 +167,7 @@ seam 清单（都同时有生产实现与测试实现/多个来源，不是为�
 | `SyncSnapshot.AttendanceError` | 原 `src/SyncEngine.cs:116-119` | 只是 `Attendance == null ? null : Attendance.error`；唯一调用是测试 | **删除**；断言直接读 `Snapshot().Attendance.error`（`test/Test.cs:1802-1804`） |
 | `ReminderEngine.BuildAgenda` 私有转发 | 原 `src/ReminderEngine.cs:117-120 / 323` | `Agenda` 只是转调，内部又直接调 `BuildAgenda`，两套入口 | **合并**：`Agenda` 即唯一实现（`src/ReminderEngine.cs:308`），`NextEvent/Advance` 直接调用 |
 | `WidgetForm.ApplySettingsChange` | 原 `src/Widget.cs:1459-1463` | 单行转发 `apply.Apply(next)`；4 个调用点 | **删除**：调用点直接 `apply.Apply(...)`；保留 `internal ApplySettings()` 作为 UI 冒烟入口（`src/Widget.cs:1453`） |
-| `CalendarSourceConfig.HasSource` | 原 `src/SyncEngine.cs:179-187` | 与 `CalendarSource.HasSource` 同一规则，且无调用者 | **删除**；`SyncConfig.Capture` 改用 `OutlookSettings.Active`（`src/SyncEngine.cs:216-228`） |
+| `CalendarSourceConfig.HasSource` | 原 `src/SyncEngine.cs:179-187` | 与 `CalendarSource.HasSource` 同一规则，且无调用者 | **删除**；`SyncConfig.Capture` 改用 `OutlookSettings.Active`（`src/SyncEngine.cs:228-239`） |
 | `OutlookSettings.CachedCount` | 原 `src/Models.cs:308-317` | 无任何调用者 | **删除** |
 | `SettingsLoadResult.IsFallback` | 原 `src/SettingsStore.cs:61` | 无调用者；与 `Status` 重复 | **删除** |
 | `SettingsCommitResult.ShouldKeepEditing` | 原 `src/SettingsApplyPlan.cs:389` | 只等于 `!IsSuccess`，仅测试使用 | **删除**；测试直接断言 `!IsSuccess` |
@@ -174,9 +177,9 @@ seam 清单（都同时有生产实现与测试实现/多个来源，不是为�
 | `SalaryCalc` | `src/Models.cs:2103` | 应出勤 / 日薪 / 时薪 / 封顶 / 跨天裁剪散回工资面板 | **保留** |
 | `StatusBuilder` | `src/Models.cs:2257` | 状态与文案矩阵散回窗口和探针 | **保留** |
 | `SyncSnapshot`（整体） | `src/SyncEngine.cs:101` | 删掉后窗口要直接读引擎的可变字段，跨线程不安全 | **保留**：界面线程只读快照 |
-| `SyncTicket` | `src/SyncEngine.cs:89` | 删掉后调用方拿不到“这次请求还在不在跑” | **保留**：只暴露 Id/Scope/Manual/ConfigVersion/RequestedAt/Cancelled |
+| `SyncTicket` | `src/SyncEngine.cs:89` | 删掉后调用方拿不到“这次请求还在不在跑” | **保留**：只暴露 Id/Scope/Manual/ConfigVersion（所属范围代次）/RequestedAt/Cancelled |
 | `SyncPublication` | `src/SyncEngine.cs:127` | 事件需要一次带出状态、错误变化与配置更新 | **保留** |
-| `SyncEngine.ConfigFingerprint()` 与 `Fingerprint(Settings)` | `src/SyncEngine.cs:328 / 342` | 一个是“当前配置”，一个是“候选配置”；合并会让变化计划拿不到候选指纹 | **保留**（命名上区分当前/候选） |
+| `SyncEngine.ConfigFingerprint()` 与 `Fingerprint(Settings)` | `src/SyncEngine.cs:381 / 395` | 一个是“当前配置”，一个是“候选配置”；合并会让变化计划拿不到候选指纹 | **保留**（命名上区分当前/候选；契约仍是单个稳定字符串） |
 | `SettingsStore` | `src/SettingsStore.cs:233` | `Load/Save/Import/Export` 与目录/日志/迁移集中；删除会散回 Program/Widget/SettingsForm | **保留**；`Exists` 被 `src/Program.cs:70` 使用，不是薄包装 |
 | `SettingsApplyCoordinator` | `src/SettingsApplyPlan.cs:333` | 删掉后“上次已应用快照 + 副作用顺序”要回到窗口 | **保留** |
 | `SettingsChangePlanner / SettingsChangePlan` | `src/SettingsApplyPlan.cs:68 / 24` | 删掉后字段比较与“哪些副作用”重新写进窗口 | **保留** |
@@ -284,6 +287,25 @@ shallow 接口（§3）。
   被吞掉；这是既有行为，未改动。
 - `WidgetForm.ApplySettings()` 是 internal 的 UI 探针入口（生产不调用），为避免测试反射而保留；
   它不是业务接口，不应被生产代码使用。
+- 配置代次已按考勤 / 飞书日程 / Outlook 三个范围失效（#5 AC3 补丁，见 §6.4），
+  “一个范围变化取消全部在途请求”不再是剩余风险。
+
+### 6.4 已收口：配置代次按范围失效（#5 AC3 后续补丁）
+
+#5 交付时 `SyncEngine` 只有一个全局配置代次：任何同步指纹变化都会 `CancelAllTickets()`，
+只改 Outlook 也会作废正在跑的考勤刷新。本补丁把代次改成按范围各自维护，`Configure` 只对
+指纹变了的范围执行 `CancelScopeLocked`，`Accept` 只与请求所属范围的当前代次比较；
+`SyncSnapshot.ConfigVersion` 仍是“任一范围变化即自增”的全局修订号，只供观测，不再用于判过期。
+
+| 范围（`SyncScopes`） | 指纹字段（来自 adapter 请求快照） |
+| --- | --- |
+| `attendance` | `lark.enabled`（是否读考勤）、`lark.command`、`lark.chatId` |
+| `lark-calendar` | `LarkCalendarEnabled`（`calendarEnabled && lark.enabled`）、`lark.command`、`lark.chatId` |
+| `outlook` | `outlook.clientId` / `tenant` / `account` / `refreshToken` / `leadMinutes`，以及每份启用来源的 `id` / `name` / `kind`（`source`）/ `url` / `path` / `leadMinutes` |
+
+飞书凭证与 `lark.enabled` 同时属于考勤与飞书日程两个范围；Outlook 字段只属于 Outlook 范围。
+全局日历 / 日程默认提前量（`calendarLeadMinutes` / `eventLeadMinutes`）在提醒决策时读取，
+不进入任何拉取请求快照，因此不会作废在途同步结果。
 
 ## 7. 构建、测试、打包与探针枚举
 
@@ -302,7 +324,8 @@ shallow 接口（§3）。
 
 验证结果：
 
-- `test/build-tests.ps1`：`Test` 540 条 / `Check` 350 条，连续运行全绿（两套 ALL PASS，exit 0）。
+- `test/build-tests.ps1`：`Test` 556 条 / `Check` 350 条，连续运行全绿（两套 ALL PASS，exit 0）。
+  （#5 AC3 补丁前为 540 / 350；新增 16 条按范围失效与旧结果保护断言。）
 - `build.ps1`：exit 0，产出 `dist/WorkCountdown.exe`。
 - `test/build-probes.ps1`：**72 个入口 / 72 OK / 0 FAIL**，包括：
   - `test/*.cs` 下 69 个含 Main 的探针、
@@ -333,3 +356,4 @@ shallow 接口（§3）。
 
 - `refactor(core): 按深模块整理实现归属并收敛行为测试 (#6)`
 - `docs(refactor): 深模块归属与设计审视收尾 (#6)`
+- `fix(sync): 配置代次按考勤/飞书/Outlook 范围失效 (#5 AC3)`
