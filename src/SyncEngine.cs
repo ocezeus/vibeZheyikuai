@@ -342,9 +342,24 @@ namespace WorkCountdown
             get { return configVersion; }
         }
 
+        /// <summary>同步模块当前实际使用的配置指纹；配置变化计划用它避免重复通知。</summary>
+        public string ConfigFingerprint()
+        {
+            return configFingerprint;
+        }
+
         public SyncSnapshot Snapshot()
         {
             return snapshot;
+        }
+
+        /// <summary>
+        /// 同步相关配置的稳定指纹：配置变化计划用它判断是否需要通知同步模块，
+        /// Configure 用它判断是否推进代次；两处共用同一份规则，避免手写两份字段比较。
+        /// </summary>
+        public static string Fingerprint(Settings settings)
+        {
+            return SyncConfig.Capture(settings, 0).Fingerprint();
         }
 
         /// <summary>设置页保存 / 启动 / 导入配置后调用；只有同步相关配置变化才推进代次。</summary>

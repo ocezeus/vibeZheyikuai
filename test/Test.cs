@@ -2624,6 +2624,405 @@ internal static class Test
             }
         }
 
+        // 25. 配置应用：变化计划、按变化通知与提交失败语义（工单 #5）
+        {
+            Func<Settings> Base = delegate
+            {
+                var cfg = new Settings();
+                cfg.Normalize();
+                cfg.lark.enabled = false;
+                cfg.calendarEnabled = false;
+                return cfg;
+            };
+
+            // 25.1 首次启动初始化一次；相同配置重复应用零副作用（AC1）
+            {
+                var cfg = Base();
+                cfg.lark.enabled = true;
+                cfg.lark.chatId = "oc_apply";
+                cfg.calendarEnabled = true;
+                cfg.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "apply-cal", name = "工作日历", source = "url",
+                    url = "https://example.com/apply.ics", enabled = true
+                });
+                cfg.Normalize();
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                var first = apply.Apply(cfg);
+                Check("AC1 首次应用表达所有需要初始化的模块",
+                    first.FirstApply + "/" + first.AttendancePollChanged + "/" + first.CalendarPollChanged
+                    + "/" + first.OutlookPollChanged + "/" + first.SyncConfigChanged + "/" + first.NoteRelayRestart
+                    + "/" + first.FontsChanged + "/" + first.DisplayChanged,
+                    "True/True/True/True/True/True/True/True");
+                Check("AC1 首次应用只按计划通知一次",
+                    target.Counts(), "sync=1 attendance=1 calendar=1 outlook=1 fonts=1 display=1 relayRestart=1 relayRefresh=0 panel=0 panelRelayout=0 salary=0 after=1");
+                Check("AC1 首次应用把配置交给状态拥有者", target.AdoptCalls + "/" + (target.Adopted == cfg), "1/True");
+
+                target.ResetCounts();
+                var same = apply.Apply(cfg.Clone());
+                Check("AC1 相同配置重复应用计划为空", same.HasChanges.ToString(), "False");
+                Check("AC1 相同配置重复应用不重建连接 / 不重启计时器 / 不关闭面板",
+                    target.Counts() + "/relayout=" + target.NotePanelRelayoutCalls,
+                    "sync=0 attendance=0 calendar=0 outlook=0 fonts=0 display=0 relayRestart=0 relayRefresh=0 panel=0 panelRelayout=0 salary=0 after=0/relayout=0");
+                Check("AC1 相同配置重复应用只更新已应用快照", target.AdoptCalls.ToString(), "1");
+            }
+
+            // 25.2 外观变化只刷新显示资源（AC1）
+            {
+                var cfg = Base();
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var next = cfg.Clone();
+                next.ui.opacity = 55;
+                next.ui.skin = "neon";
+                var change = apply.Apply(next);
+                Check("AC1 外观变化只标记显示资源",
+                    change.DisplayChanged + "/" + change.FontsChanged + "/" + change.AttendancePollChanged
+                    + "/" + change.CalendarPollChanged + "/" + change.OutlookPollChanged
+                    + "/" + change.SyncConfigChanged + "/" + change.NoteRelayRestart,
+                    "True/False/False/False/False/False/False");
+                Check("AC1 外观变化只调用显示刷新",
+                    target.Counts(), "sync=0 attendance=0 calendar=0 outlook=0 fonts=0 display=1 relayRestart=0 relayRefresh=0 panel=1 panelRelayout=0 salary=0 after=1");
+            }
+
+            // 25.3 字体变化只重建字体（AC1）
+            {
+                var cfg = Base();
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var next = cfg.Clone();
+                next.ui.textFont = "Microsoft YaHei UI";
+                next.ui.numberFont = "Courier New";
+                var change = apply.Apply(next);
+                Check("AC1 字体变化只标记字体资源",
+                    change.FontsChanged + "/" + change.DisplayChanged + "/" + change.AttendancePollChanged + "/" + change.NoteRelayRestart,
+                    "True/False/False/False");
+                Check("AC1 字体变化只重建字体（面板字体也随显示资源刷新）",
+                    target.Counts(), "sync=0 attendance=0 calendar=0 outlook=0 fonts=1 display=0 relayRestart=0 relayRefresh=0 panel=1 panelRelayout=0 salary=0 after=1");
+            }
+
+            // 25.4 置顶 / 位置：置顶按变化应用，位置保持既有独立即时契约（AC5）
+            {
+                var cfg = Base();
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var pinned = cfg.Clone();
+                pinned.ui.alwaysOnTop = false;
+                var change = apply.Apply(pinned);
+                Check("AC5 置顶变化只通知置顶模块",
+                    change.TopMostChanged + "/" + change.DisplayChanged + "/" + change.AttendancePollChanged
+                    + "/" + change.NoteRelayRestart + "/" + target.TopMostCalls,
+                    "True/False/False/False/1");
+
+                target.ResetCounts();
+                var moved = pinned.Clone();
+                moved.ui.edge = "free";
+                moved.ui.x = 321;
+                moved.ui.y = 654;
+                var movedChange = apply.Apply(moved);
+                Check("AC5 窗口位置变化不引入全局事务、不触发模块副作用",
+                    movedChange.HasChanges + "/" + target.Counts(), "False/sync=0 attendance=0 calendar=0 outlook=0 fonts=0 display=0 relayRestart=0 relayRefresh=0 panel=0 panelRelayout=0 salary=0 after=0");
+            }
+
+            // 25.5 轮询间隔只影响对应计时器（AC3）
+            {
+                var cfg = Base();
+                cfg.lark.enabled = true;
+                cfg.lark.chatId = "oc_poll";
+                cfg.calendarEnabled = true;
+                cfg.Normalize();
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var poll = cfg.Clone();
+                poll.lark.pollMinutes = 9;
+                var change = apply.Apply(poll);
+                Check("AC3 考勤轮询间隔只标记考勤计时器",
+                    change.AttendancePollChanged + "/" + change.CalendarPollChanged + "/" + change.OutlookPollChanged
+                    + "/" + change.SyncConfigChanged + "/" + target.Counts(),
+                    "True/False/False/False/sync=0 attendance=1 calendar=0 outlook=0 fonts=0 display=0 relayRestart=0 relayRefresh=0 panel=0 panelRelayout=0 salary=0 after=1");
+
+                target.ResetCounts();
+                var calendarPoll = poll.Clone();
+                calendarPoll.calendarPollMinutes = 21;
+                var calendarChange = apply.Apply(calendarPoll);
+                Check("AC3 日历轮询间隔只影响日历类计时器",
+                    calendarChange.AttendancePollChanged + "/" + calendarChange.CalendarPollChanged
+                    + "/" + calendarChange.OutlookPollChanged + "/" + calendarChange.SyncConfigChanged
+                    + "/" + target.Counts(),
+                    "False/True/True/False/sync=0 attendance=0 calendar=1 outlook=1 fonts=0 display=0 relayRestart=0 relayRefresh=0 panel=0 panelRelayout=0 salary=0 after=1");
+            }
+
+            // 25.6 来源启停 / 凭据只影响同步契约（AC3）
+            {
+                var cfg = Base();
+                cfg.lark.enabled = true;
+                cfg.lark.chatId = "oc_sync";
+                cfg.calendarEnabled = true;
+                cfg.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "sync-cal", name = "工作日历", source = "url",
+                    url = "https://example.com/sync.ics", enabled = true
+                });
+                cfg.Normalize();
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var account = cfg.Clone();
+                account.outlook.account = "new@example.com";
+                var accountChange = apply.Apply(account);
+                Check("AC3 日历账号变化推进同步配置、不动轮询计时器",
+                    accountChange.SyncConfigChanged + "/" + accountChange.AttendancePollChanged
+                    + "/" + accountChange.CalendarPollChanged + "/" + accountChange.OutlookPollChanged
+                    + "/" + target.Counts(),
+                    "True/False/False/False/sync=1 attendance=0 calendar=0 outlook=0 fonts=0 display=0 relayRestart=0 relayRefresh=0 panel=0 panelRelayout=0 salary=0 after=1");
+
+                target.ResetCounts();
+                var chat = account.Clone();
+                chat.lark.chatId = "oc_sync_2";
+                var chatChange = apply.Apply(chat);
+                Check("AC3 来源账号变化只交给同步模块，不重启无关轮询",
+                    chatChange.SyncConfigChanged + "/" + chatChange.AttendancePollChanged
+                    + "/" + chatChange.CalendarPollChanged + "/" + chatChange.OutlookPollChanged
+                    + "/" + target.Counts(),
+                    "True/False/False/False/sync=1 attendance=0 calendar=0 outlook=0 fonts=0 display=0 relayRestart=0 relayRefresh=0 panel=0 panelRelayout=0 salary=0 after=1");
+            }
+
+            // 25.7 小纸条：昵称原地刷新，连接身份变化才重建（AC2）
+            {
+                var cfg = Base();
+                cfg.note.nickname = "阿哲";
+                cfg.Normalize();
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var nick = cfg.Clone();
+                nick.note.nickname = "阿哲新";
+                var nickChange = apply.Apply(nick);
+                Check("AC2 昵称变化只原地刷新 presence",
+                    nickChange.NoteRelayRestart + "/" + nickChange.NoteSubscriptionsRefresh
+                    + "/" + target.RelayRestartCalls + "/" + target.RelayRefreshCalls,
+                    "False/True/0/1");
+
+                target.ResetCounts();
+                var moved = nick.Clone();
+                moved.note.relayHost = "broker.example.com";
+                var movedChange = apply.Apply(moved);
+                Check("AC2 中继地址变化才重建连接",
+                    movedChange.NoteRelayRestart + "/" + movedChange.NoteSubscriptionsRefresh
+                    + "/" + target.RelayRestartCalls + "/" + target.RelayRefreshCalls,
+                    "True/False/1/0");
+
+                target.ResetCounts();
+                var style = moved.Clone();
+                style.note.style = "columns";
+                var styleChange = apply.Apply(style);
+                Check("AC2 面板样式变化只重建面板布局",
+                    styleChange.NoteRelayRestart + "/" + styleChange.NotePanelRelayout
+                    + "/" + target.RelayRestartCalls + "/" + target.NotePanelRelayoutCalls,
+                    "False/True/0/1");
+
+                target.ResetCounts();
+                var contacts = style.Clone();
+                contacts.note.AddConversation("62015", "小满");
+                var contactsChange = apply.Apply(contacts);
+                Check("AC2 新增对话原地刷新订阅、不重建连接",
+                    contactsChange.NoteRelayRestart + "/" + contactsChange.NoteSubscriptionsRefresh
+                    + "/" + target.RelayRestartCalls + "/" + target.RelayRefreshCalls,
+                    "False/True/0/1");
+            }
+
+            // 25.8 工资清空只收起工资面板（AC1）
+            {
+                var cfg = Base();
+                cfg.salary.monthly = 21000m;
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var raised = cfg.Clone();
+                raised.salary.monthly = 22000m;
+                var raisedChange = apply.Apply(raised);
+                Check("AC1 工资变化会重算卡片内容",
+                    raisedChange.CardContentChanged + "/" + raisedChange.DisplayChanged
+                    + "/" + raisedChange.NoteRelayRestart + "/" + target.AfterCalls,
+                    "True/False/False/1");
+
+                target.ResetCounts();
+                var cleared = raised.Clone();
+                cleared.salary.monthly = 0m;
+                var change = apply.Apply(cleared);
+                Check("AC1 工资清空只收起工资面板",
+                    change.SalaryPanelClose + "/" + change.CardContentChanged + "/" + change.DisplayChanged
+                    + "/" + change.NoteRelayRestart + "/" + target.SalaryCalls,
+                    "True/True/False/False/1");
+            }
+
+            // 25.9 配置提交：只有 Saved 才应用；失败 / 跳过保留编辑（AC4）
+            {
+                string dir = NewTempDir();
+                try
+                {
+                    var storage = new ControlledSettingsStorage();
+                    var store = new SettingsStore(storage, dir, false);
+                    var target = new RecordingSettingsApplyTarget();
+                    var apply = new SettingsApplyCoordinator(target);
+                    var commit = new SettingsCommitCoordinator(store, apply);
+
+                    string previousNoSave = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+                    Environment.SetEnvironmentVariable("WC_NO_SAVE", "0");
+                    try
+                    {
+                        var candidate = new Settings();
+                        candidate.Normalize();
+                        candidate.ui.skin = "neon";
+                        var ok = commit.Commit(candidate, "测试保存");
+                        Check("AC4 保存成功后才应用变化",
+                            ok.IsSuccess + "/" + ok.Applied + "/" + target.AdoptCalls + "/" + target.DisplayCalls + "/" + target.AfterCalls,
+                            "True/True/1/1/1");
+                        Check("AC4 保存成功落盘的是候选配置", store.Load().Settings.ui.skin, "neon");
+
+                        // 导入与普通保存走同一个提交 + 变化计划；都只在 Saved 之后应用。
+                        var importedCandidate = candidate.Clone();
+                        importedCandidate.ui.skin = "quiet";
+                        var importedResult = commit.Commit(importedCandidate, "导入配置");
+                        Check("AC5 导入与普通保存共用同一提交 / 应用约定",
+                            importedResult.IsSuccess + "/" + importedResult.Plan.HasChanges
+                            + "/" + target.AdoptCalls + "/" + importedCandidate.ui.skin,
+                            "True/True/2/quiet");
+
+                        storage.FailStage = "commit";
+                        var edited = candidate.Clone();
+                        edited.ui.skin = "quiet";
+                        edited.note.nickname = "保留的编辑";
+                        int adoptBefore = target.AdoptCalls;
+                        int displayBefore = target.DisplayCalls;
+                        var failed = commit.Commit(edited, "测试失败");
+                        Check("AC4 保存失败不应用、不切换已应用配置",
+                            failed.IsFailed + "/" + failed.Applied + "/" + failed.ShouldKeepEditing
+                            + "/" + (target.AdoptCalls == adoptBefore) + "/" + (target.DisplayCalls == displayBefore),
+                            "True/False/True/True/True");
+                        Check("AC4 保存失败保留待修改内容",
+                            edited.ui.skin + "/" + edited.note.nickname, "quiet/保留的编辑");
+                        Check("AC4 保存失败显示的是失败消息而不是成功",
+                            (failed.Message.Length > 0 && failed.Message.IndexOf("失败") >= 0).ToString(), "True");
+
+                        storage.FailStage = null;
+                        Environment.SetEnvironmentVariable("WC_NO_SAVE", "1");
+                        var skipped = commit.Commit(edited, "探针跳过");
+                        Check("AC4 WC_NO_SAVE 跳过不显示成功、不应用变化",
+                            skipped.IsSkipped + "/" + skipped.IsSuccess + "/" + skipped.Applied
+                            + "/" + (target.AdoptCalls == adoptBefore),
+                            "True/False/False/True");
+                    }
+                    finally
+                    {
+                        Environment.SetEnvironmentVariable("WC_NO_SAVE", previousNoSave);
+                    }
+                }
+                finally
+                {
+                    DeleteTempDir(dir);
+                }
+            }
+
+            // 25.10 与同步模块的契约：配置变化拒绝旧结果；无关变化保留在途结果（AC3）
+            {
+                Func<DateTime> clock = delegate { return new DateTime(2026, 11, 16, 9, 0, 0); };
+                var cfg = Base();
+                cfg.lark.enabled = true;
+                cfg.lark.chatId = "oc_contract";
+                cfg.calendarEnabled = true;
+                cfg.outlook.calendars.Add(new CalendarSource
+                {
+                    id = "contract-cal", name = "工作日历", source = "url",
+                    url = "https://example.com/contract.ics", enabled = true
+                });
+                cfg.Normalize();
+
+                var sched = new ManualSyncScheduler();
+                var att = new ControlledAttendanceReader();
+                var cal = new ControlledCalendarReader();
+                var engine = new SyncEngine(sched, new ImmediateSyncDispatcher(), att, cal, clock);
+                var target = new RecordingSettingsApplyTarget();
+                target.Engine = engine;
+                var apply = new SettingsApplyCoordinator(target);
+                var pubs = new List<SyncPublication>();
+                engine.Published += delegate(SyncPublication p) { pubs.Add(p); };
+                cal.Respond = delegate(CalendarFetchRequest r) { return SyncTestKit.CalendarOk(r.SourceId); };
+                att.Respond = delegate(AttendanceReadRequest r) { return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 5, 0)); };
+
+                apply.Apply(cfg);
+                long version = engine.ConfigVersion;
+                var stale = engine.RequestOutlook(false);
+                var next = cfg.Clone();
+                next.outlook.calendars[0].enabled = false;
+                var change = apply.Apply(next);
+                Check("AC3 来源启停推进同步代次",
+                    change.SyncConfigChanged + "/" + (engine.ConfigVersion > version), "True/True");
+                sched.RunAll();
+                Check("AC3 配置变化后旧同步结果被同步模块拒绝",
+                    (stale != null) + "/" + pubs.Count + "/" + engine.Snapshot().OutlookEvents.Count,
+                    "True/0/0");
+
+                // 轮询间隔不属于同步结果配置：不推进代次，在途结果照常发布
+                var cfg2 = Base();
+                cfg2.lark.enabled = true;
+                cfg2.lark.chatId = "oc_contract_2";
+                cfg2.Normalize();
+                var sched2 = new ManualSyncScheduler();
+                var att2 = new ControlledAttendanceReader();
+                var cal2 = new ControlledCalendarReader();
+                var engine2 = new SyncEngine(sched2, new ImmediateSyncDispatcher(), att2, cal2, clock);
+                var target2 = new RecordingSettingsApplyTarget();
+                target2.Engine = engine2;
+                var apply2 = new SettingsApplyCoordinator(target2);
+                var pubs2 = new List<SyncPublication>();
+                engine2.Published += delegate(SyncPublication p) { pubs2.Add(p); };
+                att2.Respond = delegate(AttendanceReadRequest r) { return SyncTestKit.Attendance(new DateTime(2026, 11, 16, 9, 6, 0)); };
+                apply2.Apply(cfg2);
+                long version2 = engine2.ConfigVersion;
+                var live = engine2.RequestAttendance(false);
+                var polled = cfg2.Clone();
+                polled.lark.pollMinutes = 12;
+                var pollChange = apply2.Apply(polled);
+                Check("AC3 轮询间隔变化不推进同步代次",
+                    pollChange.SyncConfigChanged + "/" + pollChange.AttendancePollChanged
+                    + "/" + (engine2.ConfigVersion == version2), "False/True/True");
+                sched2.RunAll();
+                Check("AC3 无关变化不丢弃在途同步结果",
+                    (live != null) + "/" + pubs2.Count + "/" + engine2.Snapshot().Attendance.ok,
+                    "True/1/True");
+            }
+
+            // 25.11 变化计划使用独立快照，不原地改调用者
+            {
+                var original = new Settings();
+                original.Normalize();
+                original.note.contacts.Add(new NoteContact { id = "62015", remark = "阿哲" });
+                var copy = original.Clone();
+                copy.note.contacts[0].remark = "小满";
+                Check("变化计划使用独立快照，不原地改调用者", original.note.contacts[0].remark, "阿哲");
+            }
+        }
+
         Console.WriteLine();
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURES");
         Environment.Exit(failures == 0 ? 0 : 1);

@@ -1139,6 +1139,19 @@ namespace WorkCountdown
         public SalarySettings salary { get; set; }
         public NoteSettings note { get; set; }
         public UiSettings ui { get; set; }
+        /// <summary>
+        /// 深拷贝一份独立快照（设置窗口草稿、配置变化计划的上次应用状态）。
+        /// 走和落盘相同的 JSON 形状，保证比较的是规范化后的同一份配置。
+        /// </summary>
+        public Settings Clone()
+        {
+            var serializer = new JavaScriptSerializer();
+            Settings copy = serializer.Deserialize<Settings>(serializer.Serialize(this));
+            if (copy == null) copy = new Settings();
+            copy.Normalize();
+            return copy;
+        }
+
         /// <summary>把另一份设置整体拷过来（导入配置 / 恢复默认用）。</summary>
         public void CopyFrom(Settings o)
         {

@@ -26,7 +26,9 @@ namespace WorkCountdown
         private const int PageW = 508;
 
         private readonly SettingsStore store;
-        private Settings s;
+        private readonly Settings original;   // 调用者当前有效配置；关闭时恢复全局主题静态状态
+        private Settings s;                   // 本次编辑的深拷贝草稿
+        private bool globalsRestored;
         private readonly int initialTab;
 
         // ---- 新骨架：左栏导航 + 内容区（TabControl 只用来装 7 个页，表头被裁掉）----
@@ -151,14 +153,18 @@ namespace WorkCountdown
         public SettingsForm(SettingsStore store, Settings settings, int initialTab)
         {
             this.store = store;
-            this.s = settings;
+            this.original = settings == null ? new Settings() : settings;
+            // 设置窗口改的是一份深拷贝草稿：预览（界面风格 / 自建主题）只作用于草稿，
+            // 取消或保存失败都不会把未提交的修改漏进调用者的运行配置。
+            this.s = settings == null ? new Settings() : settings.Clone();
+            if (this.s == null) this.s = new Settings();
             this.initialTab = initialTab;
-            UiFont.Configure(settings.ui.textFont, settings.ui.numberFont);
-            settings.NormalizeSchedules();          // 直接 new 出来的 Settings 也要有固定日程
-            settings.NormalizeCustomThemes();
+            UiFont.Configure(this.s.ui.textFont, this.s.ui.numberFont);
+            this.s.NormalizeSchedules();          // 直接 new 出来的 Settings 也要有固定日程
+            this.s.NormalizeCustomThemes();
 
             // 先按当前皮肤定色：下面创建控件时拿到的就是对的颜色（默认皮肤 = 原来的浅色）
-            Ui.Apply(settings.ui);
+            Ui.Apply(this.s.ui);
 
             Text = "上班工具箱 " + AppInfo.Version + " · 设置";
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -188,6 +194,30 @@ namespace WorkCountdown
         {
             base.OnShown(e);
             OnPageChanged();          // 句柄建好后 TabControl 的表头高度才量得准
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            RestoreGlobalPreviewState();
+            base.OnFormClosed(e);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) RestoreGlobalPreviewState();
+            base.Dispose(disposing);
+        }
+
+        /// <summary>
+        /// 草稿里的预览可能改过全局主题表 / 设置窗口配色；取消 / 失败关闭时恢复调用者的状态。
+        /// 保存成功时 Widget 会重新加载落盘配置并再设置一次，不会被这里覆盖。
+        /// </summary>
+        private void RestoreGlobalPreviewState()
+        {
+            if (globalsRestored) return;
+            globalsRestored = true;
+            Themes.SetCustom(original.customThemes);
+            Ui.Apply(original.ui);
         }
 
         /// <summary>按系统 DPI 整体放大：字体按点数渲染，控件按比例放大才对得上。</summary>
@@ -1848,7 +1878,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         private void OpenOutlookLogin()
         {
             bool wasLogged = !string.IsNullOrWhiteSpace(s.outlook.refreshToken);
-            using (var dlg = new OutlookLoginForm(s, store))
+            using (var dlg = new OutlookLoginForm(s, original, store))
             {
                 dlg.ShowDialog(this);
                 bool logged = !string.IsNullOrWhiteSpace(s.outlook.refreshToken);
@@ -2151,22 +2181,32 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                         MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
+                Settings before = s.Clone();
                 s.CopyFrom(imported.Settings);
                 s.Normalize();
                 Themes.SetCustom(s.customThemes);
                 var saved = store.Save(s);
+                if (!saved.Succeeded)
+                {
+                    // 导入没有真正提交：回到导入前的草稿，调用者的运行配置完全没被碰过。
+                    s.CopyFrom(before);
+                    Themes.SetCustom(s.customThemes);
+                    schedIndex = 0;
+                    LoadValues();
+                    ApplySkin();
+                    if (saved.IsFailed)
+                        MessageBox.Show(this, "导入没有保存成功：\n" + saved.Message + "\n\n上一份有效配置没有被改动。", "导入失败",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    else
+                        MessageBox.Show(this, "导入未提交：本次运行不写配置（WC_NO_SAVE=1）。", "导入未提交",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
                 schedIndex = 0;
                 LoadValues();
                 ApplySkin();
-                if (saved.IsFailed)
-                    MessageBox.Show(this, "配置已导入，但没有保存成功：\n" + saved.Message + "\n\n上一份有效配置没有被改动。", "导入后保存失败",
-                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                else if (saved.IsSkipped)
-                    MessageBox.Show(this, "配置已导入，但本次运行不写配置文件（WC_NO_SAVE=1）。", "配置已导入",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                else
-                    MessageBox.Show(this, "配置已导入，重启悬浮窗后完全生效。", "导入完成",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "配置已导入，重启悬浮窗后完全生效。", "导入完成",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
@@ -2174,17 +2214,31 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         {
             if (MessageBox.Show(this, "恢复默认会清掉现在的所有设置（含自建日程和主题），确定吗？", "恢复默认",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            Settings before = s.Clone();
             var fresh = new Settings();
             fresh.Normalize();
             s.CopyFrom(fresh);
             Themes.SetCustom(s.customThemes);
             var saved = store.Save(s);
+            if (!saved.Succeeded)
+            {
+                // 没有真正提交：保留恢复默认之前的内容，调用者的运行配置不变。
+                s.CopyFrom(before);
+                Themes.SetCustom(s.customThemes);
+                schedIndex = 0;
+                LoadValues();
+                ApplySkin();
+                if (saved.IsFailed)
+                    MessageBox.Show(this, "默认设置没有保存成功：\n" + saved.Message + "\n\n上一份有效配置没有被改动。", "保存失败",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else
+                    MessageBox.Show(this, "恢复默认未提交：本次运行不写配置（WC_NO_SAVE=1）。", "设置未提交",
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             schedIndex = 0;
             LoadValues();
             ApplySkin();
-            if (saved.IsFailed)
-                MessageBox.Show(this, "默认设置没有保存成功：\n" + saved.Message + "\n\n上一份有效配置没有被改动。", "保存失败",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         // ---------------- 载入 / 保存 ----------------
@@ -2405,9 +2459,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             }
             if (cbAutoStart.Checked != Startup.IsEnabled()) Startup.SetEnabled(cbAutoStart.Checked);
 
-            s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
-            Themes.SetCustom(s.customThemes);
-            var saved = store.Save(s);
+            var saved = PersistDraft();
             if (saved.IsFailed)
             {
                 // 保存失败不得关窗 / 不得表现为成功：明确告知并保留上一份有效配置。
@@ -2415,15 +2467,34 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return false;
             }
-            // WC_NO_SAVE 的 Skipped 只在内存里生效，不弹“保存成功”，也不阻塞关闭。
+            if (saved.IsSkipped && closeAfter)
+            {
+                // WC_NO_SAVE 是探针语义：不能显示成功，也不能关窗假装已经提交。
+                MessageBox.Show(this, "本次运行不写配置文件（WC_NO_SAVE=1），设置没有保存。", "设置未提交",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return false;
+            }
             ApplySkin();            // 设置窗口自己立刻按新皮肤重画（不重启窗口；悬浮窗由 Widget 在 OK 后重建）
 
+            // closeAfter=false 只用于导出前取得一份通过校验的草稿：Skipped 时也允许继续导出，
+            // 但这里不产生任何“保存成功”的提示。
             if (closeAfter)
             {
                 DialogResult = DialogResult.OK;
                 Close();
             }
             return true;
+        }
+
+        /// <summary>
+        /// 把当前草稿规范化并写盘（不弹窗、不关窗）；Save() 在控件校验通过后调用它。
+        /// 抽出来是为了让“保存失败保留编辑”的行为可以在不触发模态框的情况下验收。
+        /// </summary>
+        internal SettingsSaveResult PersistDraft()
+        {
+            s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
+            Themes.SetCustom(s.customThemes);
+            return store.Save(s);
         }
 
         // ---------------- 小工具 ----------------
@@ -2742,15 +2813,17 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
     internal class OutlookLoginForm : Form
     {
         private readonly Settings s;
+        private readonly Settings original;   // 立即登录 / 退出登录也要同步到调用者的运行配置（保持既有即时契约）
         private readonly SettingsStore store;
         private Label lblAccount;
         private TextBox tbClientId;
         private Label lblState;
         private Button btnLogin;
 
-        public OutlookLoginForm(Settings s, SettingsStore store)
+        public OutlookLoginForm(Settings s, Settings original, SettingsStore store)
         {
             this.s = s;
+            this.original = original;
             this.store = store;
 
             Text = "Outlook 登录";
@@ -2824,6 +2897,18 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             ResumeLayout(true);
         }
 
+        /// <summary>登录 / 退出登录是既有即时设置：把认证字段同步到调用者的运行配置，取消设置窗也不回退。</summary>
+        private void MirrorAuthToOriginal()
+        {
+            if (original == null || original.outlook == null || s.outlook == null) return;
+            original.outlook.clientId = s.outlook.clientId;
+            original.outlook.tenant = s.outlook.tenant;
+            original.outlook.account = s.outlook.account;
+            original.outlook.refreshToken = s.outlook.refreshToken;
+            original.outlook.tokenAt = s.outlook.tokenAt;
+            original.outlook.lastError = s.outlook.lastError;
+        }
+
         private void UpdateUi()
         {
             bool logged = !string.IsNullOrWhiteSpace(s.outlook.refreshToken);
@@ -2846,6 +2931,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 s.outlook.account = "";
                 s.outlook.tokenAt = "";
                 s.outlook.lastError = "";
+                MirrorAuthToOriginal();
                 var saved = store.Save(s);
                 lblState.Text = saved.IsFailed
                     ? "已退出登录，但配置没有保存成功：" + saved.Message
@@ -2898,6 +2984,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                         OutlookGraph.FetchMe(tk.accessToken, 15000, out name, out mail, out meErr);
                         s.outlook.account = mail.Length > 0 ? mail : name;
                         s.outlook.lastError = "";
+                        MirrorAuthToOriginal();
                         var saved = store.Save(s);
                         UpdateUi();
                         lblState.Text = saved.IsFailed

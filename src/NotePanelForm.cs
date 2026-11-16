@@ -69,15 +69,14 @@ namespace WorkCountdown
             public Hit(Rectangle r, HitKind k, string key) { rect = r; kind = k; this.key = key; }
         }
 
-        private readonly Settings settings;
-        private readonly NoteSettings note;
-        private readonly SkinDef skin;           // 整体界面主题（皮肤）：颜色 / 圆角 / 质感都从这取
-        private readonly bool skinDefault;       // 默认皮肤：外观必须和 v3.6 完全一致
-        private readonly bool glass;             // 磨砂玻璃底座（默认皮肤的「背景风格」或云母皮肤）
-        private readonly ThemeDef theme;
+        private readonly Func<Settings> settingsProvider;
+        private SkinDef skin;                    // 整体界面主题（皮肤）：颜色 / 圆角 / 质感都从这取
+        private bool skinDefault;                // 默认皮肤：外观必须和 v3.6 完全一致
+        private bool glass;                      // 磨砂玻璃底座（默认皮肤的「背景风格」或云母皮肤）
+        private ThemeDef theme;
         private readonly Rectangle card;
-        private readonly bool topMost;
-        private readonly bool columns;
+        private bool topMost;
+        private bool columns;
         private readonly float scale;
         private readonly float u;                 // 设计像素 → 实际像素（设计稿是 96 DPI 的 DIP，1 设计 px = 1 DIP）
         private readonly bool toRight;
@@ -130,26 +129,47 @@ namespace WorkCountdown
 
         private readonly List<Hit> hits = new List<Hit>();
         private readonly List<NoteContact> drawnContacts = new List<NoteContact>();
-        private readonly Font fTitle, fHeading, fSub, fContact, fContactSub, fMsg, fMsgSub, fTiny, fField, fButton, fGlyph, fName;
+        private Font fTitle, fHeading, fSub, fContact, fContactSub, fMsg, fMsgSub, fTiny, fField, fButton, fGlyph, fName;
         private Bitmap frame;
         private readonly Timer anim;
         private int animTick;
 
+        /// <summary>固定设置（验收 / 探针）：面板始终读这一份。</summary>
         public NotePanelForm(Settings settings, ThemeDef theme, Rectangle card, bool topMost,
             Func<string, string, bool> onSend, Action<string> onRead,
             Action<string, Action<bool>> onProbe, Func<string, string, bool> onAddContact,
             Action onOpenSettings, Action<string, string> onRenameContact = null,
             Action<string> onDeleteContact = null, Action<string> onSetNickname = null)
+            : this(ConstantSettings(settings), theme, card, topMost, onSend, onRead, onProbe,
+                onAddContact, onOpenSettings, onRenameContact, onDeleteContact, onSetNickname)
         {
-            this.settings = settings;
-            this.note = settings.note;
-            this.skin = Skins.Current(settings.ui);
+        }
+
+        private static Func<Settings> ConstantSettings(Settings settings)
+        {
+            return delegate { return settings; };
+        }
+
+        /// <summary>
+        /// 设置提供者：窗口换了一份 Settings 后，面板仍能读到当前 note；显示资源变化时
+        /// 由 RefreshFromSettings 原地刷新，不需要关掉面板重开。
+        /// </summary>
+        public NotePanelForm(Func<Settings> settingsProvider, ThemeDef theme, Rectangle card, bool topMost,
+            Func<string, string, bool> onSend, Action<string> onRead,
+            Action<string, Action<bool>> onProbe, Func<string, string, bool> onAddContact,
+            Action onOpenSettings, Action<string, string> onRenameContact = null,
+            Action<string> onDeleteContact = null, Action<string> onSetNickname = null)
+        {
+            this.settingsProvider = settingsProvider;
+            Settings initial = settingsProvider == null ? new Settings() : settingsProvider();
+            if (initial == null) initial = new Settings();
+            this.skin = Skins.Current(initial.ui);
             this.skinDefault = skin.IsDefault;
-            this.glass = Skins.UsesGlass(settings.ui);
+            this.glass = Skins.UsesGlass(initial.ui);
             // 默认皮肤继续用调用方传进来的那套主题；其它皮肤用自带配色（Widget 现在传的已经是 ResolveTheme，
             // 这里再兜一次，旧调用点也不会把皮肤配色盖掉）。
             this.theme = skin.colors != null ? skin.colors
-                : (theme != null ? theme : Skins.ResolveTheme(settings.ui));
+                : (theme != null ? theme : Skins.ResolveTheme(initial.ui));
             this.card = card;
             this.topMost = topMost;
             this.onSend = onSend;
@@ -194,6 +214,34 @@ namespace WorkCountdown
             Bounds = new Rectangle(winLeft, baseTop, winWidth, (int)heightNow);
             BuildHits();
 
+            CreateFonts();
+
+            FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+            BackColor = Color.Black;
+            DoubleBuffered = false;
+            TopMost = topMost;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+
+            anim = new Timer();
+            anim.Interval = 15;
+            anim.Tick += delegate { StepAnim(); };
+        }
+
+        private NoteSettings note
+        {
+            get
+            {
+                Settings current = settingsProvider == null ? null : settingsProvider();
+                if (current == null || current.note == null) return new NoteSettings();
+                return current.note;
+            }
+        }
+
+        /// <summary>按当前皮肤 / 字体创建面板字体；皮肤或字体变化时由 RefreshFromSettings 重建。</summary>
+        private void CreateFonts()
+        {
             fTitle = F(14f, FontStyle.Bold);
             // 皮肤标题字体：宣纸宋体、仪表 Bahnschrift；默认皮肤 / 没配字体的皮肤跟界面中文字体走
             fHeading = !skinDefault && !string.IsNullOrWhiteSpace(skin.headingFont)
@@ -209,18 +257,38 @@ namespace WorkCountdown
             fField = F(12.5f, FontStyle.Regular);
             fButton = F(12.5f, FontStyle.Bold);
             fGlyph = FN(15f, FontStyle.Bold);
+        }
 
-            FormBorderStyle = FormBorderStyle.None;
-            StartPosition = FormStartPosition.Manual;
-            ShowInTaskbar = false;
-            BackColor = Color.Black;
-            DoubleBuffered = false;
+        private void DisposeFonts()
+        {
+            Font[] fonts = new Font[] { fTitle, fHeading, fSub, fContact, fName, fContactSub,
+                fMsg, fMsgSub, fTiny, fField, fButton, fGlyph };
+            foreach (var font in fonts)
+                if (font != null && !ReferenceEquals(font, SystemFonts.DefaultFont)) font.Dispose();
+        }
+
+        /// <summary>
+        /// 按变化计划原地刷新外观 / 数据；不关闭面板，也不重建连接。
+        /// 布局（抽屉 / 双栏）变化由 applier 走重建分支，不会进到这里。
+        /// </summary>
+        internal void RefreshFromSettings(Settings next, ThemeDef resolvedTheme)
+        {
+            if (IsDisposed || next == null) return;
+            SkinDef nextSkin = Skins.Current(next.ui);
+            bool skinChanged = skin == null || !string.Equals(skin.id, nextSkin.id, StringComparison.Ordinal);
+            skin = nextSkin;
+            skinDefault = skin.IsDefault;
+            glass = Skins.UsesGlass(next.ui);
+            theme = skin.colors != null
+                ? skin.colors
+                : (resolvedTheme != null ? resolvedTheme : Skins.ResolveTheme(next.ui));
+            topMost = next.ui.alwaysOnTop;
             TopMost = topMost;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-
-            anim = new Timer();
-            anim.Interval = 15;
-            anim.Tick += delegate { StepAnim(); };
+            columns = next.note != null && string.Equals(next.note.style, "columns", StringComparison.OrdinalIgnoreCase);
+            DisposeFonts();
+            CreateFonts();
+            if (skinChanged) Invalidate(true);
+            RefreshData();
         }
 
         public string SelectedId { get { return selectedId; } }

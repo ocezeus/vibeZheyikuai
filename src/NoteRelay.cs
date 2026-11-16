@@ -33,7 +33,7 @@ namespace WorkCountdown
         private const string TopicPrefix = "xzt/v1";
         internal const string RoomTopicPrefix = TopicPrefix + "/room/";
         internal const string PresenceTopicPrefix = TopicPrefix + "/presence/";
-        private readonly NoteSettings cfg;
+        private readonly Func<NoteSettings> settingsProvider;
         private readonly string clientId;
         private TcpClient tcp;
         private NetworkStream stream;
@@ -56,10 +56,35 @@ namespace WorkCountdown
 
         public bool Connected { get { return connected; } }
 
+        /// <summary>固定配置（测试 / 探针）：中继始终读这一份。</summary>
         public NoteRelay(NoteSettings settings)
+            : this(Constant(settings))
         {
-            cfg = settings;
-            clientId = "xzt" + cfg.id + "-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        }
+
+        /// <summary>
+        /// 配置提供者：每次访问都读当前 settings.note。窗口换了一份 Settings 时不需要重建连接，
+        /// 昵称 / 对话变化也能在同一个连接上原地生效。
+        /// </summary>
+        public NoteRelay(Func<NoteSettings> settingsProvider)
+        {
+            this.settingsProvider = settingsProvider;
+            NoteSettings initial = Cfg;
+            clientId = "xzt" + initial.id + "-" + Guid.NewGuid().ToString("N").Substring(0, 6);
+        }
+
+        private static Func<NoteSettings> Constant(NoteSettings settings)
+        {
+            return delegate { return settings; };
+        }
+
+        private NoteSettings Cfg
+        {
+            get
+            {
+                NoteSettings current = settingsProvider == null ? null : settingsProvider();
+                return current == null ? new NoteSettings() : current;
+            }
         }
 
         public void Start()
@@ -96,7 +121,7 @@ namespace WorkCountdown
                 {
                     var c = new TcpClient();
                     c.NoDelay = true;
-                    var ar = c.BeginConnect(cfg.relayHost, cfg.relayPort, null, null);
+                    var ar = c.BeginConnect(Cfg.relayHost, Cfg.relayPort, null, null);
                     if (!ar.AsyncWaitHandle.WaitOne(8000))
                     {
                         try { c.Close(); } catch { }
@@ -155,10 +180,10 @@ namespace WorkCountdown
             {
                 connected = true;
                 lock (subLock) { subscribed.Clear(); subPacketId = 0; }
-                SubscribeTopic(InboxTopic(cfg.id));
+                SubscribeTopic(InboxTopic(Cfg.id));
                 SubscribeRooms();
                 SubscribeContactPresence();
-                Send(PublishPacket(PresenceTopic(cfg.id), PresenceJson(cfg.id, cfg.nickname), true));
+                Send(PublishPacket(PresenceTopic(Cfg.id), PresenceJson(Cfg.id, Cfg.nickname), true));
                 StartKeepAlive();
                 RaiseConnected(true);
                 return;
@@ -168,7 +193,7 @@ namespace WorkCountdown
                 string topic;
                 string payload;
                 if (!ParsePublish(flags, body, out topic, out payload)) return;
-                if (topic == InboxTopic(cfg.id))
+                if (topic == InboxTopic(Cfg.id))
                 {
                     NoteIncoming msg = DecodeMessage(payload);
                     if (msg != null && Message != null)
@@ -210,7 +235,7 @@ namespace WorkCountdown
             {
                 if (!connected) return;
                 try { Send(PingPacket()); } catch { }
-                try { Send(PublishPacket(PresenceTopic(cfg.id), PresenceJson(cfg.id, cfg.nickname), true)); } catch { }
+                try { Send(PublishPacket(PresenceTopic(Cfg.id), PresenceJson(Cfg.id, Cfg.nickname), true)); } catch { }
             }, null, 15000, 15000);
         }
 
@@ -237,7 +262,7 @@ namespace WorkCountdown
             try
             {
                 bool room = !NoteSettings.ValidId(code);
-                string payload = BuildMessageJson(cfg.id, code, text, Now(), cfg.nickname);
+                string payload = BuildMessageJson(Cfg.id, code, text, Now(), Cfg.nickname);
                 Send(PublishPacket(room ? RoomTopic(code) : InboxTopic(code), payload, false));
                 return true;
             }
@@ -254,20 +279,20 @@ namespace WorkCountdown
             if (!connected) return;
             SubscribeRooms();
             SubscribeContactPresence();
-            try { Send(PublishPacket(PresenceTopic(cfg.id), PresenceJson(cfg.id, cfg.nickname), true)); } catch { }
+            try { Send(PublishPacket(PresenceTopic(Cfg.id), PresenceJson(Cfg.id, Cfg.nickname), true)); } catch { }
         }
 
         private void SubscribeRooms()
         {
             try
             {
-                var list = cfg.contacts == null ? new NoteContact[0] : cfg.contacts.ToArray();
+                var list = Cfg.contacts == null ? new NoteContact[0] : Cfg.contacts.ToArray();
                 for (int i = 0; i < list.Length; i++)
                 {
                     var c = list[i];
                     if (c == null) continue;
                     string code = NoteSettings.NormalizeCode(c.id);
-                    if (!cfg.IsRoom(code)) continue;
+                    if (!Cfg.IsRoom(code)) continue;
                     SubscribeTopic(RoomTopic(code));
                 }
             }
@@ -282,7 +307,7 @@ namespace WorkCountdown
         {
             try
             {
-                var list = cfg.contacts == null ? new NoteContact[0] : cfg.contacts.ToArray();
+                var list = Cfg.contacts == null ? new NoteContact[0] : Cfg.contacts.ToArray();
                 for (int i = 0; i < list.Length; i++)
                 {
                     var c = list[i];
@@ -351,7 +376,7 @@ namespace WorkCountdown
                 }
             }
             catch { }
-            if (!string.Equals(id, cfg.id, StringComparison.Ordinal)) RaiseProfile(id, nick, online);
+            if (!string.Equals(id, Cfg.id, StringComparison.Ordinal)) RaiseProfile(id, nick, online);
             Action<bool> cb = null;
             lock (probeLock)
             {

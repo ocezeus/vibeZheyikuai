@@ -1245,17 +1245,18 @@ class Check
             // 设置窗口：改一条再存回去，不能把改动丢了
             using (var dlg = new SettingsForm(new SettingsStore(), s))
             {
+                var draft = (Settings)Get(dlg, "s");
                 var list = (ScheduleList)Get(dlg, "listSched");
-                Ok("列表里能看到全部固定日程", list != null && s.schedules.Count >= 4, s.schedules.Count + " 条");
+                Ok("列表里能看到全部固定日程", list != null && draft.schedules.Count >= 4, draft.schedules.Count + " 条");
 
                 int index = -1;
-                for (int i = 0; i < s.schedules.Count; i++) if (s.schedules[i].id == "t-odd") index = i;
+                for (int i = 0; i < draft.schedules.Count; i++) if (draft.schedules[i].id == "t-odd") index = i;
                 Call(dlg, "SelectSched", index);
                 ((TextBox)Get(dlg, "tbSchedStart")).Text = "10:20";
                 ((TextBox)Get(dlg, "tbSchedName")).Text = "单周站会";
                 Call(dlg, "StoreSchedEditor");
-                Ok("编辑器改动写回日程", s.schedules[index].start == "10:20" && s.schedules[index].name == "单周站会",
-                    s.schedules[index].name + " " + s.schedules[index].start);
+                Ok("编辑器改动写回草稿日程", draft.schedules[index].start == "10:20" && draft.schedules[index].name == "单周站会",
+                    draft.schedules[index].name + " " + draft.schedules[index].start);
 
                 var cmbRepeat = (ComboBox)Get(dlg, "cmbRepeat");
                 Ok("重复下拉是每天/单数周/双数周",
@@ -2689,6 +2690,7 @@ class Check
                     look.Controls.Count + " 张：" + cardTitles);
 
                 var picker = Get(dlg, "skinPicker") as SkinPicker;
+                var draft = (Settings)Get(dlg, "s");
                 var themePicker = (ThemePicker)Get(dlg, "picker");
                 var lblLocked = (Label)Get(dlg, "lblThemeLocked");
                 Ok("外观页有「界面风格」skinPicker（默认 + 5 套 = 6 块）",
@@ -2718,23 +2720,25 @@ class Check
                 var rNeon = picker.RectOf(5);
                 Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
                     rNeon.Left + rNeon.Width / 2, rNeon.Top + rNeon.Height / 2, 0));
-                Ok("点「霓虹」→ ui.skin=neon，主题色卡置灰并提示自带配色",
-                    s.ui.skin == "neon" && picker.SelectedId == "neon"
+                Ok("点「霓虹」→ 草稿 ui.skin=neon，调用者配置保持不动",
+                    draft.ui.skin == "neon" && s.ui.skin == "default" && picker.SelectedId == "neon"
                     && themePicker.Locked && !themePicker.Enabled && DesiredVisible(lblLocked),
-                    "skin=" + s.ui.skin + " selected=" + picker.SelectedId + " locked=" + themePicker.Locked
-                    + " enabled=" + themePicker.Enabled + " 提示可见=" + DesiredVisible(lblLocked));
+                    "draft=" + draft.ui.skin + " caller=" + s.ui.skin + " selected=" + picker.SelectedId
+                    + " locked=" + themePicker.Locked + " enabled=" + themePicker.Enabled
+                    + " 提示可见=" + DesiredVisible(lblLocked));
 
                 var saved = Call(dlg, "Save", false);
-                Ok("Save(false) 把所选皮肤存下来", (bool)saved && s.ui.skin == "neon",
-                    "save=" + saved + " skin=" + s.ui.skin);
+                Ok("Save(false) 只把所选皮肤留在草稿（WC_NO_SAVE 不落盘、不碰调用者）",
+                    (bool)saved && draft.ui.skin == "neon" && s.ui.skin == "default",
+                    "save=" + saved + " draft=" + draft.ui.skin + " caller=" + s.ui.skin);
 
                 var rDefault = picker.RectOf(0);
                 Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
                     rDefault.Left + rDefault.Width / 2, rDefault.Top + rDefault.Height / 2, 0));
-                Ok("点回「默认」→ 恢复 default、色卡解锁、提示消失",
-                    s.ui.skin == "default" && picker.SelectedId == "default"
+                Ok("点回「默认」→ 草稿恢复 default、色卡解锁、提示消失",
+                    draft.ui.skin == "default" && picker.SelectedId == "default"
                     && !themePicker.Locked && themePicker.Enabled && !DesiredVisible(lblLocked),
-                    "skin=" + s.ui.skin + " locked=" + themePicker.Locked
+                    "draft=" + draft.ui.skin + " locked=" + themePicker.Locked
                     + " 提示可见=" + DesiredVisible(lblLocked));
 
                 // 6 块逐一点：预览的皮肤 id 和锁定态都跟着走
@@ -2746,8 +2750,8 @@ class Check
                     Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
                         r.Left + r.Width / 2, r.Top + r.Height / 2, 0));
                     var skin = Skins.All[i];
-                    clickTrace += skin.id + "→" + s.ui.skin + " ";
-                    if (s.ui.skin != skin.id || picker.SelectedId != skin.id) everyClick = false;
+                    clickTrace += skin.id + "→" + draft.ui.skin + " ";
+                    if (draft.ui.skin != skin.id || picker.SelectedId != skin.id) everyClick = false;
                     bool wantLocked = !skin.IsDefault;
                     if (themePicker.Locked != wantLocked || DesiredVisible(lblLocked) != wantLocked) everyClick = false;
                 }
@@ -3624,14 +3628,15 @@ class Check
                     cbs[0].Checked && cbs[4].Checked && !cbs[5].Checked && !cbs[6].Checked, "ok");
                 for (int i = 0; i < 7; i++) cbs[i].Checked = i < 5;
                 Call(dlg, "Save", false);
+                var draft = (Settings)Get(dlg, "s");
                 DateTime fri = DateTime.Today;
                 while (fri.DayOfWeek != DayOfWeek.Friday) fri = fri.AddDays(1);
                 Ok("勾周一到周五保存后周五是工作日（修复前周五会变成休息日）",
-                    wd.workdays[1] && wd.workdays[5] && !wd.workdays[6] && !wd.workdays[0]
-                    && Policy.Build(wd, fri).isWorkday,
-                    "数组=" + wd.workdays[0] + wd.workdays[1] + wd.workdays[2] + wd.workdays[3]
-                    + wd.workdays[4] + wd.workdays[5] + wd.workdays[6] + " / 周五isWorkday=" + Policy.Build(wd, fri).isWorkday);
-                var stFri = StatusBuilder.Build(wd, null, fri.Date.AddHours(10), Themes.Get("midnight"));
+                    draft.workdays[1] && draft.workdays[5] && !draft.workdays[6] && !draft.workdays[0]
+                    && Policy.Build(draft, fri).isWorkday,
+                    "数组=" + draft.workdays[0] + draft.workdays[1] + draft.workdays[2] + draft.workdays[3]
+                    + draft.workdays[4] + draft.workdays[5] + draft.workdays[6] + " / 周五isWorkday=" + Policy.Build(draft, fri).isWorkday);
+                var stFri = StatusBuilder.Build(draft, null, fri.Date.AddHours(10), Themes.Get("midnight"));
                 Ok("固定班次下周五 10:00 显示「工作中」、预计下班 18:00（不再显示休息日）",
                     stFri.headline != "休息日" && stFri.sub != null && stFri.sub.Contains("18:00"),
                     "headline=" + stFri.headline + " sub=" + stFri.sub);
@@ -3651,8 +3656,10 @@ class Check
                     tbNick == null ? "没有 tbNoteNick" : "text=" + tbNick.Text);
                 if (tbNick != null) tbNick.Text = "  老王  ";
                 Call(dlg, "Save", false);
-                Ok("昵称保存时去首尾空白、最多 12 字",
-                    nk.note.nickname == "老王" && NoteSettings.MaxNick == 12, "nickname=" + nk.note.nickname);
+                var draft = (Settings)Get(dlg, "s");
+                Ok("昵称保存时去首尾空白、最多 12 字（只改草稿）",
+                    draft.note.nickname == "老王" && nk.note.nickname == "小明" && NoteSettings.MaxNick == 12,
+                    "draft=" + draft.note.nickname + " caller=" + nk.note.nickname);
             }
             Ok("个人对话没备注时显示对方昵称（自动拿到的）",
                 nk.note.Contact("93183").Display() == "阿哲", "display=" + nk.note.Contact("93183").Display());
@@ -3967,6 +3974,77 @@ class Check
             }
         }
 
+        // 配置应用：预览与提交分离 + 同一配置重复应用不关面板（工单 #5 UI 冒烟）
+        {
+            var smokeSettings = new Settings();
+            smokeSettings.lark.enabled = false;
+            smokeSettings.calendarEnabled = false;
+            smokeSettings.ui.edge = "free";
+            smokeSettings.note.id = "48372";
+            smokeSettings.note.AddContact("62015", "阿哲");
+            smokeSettings.Normalize();
+            using (var smokeForm = new WidgetForm(new SettingsStore(), smokeSettings))
+            {
+                Call(smokeForm, "ToggleNotePanel");
+                var openedPanel = Get(smokeForm, "notePanel") as NotePanelForm;
+                Ok("小纸条面板能打开（冒烟前置）", openedPanel != null && !openedPanel.IsDisposed,
+                    openedPanel == null ? "null" : "ok");
+
+                smokeSettings.ui.opacity = 55;
+                Call(smokeForm, "ApplySettings");
+                var afterAppearance = Get(smokeForm, "notePanel") as NotePanelForm;
+                Ok("外观变化只刷新面板、不关闭面板",
+                    ReferenceEquals(openedPanel, afterAppearance) && afterAppearance != null && !afterAppearance.IsDisposed,
+                    "same=" + ReferenceEquals(openedPanel, afterAppearance));
+
+                Call(smokeForm, "ApplySettings");
+                var afterRepeat = Get(smokeForm, "notePanel") as NotePanelForm;
+                Ok("相同配置重复应用不关闭面板",
+                    ReferenceEquals(openedPanel, afterRepeat) && afterRepeat != null && !afterRepeat.IsDisposed,
+                    "same=" + ReferenceEquals(openedPanel, afterRepeat));
+                if (afterRepeat != null) afterRepeat.Dispose();
+            }
+        }
+
+        // 设置窗口的界面风格预览只改草稿；关闭 / 取消后回退，不污染调用者或全局主题表
+        {
+            Themes.SetCustom(new System.Collections.Generic.List<CustomTheme>());
+            var previewSettings = new Settings();
+            previewSettings.lark.enabled = false;
+            previewSettings.calendarEnabled = false;
+            previewSettings.ui.skin = "default";
+            previewSettings.customThemes.Add(new CustomTheme
+            {
+                id = "my-orig", name = "原主题", bg = "#334455", bar = "#667788", accent = "#667788"
+            });
+            previewSettings.Normalize();
+            using (var previewForm = new SettingsForm(new SettingsStore(), previewSettings))
+            {
+                var previewPicker = (SkinPicker)Get(previewForm, "skinPicker");
+                var previewRect = previewPicker.RectOf(5);
+                Call(previewPicker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
+                    previewRect.Left + previewRect.Width / 2, previewRect.Top + previewRect.Height / 2, 0));
+                var previewDraft = (Settings)Get(previewForm, "s");
+                previewDraft.customThemes.Add(new CustomTheme
+                {
+                    id = "my-preview", name = "预览主题", bg = "#112233", bar = "#445566", accent = "#445566"
+                });
+                Themes.SetCustom(previewDraft.customThemes);
+                Ok("设置窗预览只改草稿，调用者配置不变",
+                    previewDraft.ui.skin == "neon" && previewSettings.ui.skin == "default"
+                    && previewSettings.customThemes.Count == 1 && Themes.IsCustom("my-preview"),
+                    "draft=" + previewDraft.ui.skin + " caller=" + previewSettings.ui.skin
+                    + " themes=" + previewSettings.customThemes.Count + " preview=" + Themes.IsCustom("my-preview"));
+            }
+            Ok("关闭设置窗后预览状态回退（调用者 / 全局主题表）",
+                previewSettings.ui.skin == "default" && Skins.Current(previewSettings.ui).id == "default"
+                && previewSettings.customThemes.Count == 1
+                && Themes.IsCustom("my-orig") && !Themes.IsCustom("my-preview")
+                && Themes.All.Length == Themes.BuiltIn.Length + 1,
+                "caller=" + previewSettings.ui.skin + " themes=" + Themes.All.Length + "/" + (Themes.BuiltIn.Length + 1)
+                + " orig=" + Themes.IsCustom("my-orig") + " preview=" + Themes.IsCustom("my-preview"));
+        }
+
         // 配置保存反馈：后台保存失败只记日志、不弹窗（若弹窗，这条用例会被模态框卡住）
         {
             string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-settings-" + Guid.NewGuid().ToString("N"));
@@ -3990,6 +4068,25 @@ class Check
                     Ok("后台保存失败只记日志、不弹窗（否则本用例会被模态框卡住）",
                         result.IsFailed && logged && !System.IO.File.Exists(store.SettingsPath),
                         "failed=" + result.IsFailed + " logged=" + logged + " settings=" + System.IO.File.Exists(store.SettingsPath));
+                }
+
+                var formSettings = new Settings();
+                formSettings.Normalize();
+                formSettings.note.nickname = "原先";
+                using (var dlg = new SettingsForm(store, formSettings))
+                {
+                    var formDraft = (Settings)Get(dlg, "s");
+                    formDraft.note.nickname = "保留的编辑";
+                    string previousNoSave = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+                    Environment.SetEnvironmentVariable("WC_NO_SAVE", "0");
+                    SettingsSaveResult failedSave;
+                    try { failedSave = dlg.PersistDraft(); }
+                    finally { Environment.SetEnvironmentVariable("WC_NO_SAVE", previousNoSave); }
+                    Ok("显式保存失败保留草稿编辑、不改调用者、不显示成功",
+                        failedSave.IsFailed && formDraft.note.nickname == "保留的编辑"
+                        && formSettings.note.nickname == "原先" && dlg.DialogResult != DialogResult.OK,
+                        "failed=" + failedSave.IsFailed + " draft=" + formDraft.note.nickname
+                        + " caller=" + formSettings.note.nickname + " dialog=" + dlg.DialogResult);
                 }
             }
             finally

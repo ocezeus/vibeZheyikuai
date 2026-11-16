@@ -66,7 +66,7 @@ namespace WorkCountdown
         [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
             int X, int Y, int cx, int cy, uint uFlags);
 
-        private readonly Settings settings;
+        private Settings settings;
         private readonly ReminderEvent ev;
         private readonly float scale;
         private readonly bool instant;
@@ -244,6 +244,15 @@ namespace WorkCountdown
         {
             try { return new Font("Microsoft YaHei", pt, style, GraphicsUnit.Point); }
             catch { return UiFont.Make(pt, style); }
+        }
+
+        /// <summary>窗口换了一份 Settings 后原地换引用并重画，不关闭抽屉。</summary>
+        internal void RebindSettings(Settings next)
+        {
+            if (next == null) return;
+            settings = next;
+            RefreshText();
+            Invalidate();
         }
 
         /// <summary>剩余时间每分钟变一次（还有 10 分钟 → 正在进行），由主窗口的 tick 叫。</summary>

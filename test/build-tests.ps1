@@ -70,7 +70,7 @@ $common = @(
 )
 
 # 两套测试共用的可控同步 adapter / 调度器
-$testKit = @((Join-Path $testDir 'SyncFakes.cs'), (Join-Path $testDir 'SettingsStoreFakes.cs'))
+$testKit = @((Join-Path $testDir 'SyncFakes.cs'), (Join-Path $testDir 'SettingsStoreFakes.cs'), (Join-Path $testDir 'SettingsApplyFakes.cs'))
 
 $suites = @(
     [pscustomobject]@{ Name = 'Test';  Src = 'Test.cs';  Exe = 'Test.exe'  },

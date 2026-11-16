@@ -12,7 +12,7 @@ using System.Windows.Forms;
 
 namespace WorkCountdown
 {
-    public class WidgetForm : Form, ISyncConfigSink
+    public class WidgetForm : Form, ISyncConfigSink, ISettingsApplyTarget
     {
         // 96 DPI 下的设计尺寸，实际按 scale 放大
         private const int DesignExpandedW = 280;
@@ -34,6 +34,8 @@ namespace WorkCountdown
         private Settings settings;
         private readonly LarkClient lark;
         private readonly SyncEngine sync;
+        private readonly SettingsApplyCoordinator apply;
+        private readonly SettingsCommitCoordinator commit;
 
         private CardStatus status;
         private ThemeDef theme;
@@ -183,8 +185,6 @@ namespace WorkCountdown
         private Font fontSmall;
         private Font fontCollapsedNum;
         private Font fontCollapsedLabel;
-        private string appliedTextFont = "";
-        private string appliedNumberFont = "Consolas";
 
         private readonly StringFormat sfCenter = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         private readonly StringFormat sfNear = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center };
@@ -225,8 +225,8 @@ namespace WorkCountdown
                 delegate { return DateTime.Now; });
             this.sync.ConfigSink = this;
             this.sync.Published += OnSyncPublished;
-            this.sync.Configure(settings);
-            this.snapshot = this.sync.Snapshot().Attendance;
+            this.apply = new SettingsApplyCoordinator(this);
+            this.commit = new SettingsCommitCoordinator(store, this.apply);
             this.theme = Skins.ResolveTheme(settings.ui);
 
             using (var screen = Graphics.FromHwnd(IntPtr.Zero))
@@ -248,11 +248,6 @@ namespace WorkCountdown
             AutoScaleMode = AutoScaleMode.None;
             Text = "上班工具箱";
             MinimumSize = new Size(S(DesignCollapsedW), S(DesignCollapsedH));
-
-            UiFont.Configure(settings.ui.textFont, settings.ui.numberFont);
-            appliedTextFont = settings.ui.textFont ?? "";
-            appliedNumberFont = UiFont.NumberFamily;
-            CreateFonts();
 
             // 工资面板每次启动都从收起状态开始（v3.2 起不再持久化展开 / 固定状态）
             salaryOpen = false;
@@ -334,7 +329,7 @@ namespace WorkCountdown
             tapeT.Interval = 50;
             tapeT.Tick += delegate { StepTapeFlow(); };
 
-            ApplySettings();
+            ApplySettingsChange(settings);
             BackColor = theme.bgBottom;
             collapsed = settings.ui.edge != "free";
             Size = collapsed ? new Size(S(DesignCollapsedW), S(DesignCollapsedH)) : new Size(S(DesignExpandedW), ExpandedH);
@@ -1451,59 +1446,140 @@ namespace WorkCountdown
             catch { }
         }
 
+        /// <summary>
+        /// 按当前 settings 重新走一次变化计划（构造 / UI 冒烟测试用）。
+        /// 生产调用点直接传下一份配置；这里不再手写字段比较或副作用顺序。
+        /// </summary>
         private void ApplySettings()
         {
-            if (sync != null)
-            {
-                sync.Configure(settings);
-                snapshot = sync.Snapshot().Attendance;
-            }
-            CloseDrawer();
-            CloseNotePanel();
-            if (settings.note == null) settings.note = new NoteSettings();
-            settings.note.Normalize();
-            UiFont.Configure(settings.ui.textFont, settings.ui.numberFont);
-            string wantText = settings.ui.textFont ?? "";
-            string wantNumber = UiFont.NumberFamily;
-            if (!string.Equals(wantText, appliedTextFont, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(wantNumber, appliedNumberFont, StringComparison.OrdinalIgnoreCase))
-            {
-                appliedTextFont = wantText;
-                appliedNumberFont = wantNumber;
-                CreateFonts();
-            }
-            if (salaryAnimating) FinishSalaryAnimNow();
-            if (settings.salary == null || settings.salary.monthly <= 0m) salaryOpen = false;
-            frameAlpha = (byte)Math.Round(255 * Math.Max(0.3, Math.Min(1.0, settings.ui.opacity / 100.0)));
-            KeepTopMost();
-            int ms = Math.Max(1, settings.lark.pollMinutes) * 60 * 1000;
-            poll.Interval = ms;
-            poll.Stop();
-            if (settings.lark.enabled) poll.Start();
+            ApplySettingsChange(settings);
+        }
 
-            calPoll.Interval = Math.Max(3, settings.calendarPollMinutes) * 60 * 1000;
+        /// <summary>按实际变化应用下一份规范化配置；提交失败时调用者不会走到这里。</summary>
+        private SettingsChangePlan ApplySettingsChange(Settings next)
+        {
+            if (next == null) return new SettingsChangePlan();
+            return apply.Apply(next);
+        }
+
+        private static bool RelayDisabledByEnvironment()
+        {
+            return Environment.GetEnvironmentVariable("WC_NO_RELAY") == "1"
+                || Environment.GetEnvironmentVariable("WC_NO_SAVE") == "1";
+        }
+
+        SettingsApplyState ISettingsApplyTarget.CaptureState()
+        {
+            var state = new SettingsApplyState();
+            state.AttendancePollRunning = poll != null && poll.Enabled;
+            state.CalendarPollRunning = calPoll != null && calPoll.Enabled;
+            state.OutlookPollRunning = olPoll != null && olPoll.Enabled;
+            state.NoteRelayRunning = noteRelay != null || RelayDisabledByEnvironment();
+            state.SyncFingerprint = sync.ConfigFingerprint();
+            return state;
+        }
+
+        void ISettingsApplyTarget.AdoptSettings(Settings next)
+        {
+            settings = next;
+        }
+
+        void ISettingsApplyTarget.ConfigureSync(Settings next)
+        {
+            sync.Configure(next);
+            snapshot = sync.Snapshot().Attendance;
+        }
+
+        void ISettingsApplyTarget.ApplyAttendancePoll(Settings next)
+        {
+            poll.Interval = Math.Max(1, next.lark.pollMinutes) * 60 * 1000;
+            poll.Stop();
+            if (next.lark.enabled) poll.Start();
+        }
+
+        void ISettingsApplyTarget.ApplyCalendarPoll(Settings next)
+        {
+            calPoll.Interval = Math.Max(3, next.calendarPollMinutes) * 60 * 1000;
             calPoll.Stop();
-            if (settings.calendarEnabled && settings.lark.enabled) calPoll.Start();
-            olPoll.Interval = Math.Max(3, settings.calendarPollMinutes) * 60 * 1000;
+            if (next.calendarEnabled && next.lark.enabled) calPoll.Start();
+        }
+
+        void ISettingsApplyTarget.ApplyOutlookPoll(Settings next)
+        {
+            olPoll.Interval = Math.Max(3, next.calendarPollMinutes) * 60 * 1000;
             olPoll.Stop();
-            if (settings.outlook != null && settings.outlook.HasEnabled) olPoll.Start();
-            if (tray != null)
-            {
-                try
-                {
-                    Icon old = tray.Icon;
-                    tray.Icon = MakeTrayIcon();
-                    if (old != null) old.Dispose();
-                }
-                catch { }
-            }
+            if (next.outlook != null && next.outlook.HasEnabled) olPoll.Start();
+        }
+
+        void ISettingsApplyTarget.RestartNoteRelay(Settings next)
+        {
             RestartNoteRelay();
+        }
+
+        void ISettingsApplyTarget.RefreshNoteRelay(Settings next)
+        {
+            if (noteRelay != null) noteRelay.RefreshSubscriptions();
+        }
+
+        void ISettingsApplyTarget.ApplyFonts(Settings next)
+        {
+            UiFont.Configure(next.ui.textFont, next.ui.numberFont);
+            CreateFonts();
+        }
+
+        void ISettingsApplyTarget.ApplyDisplayResources(Settings next)
+        {
+            theme = Skins.ResolveTheme(next.ui);
+            if (BackColor != theme.bgBottom) BackColor = theme.bgBottom;
+            frameAlpha = (byte)Math.Round(255 * Math.Max(0.3, Math.Min(1.0, next.ui.opacity / 100.0)));
+            RefreshTrayIcon();
+            Invalidate();
+        }
+
+        void ISettingsApplyTarget.ApplyTopMost(Settings next)
+        {
+            KeepTopMost();
+        }
+
+        void ISettingsApplyTarget.ApplyNotePanel(Settings next, bool relayout)
+        {
+            if (relayout)
+            {
+                CloseNotePanel();
+                return;
+            }
+            if (notePanel != null) notePanel.RefreshFromSettings(next, theme);
+        }
+
+        void ISettingsApplyTarget.ApplySalaryState(Settings next)
+        {
+            if (salaryAnimating) FinishSalaryAnimNow();
+            if (next.salary == null || next.salary.monthly <= 0m) salaryOpen = false;
+        }
+
+        void ISettingsApplyTarget.AfterApply(Settings next)
+        {
+            if (drawer != null) drawer.RebindSettings(next);
             Recompute();
             if (!collapsed && !animating && Height != ExpandedH)
             {
                 Size = new Size(S(DesignExpandedW), ExpandedH);
                 ApplyRegion();
             }
+            Invalidate();
+        }
+
+        /// <summary>托盘图标跟随当前主题；只有显示资源变化时由 applier 调用。</summary>
+        private void RefreshTrayIcon()
+        {
+            if (tray == null) return;
+            try
+            {
+                Icon old = tray.Icon;
+                tray.Icon = MakeTrayIcon();
+                if (old != null) old.Dispose();
+            }
+            catch { }
         }
 
         // ---------------- 位置与尺寸 ----------------
@@ -3659,8 +3735,7 @@ namespace WorkCountdown
                 dlg.TopMost = true;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    settings = store.Load().Settings;
-                    ApplySettings();
+                    ApplySettingsChange(store.Load().Settings);
                     RequestRefresh(false);
                     RequestCalendar(false);
                     RequestOutlook(false);
@@ -3733,7 +3808,7 @@ namespace WorkCountdown
             get { return settings.note != null && settings.note.TotalUnread() > 0; }
         }
 
-        /// <summary>重新连公共中继（设置改了 / 换了一份 Settings 之后调用）。</summary>
+        /// <summary>重新连公共中继（只有连接身份变化 / 首次启动才由 applier 调用）。</summary>
         private void RestartNoteRelay()
         {
             if (noteRelay != null)
@@ -3742,11 +3817,11 @@ namespace WorkCountdown
                 noteRelay = null;
             }
             if (settings.note == null) settings.note = new NoteSettings();
-            settings.note.Normalize();
             // 测试 / 出图探针不连真实中继（避免后台线程和网络依赖）
-            if (Environment.GetEnvironmentVariable("WC_NO_RELAY") == "1"
-                || Environment.GetEnvironmentVariable("WC_NO_SAVE") == "1") return;
-            var relay = new NoteRelay(settings.note);
+            if (RelayDisabledByEnvironment()) return;
+            // 中继每次读取当前 settings.note：换了一份 Settings 也不用重建连接，
+            // 昵称 / 对话变化只需 RefreshSubscriptions 原地刷新。
+            var relay = new NoteRelay(delegate { return settings.note; });
             relay.Message += OnNoteMessage;
             relay.Profile += OnNoteProfile;
             relay.ConnectedChanged += delegate(bool on) { store.Log("小纸条中继: " + (on ? "已连接" : "断开")); };
@@ -3759,7 +3834,7 @@ namespace WorkCountdown
             if (notePanel != null) { CloseNotePanel(); return; }
             if (screenReminder || collapsed) return;
             autoCollapse.Stop();
-            var p = new NotePanelForm(settings, theme, Bounds, settings.ui.alwaysOnTop,
+            var p = new NotePanelForm(delegate { return settings; }, theme, Bounds, settings.ui.alwaysOnTop,
                 SendNoteText, ReadNoteThread, ProbeNoteId, AddNoteContact,
                 delegate { CloseNotePanel(); OpenSettings(6); },
                 RenameNoteContact, DeleteNoteContact, SetNoteNickname);
@@ -3880,10 +3955,20 @@ namespace WorkCountdown
         {
             if (settings.note == null) settings.note = new NoteSettings();
             nick = NoteSettings.CleanNick(nick);
-            if (string.Equals(settings.note.nickname ?? "", nick, StringComparison.Ordinal)) return;
+            string previousNick = settings.note.nickname ?? "";
+            if (string.Equals(previousNick, nick, StringComparison.Ordinal)) return;
             settings.note.nickname = nick;
-            SaveSettingsQuietly("设置变化");
-            RestartNoteRelay();      // 昵称变化要立刻广播给已有联系人
+            var committed = commit.Commit(settings, "小纸条改昵称");
+            if (!committed.IsSuccess)
+            {
+                settings.note.nickname = previousNick;
+                if (committed.IsFailed)
+                    ShowBalloon("昵称没有保存成功：" + committed.Message);
+                else
+                    ShowBalloon("昵称未提交：本次运行不写配置（WC_NO_SAVE=1）。");
+                return;
+            }
+            // 连接身份没变：变化计划选择原地重发 presence，不重建中继。
             if (notePanel != null) notePanel.RefreshData();
             Invalidate();
             store.Log("小纸条改昵称: " + (string.IsNullOrEmpty(nick) ? "(空)" : nick));
@@ -4289,9 +4374,16 @@ namespace WorkCountdown
         private void ApplyBubbleTheme(string id)
         {
             if (string.IsNullOrEmpty(id) || id == settings.ui.theme) return;
+            string previous = settings.ui.theme;
             settings.ui.theme = id;
-            SaveSettingsQuietly("设置变化");
-            ApplySettings();
+            var committed = commit.Commit(settings, "胶囊菜单换主题");
+            if (!committed.IsSuccess)
+            {
+                settings.ui.theme = previous;
+                if (committed.IsFailed) ShowBalloon("主题没有保存成功：" + committed.Message);
+                else ShowBalloon("主题未提交：本次运行不写配置（WC_NO_SAVE=1）。");
+                return;
+            }
             Invalidate();
             store.Log("胶囊菜单换主题: " + id);
         }
@@ -4309,9 +4401,18 @@ namespace WorkCountdown
             settings.customThemes.Add(ct);
             Themes.SetCustom(settings.customThemes);
 
+            string previous = settings.ui.theme;
             settings.ui.theme = ct.id;
-            SaveSettingsQuietly("设置变化");
-            ApplySettings();
+            var committed = commit.Commit(settings, "胶囊菜单新建主题");
+            if (!committed.IsSuccess)
+            {
+                settings.ui.theme = previous;
+                settings.customThemes.Remove(ct);
+                Themes.SetCustom(settings.customThemes);
+                if (committed.IsFailed) ShowBalloon("主题没有保存成功：" + committed.Message);
+                else ShowBalloon("主题未提交：本次运行不写配置（WC_NO_SAVE=1）。");
+                return "";
+            }
             Invalidate();
             store.Log("胶囊菜单新建主题: " + ct.name + " (" + ct.id + ")");
             return ct.id;
@@ -4475,18 +4576,23 @@ namespace WorkCountdown
                     ShowBalloon("导入失败：" + imported.Message);
                     return;
                 }
+                Settings previous = settings;
                 settings = imported.Settings;
-                var saved = SaveSettingsQuietly("导入配置");
-                ApplySettings();
+                var committed = commit.Commit(settings, "导入配置");
+                if (!committed.IsSuccess)
+                {
+                    settings = previous;
+                    Themes.SetCustom(settings.customThemes);
+                    if (committed.IsFailed)
+                        ShowBalloon("导入没有保存成功：\r\n" + committed.Message + "\r\n上一份有效配置没有被改动。");
+                    else
+                        ShowBalloon("导入未提交：本次运行不写配置（WC_NO_SAVE=1）。");
+                    return;
+                }
                 RequestRefresh(false);
                 RequestCalendar(false);
                 Invalidate();
-                if (saved.IsFailed)
-                    ShowBalloon("配置已导入，但没有保存成功：\r\n" + saved.Message + "\r\n上一份有效配置没有被改动。");
-                else if (saved.IsSkipped)
-                    ShowBalloon("配置已导入（本次运行不写配置）");
-                else
-                    ShowBalloon("配置已导入");
+                ShowBalloon("配置已导入");
             }
         }
 
@@ -4499,8 +4605,7 @@ namespace WorkCountdown
                 dlg.TopMost = true;
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
-                    settings = store.Load().Settings;
-                    ApplySettings();
+                    ApplySettingsChange(store.Load().Settings);
                     RequestRefresh(false);
                     RequestCalendar(false);
                     Invalidate();
