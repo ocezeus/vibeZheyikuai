@@ -654,6 +654,7 @@ lark-cli auth login --scope "im:message.send_as_user"
 |---|---|
 | `src/Models.cs` | 设置模型、持久化、考勤策略与状态计算（纯逻辑，无 UI）；v5.0.0 删除 `UiSettings.skin` 与自建主题内嵌存储 |
 | `src/ThemeFiles.cs` | v5.0.0 主题文件：`themes\<id>.theme.json`（schema=1）的读写/校验/导入/导出/删除、旧 `customThemes` 迁移、`Themes` 用户主题目录扫描 |
+| `docs/DESIGN-SPEC.md` | v5.0.0 默认 UI 设计规范交接文档（令牌 / 界面几何 / 组件 / 动效 / 主题系统 / 源码映射 / 验收清单，1415 行） |
 | `src/Lark.cs` | 调 `lark-cli` 读会话 / 发消息 / 读日历日程，解析打卡 |
 | `src/Widget.cs` | 悬浮窗：绘制、卡片内提醒动画、收起展开、拖拽吸附、胶囊菜单入口、小纸条入口与边框闪光、托盘；v3.6 起还管「预览通知」和「检查更新」的线程与状态 |
 | `src/Frost.cs` | 磨砂玻璃背景（v3.6）：半透明主题底 + 柔光雾气 + 模糊噪点 tile + 斜向反光 + 玻璃边缘高光，卡片/小纸条/胶囊三处共用 |

@@ -8,7 +8,7 @@
 
 ## 当前版本：v5.0.0
 
-已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.0.0`（本轮只保留默认界面风格、主题文件化、设计规范文档；日常改动仍按下面的约定走）。
+已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.0.0`（Release id 448605714，双资产齐全；装**机 FileVersion 5.0.0.0 / PID 37952（20:33:14）**；更新链路实测：当前 5.0.0 / 最新 5.0.0 / `IsNewer=false`。本轮只保留默认界面风格、主题文件化、设计规范文档；日常改动仍按下面的约定走）。
 
 ### 2026-11-17 20:30 · v5.0.0 外观与主题重构：只保留默认风格 + 主题文件化 + 设计规范文档
 
@@ -33,7 +33,7 @@
 - 版本 4.1.0 → **5.0.0**：`src/Models.cs`（`AppInfo.Version`）、`src/AssemblyInfo.cs`（5.0.0.0）、`package.ps1` / `tools/release.ps1` 默认版本、`README.md`、`src/UpdateChangelog.cs`（新增 5.0.0 条目）、设计规范文档标题。
 - `.\test\build-tests.ps1`：**Test 664 / Check 384 全绿**（v4.1.0 基线 636 / 384；皮肤断言删除、主题文件新增 28 条 Test、Check 换成「外观页只有默认风格 + 主题文件全链」断言）；`.\test\build-probes.ps1` **69/69 OK**（3 个皮肤专用探针随皮肤一起删除，其余探针改用主题文件 API）。
 - `README.md` 外观与主题 / 设置窗口 / 项目结构 / 版本与发版示例全部改 v5 口径（界面风格整节删除，新增「主题文件（v5.0.0）」与「默认界面风格（v5.0.0）」）；`package.ps1` 内嵌「使用说明.txt」同步；一图说明书删除第 06 节六套皮肤、换成 39 套主题 + 主题文件说明并重出（**2400×9927，3,024 KB**）。
-- 发版：`.\package.ps1` 一条命令（build → zip → commit → push → tag → GitHub Release 双资产：`WorkCountdown-v5.0.0.zip` + `WorkCountdown.exe`），装机 FileVersion **5.0.0.0**，更新链路实测到 5.0.0。
+- 发版：`.\package.ps1` 一条命令（build → zip → commit → push → tag → GitHub Release 双资产：`WorkCountdown-v5.0.0.zip` 2906.5 KB + `WorkCountdown.exe` 490 KB），Release id 448605714；装机 `FileVersion 5.0.0.0` / PID 37952（20:33:14）；更新链路实测：当前 5.0.0 / 最新 5.0.0 / `asset=WorkCountdown.exe` / `IsNewer=false`。
 
 **改动文件（本轮）**
 | 文件 | 改了什么 |
