@@ -4702,6 +4702,11 @@ class Check
             {
                 return new Rectangle(6, 6, b.Width * 2 / 5, b.Height * 2 / 5);
             };
+            // 左侧留白条：正文从 12 DIP 起，这一条里没有字，量到的才是「文字背后的底色」
+            Func<Bitmap, Rectangle> inkGround = delegate(Bitmap b)
+            {
+                return new Rectangle(6, (int)(b.Height * 0.2), 8, (int)(b.Height * 0.6));
+            };
             Func<Bitmap, Bitmap, int> rbGain = delegate(Bitmap off, Bitmap on)
             {
                 return Brightness(AverageColor(on, rbRect(on))) - Brightness(AverageColor(off, rbRect(off)));
@@ -4754,7 +4759,7 @@ class Check
             using (shotOff) using (shotOn)
             {
                 double dist = Distance(AverageColor(shotOn, rbRect(shotOn)), AverageColor(shotOff, rbRect(shotOff)));
-                Color ground = AverageColor(shotOn, ltRect(shotOn));
+                Color ground = AverageColor(shotOn, inkGround(shotOn));
                 double ct = Contrast(Themes.Get("ivory").textMain, ground);
                 Ok("象牙白（浅色玻璃）开弧光后不糊：右下确实有色差", dist >= 3, "色差 " + dist.ToString("0.0"));
                 Ok("象牙白开弧光后左上文字区对比度 ≥ 4.5", ct >= 4.5, "对比度 " + ct.ToString("0.00") + " / 底色 " + fmt(ground));
@@ -4790,6 +4795,24 @@ class Check
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
         }
+
+            // 39 套主题逐个自检：开弧光后文字仍清晰（浅色主题最容易糊在白底上）
+            {
+                double worst = 99, worstOff = 99;
+                string worstTheme = "";
+                foreach (ThemeDef t in Themes.BuiltIn)
+                {
+                    using (var on = RenderCardPixels(ArcSettings(t.id, "glass", true, false)))
+                    using (var off = RenderCardPixels(ArcSettings(t.id, "glass", false, false)))
+                    {
+                        double ct = Contrast(t.textMain, AverageColor(on, inkGround(on)));
+                        double ctOff = Contrast(t.textMain, AverageColor(off, inkGround(off)));
+                        if (ct < worst) { worst = ct; worstTheme = t.id; worstOff = ctOff; }
+                    }
+                }
+                Ok("39 套主题开弧光后文字对比度都 ≥ 4.4", worst >= 4.4,
+                    "最低 " + worst.ToString("0.00") + ":1（" + worstTheme + "，不开时 " + worstOff.ToString("0.00") + ":1）");
+            }
 
             string seedHues = "";
             foreach (string themeId in new string[] { "midnight", "aurora", "sunset", "sakura", "forest", "ivory" })
