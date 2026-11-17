@@ -16,6 +16,24 @@ internal static class Test
         Console.WriteLine((ok ? "PASS  " : "FAIL  ") + name + "  => " + actual + (ok ? "" : "   (expected " + expected + ")"));
     }
 
+    /// <summary>数值断言：超出容差就把名字记下来，整组跑完再一起报。</summary>
+    private static void Near(System.Collections.Generic.List<string> bad, string name, double actual, double expected, double tol)
+    {
+        if (Math.Abs(actual - expected) > tol)
+            bad.Add(name + "=" + actual.ToString("0.###") + "(want " + expected.ToString("0.###") + ")");
+    }
+
+    /// <summary>色相是环形的：往 reference 最近的一侧折一下再比，跨 0° 不会假失败。</summary>
+    private static double HueOf(Color c, double reference)
+    {
+        double h, s, l;
+        Themes.ToHsl(c, out h, out s, out l);
+        double d = h - reference;
+        while (d > 180) d -= 360;
+        while (d < -180) d += 360;
+        return reference + d;
+    }
+
     private static string NewTempDir()
     {
         string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-settings-" + Guid.NewGuid().ToString("N"));
@@ -3324,6 +3342,28 @@ internal static class Test
             }
         }
 
+            // 25.12 弧光开关变化只刷新显示资源（保存后卡片立刻跟着变）
+            {
+                var cfg = new Settings();
+                cfg.Normalize();
+                cfg.lark.enabled = false;
+                cfg.calendarEnabled = false;
+                var target = new RecordingSettingsApplyTarget();
+                var apply = new SettingsApplyCoordinator(target);
+                apply.Apply(cfg);
+                target.ResetCounts();
+
+                var next = cfg.Clone();
+                next.ui.arcGlow = true;
+                var change = apply.Apply(next);
+                Check("AC1 弧光开关变化只标记显示资源",
+                    change.DisplayChanged + "/" + change.FontsChanged + "/" + change.AttendancePollChanged
+                    + "/" + change.CardContentChanged + "/" + change.TopMostChanged,
+                    "True/False/False/False/False");
+                Check("AC1 弧光开关变化只调用显示刷新", target.Counts(),
+                    "sync=0 attendance=0 calendar=0 outlook=0 fonts=0 display=1 relayRestart=0 relayRefresh=0 panel=1 panelRelayout=0 salary=0 after=1");
+            }
+
             // 26. 检查更新页的变更记录（v4.0.0）：每个大版本一条，新的在前
             {
                 var entries = UpdateChangelog.Entries;
@@ -3737,6 +3777,103 @@ internal static class Test
             var endOut = skipEngine.Advance(skip, noSnap, new DateTime(2026, 11, 17, 10, 0, 0), new ReminderSignals());
             Check("28.36 循环日程没有结束提醒",
                 endOut.Decisions.Count > 0 ? endOut.Decisions[0].Event.title : "-", "拉伸时间到");
+        }
+
+        // ---- 29. 弧光（Aurora Arc）：派生色 / 可用性 / 持久化 ----
+        {
+            string[] seeds = new string[] { "#4C8DFF", "#2FD4C4", "#FF9A5A", "#FF7FA8", "#5FD08A", "#3D6BFF" };
+            var bad = new System.Collections.Generic.List<string>();
+            foreach (string hex in seeds)
+            {
+                Color seed = Skins.Hex(hex);
+                ArcPalette pal = ArcGlow.Derive(seed);
+                double dh, ds, dl;
+                Themes.ToHsl(seed, out dh, out ds, out dl);
+                double S = Math.Max(ds, ArcPalette.SatFloor);
+                Near(bad, hex + " hue arc2", HueOf(pal.Arc2, dh), dh, 1.6);
+                Near(bad, hex + " hue arc1", HueOf(pal.Arc1, dh), dh - 45, 1.6);
+                Near(bad, hex + " hue arc3", HueOf(pal.Arc3, dh), dh - 100, 1.6);
+                Near(bad, hex + " hue arc4", HueOf(pal.Arc4, dh), dh + 42, 1.6);
+                double hh, ss, ll;
+                Themes.ToHsl(pal.Arc1, out hh, out ss, out ll); Near(bad, hex + " arc1 L", ll, 0.55, 0.03);
+                Themes.ToHsl(pal.Arc2, out hh, out ss, out ll); Near(bad, hex + " arc2 L", ll, 0.64, 0.03);
+                Themes.ToHsl(pal.Arc2, out hh, out ss, out ll); Near(bad, hex + " arc2 S", ss, S, 0.05);
+                Themes.ToHsl(pal.Arc3, out hh, out ss, out ll); Near(bad, hex + " arc3 L", ll, 0.72, 0.03);
+                Themes.ToHsl(pal.Arc3, out hh, out ss, out ll); Near(bad, hex + " arc3 S", ss, S * 0.92, 0.05);
+                Themes.ToHsl(pal.Arc4, out hh, out ss, out ll); Near(bad, hex + " arc4 L", ll, 0.64, 0.03);
+                Themes.ToHsl(pal.Hot, out hh, out ss, out ll); Near(bad, hex + " hot L", ll, 0.93, 0.03);
+                Themes.ToHsl(pal.Deep, out hh, out ss, out ll); Near(bad, hex + " deep L", ll, 0.42, 0.03);
+            }
+            Check("29.01 六套 seed 的派生色（−45° / 0° / −100° / +42° + 亮度 + 饱和下限）",
+                bad.Count == 0 ? "ok" : string.Join("; ", bad.ToArray()), "ok");
+
+            string problems = "";
+            foreach (ThemeDef t in Themes.BuiltIn)
+            {
+                try
+                {
+                    ArcPalette pal = ArcGlow.Derive(t.accent);
+                    if (pal.Hot.IsEmpty || pal.Deep.IsEmpty) problems += t.id + "(empty) ";
+                }
+                catch (Exception ex) { problems += t.id + "(" + ex.GetType().Name + ") "; }
+            }
+            Check("29.02 内置全部主题都能派生（不抛异常、颜色非空）",
+                problems.Length == 0 ? Themes.BuiltIn.Length + " 套 ok" : problems, Themes.BuiltIn.Length + " 套 ok");
+
+            var ui = new UiSettings();
+            Check("29.03 弧光默认关闭", ui.arcGlow.ToString(), "False");
+            ui.arcGlow = false;
+            Check("29.04 默认皮肤 + 开关关闭 → 不画", ArcGlow.Enabled(ui).ToString(), "False");
+            ui.arcGlow = true;
+            Check("29.05 默认皮肤 + 纯色 → 画", ArcGlow.Enabled(ui).ToString(), "True");
+            ui.bgStyle = Frost.Glass;
+            Check("29.06 默认皮肤 + 磨砂玻璃 → 也画", ArcGlow.Enabled(ui).ToString(), "True");
+            ui.skin = "neon";
+            Check("29.07 非默认皮肤 → 不画，且设置值保留",
+                ArcGlow.Enabled(ui).ToString() + "/" + ui.arcGlow, "False/True");
+            Check("29.08 非默认皮肤 Supported=false", ArcGlow.Supported(ui).ToString(), "False");
+            ui.skin = Skins.DefaultId;
+            ui.arcGlow = false;
+            Check("29.09 切回默认皮肤后开关照样能开", ArcGlow.Supported(ui).ToString(), "True");
+
+            var json = new JavaScriptSerializer();
+            Settings old = json.Deserialize<Settings>("{\"ui\":{\"theme\":\"midnight\",\"bgStyle\":\"glass\"}}");
+            if (old.ui == null) old.ui = new UiSettings();
+            Check("29.10 老配置里没有 arcGlow 字段 → 读回来是关", old.ui.arcGlow.ToString(), "False");
+            var src = new Settings();
+            src.ui.arcGlow = true;
+            src.ui.bgStyle = Frost.Glass;
+            Settings copy = src.Clone();
+            Check("29.11 克隆（JSON 往返）带着 arcGlow 与背景风格",
+                copy.ui.arcGlow.ToString() + "/" + copy.ui.bgStyle, "True/glass");
+
+            ThemeDef mid = Themes.Get("midnight");
+            Check("29.12 同一主题的派生结果复用缓存",
+                object.ReferenceEquals(ArcGlow.For(mid), ArcGlow.For(mid)).ToString(), "True");
+            string arcDir = NewTempDir();
+            string arcNoSave = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+            try
+            {
+                Environment.SetEnvironmentVariable("WC_NO_SAVE", "0");
+                var arcStore = StoreIn(arcDir);
+                var arcSaved = new Settings();
+                arcSaved.ui.arcGlow = true;
+                arcSaved.ui.bgStyle = Frost.Glass;
+                arcStore.Save(arcSaved);
+                Settings arcBack = arcStore.Load().Settings;
+                Check("29.13 落盘 / 读回都带着 arcGlow",
+                    arcBack.ui.arcGlow.ToString() + "/" + arcBack.ui.bgStyle, "True/glass");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("WC_NO_SAVE", arcNoSave);
+                DeleteTempDir(arcDir);
+            }
+
+            var lightScene = ArcScene.Of(new Rectangle(0, 0, 40, 20), true, Themes.Get("ivory"), 0);
+            var darkScene = ArcScene.Of(new Rectangle(0, 0, 40, 20), false, mid, 0);
+            Check("29.14 象牙白按浅色处理、午夜蓝按深色",
+                lightScene.Light.ToString() + "/" + darkScene.Light, "True/False");
         }
 
         Console.WriteLine();

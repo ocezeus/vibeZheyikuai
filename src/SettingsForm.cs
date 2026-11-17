@@ -42,6 +42,11 @@ namespace WorkCountdown
         private SettingsHead head;          // 内容区标题条（自绘，宣纸时画印章）
         private Panel footerBar;            // 底部按钮条
         private SkinPicker skinPicker;      // 外观页「界面风格」的 6 个块
+        private ArcSwitch swArc;             // 外观页「弧光」开关
+        private Label lblArcState;           // 弧光状态行（随背景风格 / 皮肤变）
+        private Label lblArcLock;            // 弧光可用性标签
+        private ArcSwatchStrip arcSwatches;  // 弧光配色：种子 → 四颗派生色
+        private bool loadingArc;             // 载入控件的瞬间不要回写草稿
         private Label lblThemeLocked;       // 非默认皮肤时「主题配色」上的提示
         private Button btnNewTheme;         // ＋ 新建主题（非默认皮肤时置灰）
         private int curPage = 0;
@@ -327,6 +332,7 @@ namespace WorkCountdown
             BuildNotes(p7);
 
             BuildThemes(p4);
+            BuildArcCard(p4);
             BuildLook(p4);
             BuildBackup(p4);
         }
@@ -1992,6 +1998,73 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             rbBgGlass.BackColor = Color.Transparent;
             g.Controls.Add(rbBgGlass);
             g.Controls.Add(Hint("磨砂玻璃：半透明 + 磨砂颗粒", 258, 198, 222, 20));
+
+            rbBgSolid.CheckedChanged += delegate { RefreshArcUi(); };
+            rbBgGlass.CheckedChanged += delegate { RefreshArcUi(); };
+        }
+
+        /// <summary>
+        /// 外观页「弧光」卡片：开关 + 状态行 + 派生色。可用性只看《默认》皮肤，
+        /// 纯色 / 磨砂玻璃只是卡片底怎么画，两样都能开。
+        /// </summary>
+        private void BuildArcCard(TabPage page)
+        {
+            var g = CardBox(page, "弧光", 8, 356, 492, 116);
+            g.Controls.Add(Hint("取当前主题的强调色作种子，沿 −100° / −45° / 0° / +42° 派生", 14, 26, 360, 20));
+
+            swArc = new ArcSwitch();
+            swArc.SetBounds(414, 22, 52, 28);
+            swArc.Click += delegate
+            {
+                if (loadingArc) return;
+                s.ui.arcGlow = swArc.Checked;
+                RefreshArcUi();
+            };
+            g.Controls.Add(swArc);
+
+            lblArcState = Hint("", 14, 58, 330, 20);
+            lblArcState.ForeColor = Ui.Muted;
+            g.Controls.Add(lblArcState);
+
+            lblArcLock = new Label();
+            lblArcLock.SetBounds(300, 58, 166, 20);
+            lblArcLock.TextAlign = ContentAlignment.MiddleRight;
+            lblArcLock.Font = UiFont.Make(8f, FontStyle.Regular);
+            lblArcLock.ForeColor = Ui.Muted;
+            lblArcLock.BackColor = Color.Transparent;
+            lblArcLock.Tag = "hint";
+            g.Controls.Add(lblArcLock);
+
+            arcSwatches = new ArcSwatchStrip();
+            arcSwatches.SetBounds(14, 82, 464, 26);
+            g.Controls.Add(arcSwatches);
+        }
+
+        /// <summary>弧光开关的可用性与说明：非默认皮肤置灰、设置值不清空。</summary>
+        private void RefreshArcUi()
+        {
+            if (swArc == null) return;
+            var skin = Skins.Current(s.ui);
+            bool supported = skin.IsDefault;
+            bool glass = rbBgGlass != null ? rbBgGlass.Checked : s.ui.bgStyle == Frost.Glass;
+            string where = glass ? "磨砂玻璃" : "纯色卡片";
+            swArc.Enabled = supported;
+            if (!supported)
+                lblArcState.Text = "仅《默认》支持弧光，其它皮肤不叠加";
+            else if (s.ui.arcGlow)
+                lblArcState.Text = "已开启 · 叠加在" + where + "上";
+            else
+                lblArcState.Text = "已关闭 · 回到普通" + where;
+            lblArcLock.Text = supported ? "默认 · 纯色 / 磨砂玻璃" : "仅默认皮肤";
+            if (arcSwatches != null)
+            {
+                ThemeDef theme = (supported && picker != null) ? Themes.Get(picker.SelectedId) : Skins.ResolveTheme(s.ui);
+                swArc.Palette = ArcGlow.For(theme);
+                swArc.Invalidate();
+                arcSwatches.Seed = theme.accent;
+                arcSwatches.Palette = swArc.Palette;
+                arcSwatches.Invalidate();
+            }
         }
 
         /// <summary>「界面风格」卡片：6 个可点的风格块，点一下立刻预览，点「保存」才落盘。</summary>
@@ -2036,6 +2109,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 btnEditTheme.ForeColor = (!locked && custom) ? Ui.Accent : Ui.Muted;
                 btnEditTheme.FlatAppearance.BorderColor = (!locked && custom) ? Ui.Accent : Ui.Edge;
             }
+            RefreshArcUi();
         }
 
         private void NewCustomTheme()
@@ -2100,7 +2174,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildLook(TabPage page)
         {
-            var g = CardBox(page, "外观与提醒", 8, 356, 492, 190);
+            var g = CardBox(page, "外观与提醒", 8, 480, 492, 190);
 
             g.Controls.Add(Lbl("不透明度", 14, 28, 58, 24));
             numOpacity = Num(94, 76, 28, 56, 30, 100);
@@ -2166,7 +2240,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildBackup(TabPage page)
         {
-            var g = CardBox(page, "配置备份", 8, 554, 492, 112);
+            var g = CardBox(page, "配置备份", 8, 678, 492, 112);
             g.Controls.Add(Hint("换电脑或给同事复用：导出一份，带过去再导入。", 14, 24, 466, 18));
 
             var btnExport = FlatButton("导出配置…", 14, 48, 108, 30);
@@ -2325,8 +2399,17 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             if (rbBgSolid != null)
             {
                 bool glass = Frost.On(s.ui);
+                loadingArc = true;
                 rbBgSolid.Checked = !glass;
                 rbBgGlass.Checked = glass;
+                loadingArc = false;
+            }
+            if (swArc != null)
+            {
+                loadingArc = true;
+                swArc.Checked = s.ui.arcGlow;
+                loadingArc = false;
+                RefreshArcUi();
             }
 
             if (picker != null)
@@ -2448,6 +2531,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             string[] glowIds = new string[] { "classic", "corner", "bar", "all" };
             s.ui.cardGlow = glowIds[Math.Max(0, Math.Min(glowIds.Length - 1, cmbGlow.SelectedIndex))];
             if (rbBgGlass != null) s.ui.bgStyle = rbBgGlass.Checked ? Frost.Glass : Frost.Solid;
+            if (swArc != null) s.ui.arcGlow = swArc.Checked;
             s.ui.textFont = editTextFont ?? "";
             s.ui.numberFont = string.IsNullOrWhiteSpace(editNumberFont) ? "Consolas" : editNumberFont;
             UiFont.Configure(s.ui.textFont, s.ui.numberFont);
@@ -3476,6 +3560,145 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             selectedId = id;
             Invalidate();
             if (SelectedIdChanged != null) SelectedIdChanged(this, EventArgs.Empty);
+        }
+    }
+
+
+    /// <summary>
+    /// 弧光开关：50×28 的自绘胶囊。轨道用当前的派生色做渐变（关的时候是界面强调色），
+    /// 关 / 开只换轨道和滑块位置，不用普通 CheckBox 那种系统样式。
+    /// </summary>
+    public class ArcSwitch : Control
+    {
+        public bool Checked;
+        public ArcPalette Palette;
+
+        public override bool AutoSize { get { return false; } }
+
+        public ArcSwitch()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Size = new Size(52, 28);
+            Cursor = Cursors.Hand;
+        }
+
+        protected override void OnClick(EventArgs e)
+        {
+            if (!Enabled) return;
+            Checked = !Checked;
+            Invalidate();
+            base.OnClick(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float k = g.DpiX / 96f;
+            var box = new Rectangle(0, 0, Width - 1, Height - 1);
+            int radius = Math.Max(1, (int)Math.Round(box.Height / 2f));
+            using (var path = Ui.RoundPath(box, radius))
+            {
+                if (Checked && Palette != null)
+                {
+                    var inner = new Rectangle(box.X, box.Y, box.Width, box.Height);
+                    using (var brush = new LinearGradientBrush(inner, Palette.Arc1, Palette.Arc4, 0f))
+                    {
+                        var blend = new ColorBlend();
+                        blend.Colors = new Color[] { Palette.Arc1, Palette.Arc2, Palette.Arc4 };
+                        blend.Positions = new float[] { 0f, 0.55f, 1f };
+                        brush.InterpolationColors = blend;
+                        g.FillPath(brush, path);
+                    }
+                    using (var p = new Pen(Skins.Alpha(Palette.Arc2, 0.55), Math.Max(1f, k))) g.DrawPath(p, path);
+                }
+                else
+                {
+                    // 关掉的轨道不能是纯白：浅色界面下会和卡片底连成一片，看不出这是个开关
+                    using (var b = new SolidBrush(Checked ? Ui.Accent : Skins.Mix(Ui.Surface, Ui.Ink, 0.12)))
+                        g.FillPath(b, path);
+                    using (var p = new Pen(Ui.Edge, Math.Max(1f, k))) g.DrawPath(p, path);
+                }
+                if (!Enabled)
+                    using (var b = new SolidBrush(Skins.Alpha(Ui.WindowBg, 0.55))) g.FillPath(b, path);
+            }
+
+            int knob = Math.Max(6, (int)Math.Round(Math.Min(box.Height, box.Width) * 0.60f));
+            int margin = Math.Max(2, (int)Math.Round((box.Height - knob) / 2f));
+            int x = Checked ? box.Right - knob - margin : box.X + margin;
+            var knobRect = new Rectangle(x, box.Y + margin, knob, knob);
+            using (var path = Ui.RoundPath(knobRect, knob / 2))
+            {
+                using (var b = new SolidBrush(Enabled ? Color.White : Skins.Alpha(Color.White, 0.72)))
+                    g.FillPath(b, path);
+                // 关掉时滑块压在同一片浅色轨道上，补一圈细边才分得开
+                if (!Checked)
+                    using (var p = new Pen(Skins.Alpha(Ui.Ink, 0.22), Math.Max(1f, k)))
+                        g.DrawPath(p, path);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 「弧光配色」一行：种子色 → 四颗派生色，右边标出色相偏移。
+    /// 颜色直接来自 ArcGlow.Derive，所以换主题时这一行跟着变，不能手选。
+    /// </summary>
+    public class ArcSwatchStrip : Control
+    {
+        public Color Seed = Color.Transparent;
+        public ArcPalette Palette;
+
+        public ArcSwatchStrip()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw
+                | ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            float k = g.DpiX / 96f;
+            int d = Math.Max(8, (int)Math.Round(12 * k));
+            int gap = Math.Max(5, (int)Math.Round(13 * k));
+            int top = Math.Max(1, (int)Math.Round(2 * k));
+            int x = 0;
+
+            using (var b = new SolidBrush(Seed)) g.FillEllipse(b, x, top, d, d);
+            x += d + gap;
+
+            using (var p = new Pen(Ui.Muted, Math.Max(1f, k)))
+            {
+                int ay = top + d / 2;
+                g.DrawLine(p, x, ay, x + gap * 2, ay);
+                g.DrawLine(p, x + gap * 2 - (int)(3 * k), ay - (int)(3 * k), x + gap * 2, ay);
+                g.DrawLine(p, x + gap * 2 - (int)(3 * k), ay + (int)(3 * k), x + gap * 2, ay);
+            }
+            x += gap * 2 + gap;
+
+            if (Palette != null)
+            {
+                Color[] tones = new Color[] { Palette.Arc3, Palette.Arc1, Palette.Arc2, Palette.Arc4 };
+                string[] hues = new string[] { "−100°", "−45°", "0°", "+42°" };
+                using (var font = UiFont.Make(6.5f))
+                using (var ink = new SolidBrush(Ui.Muted))
+                {
+                    for (int i = 0; i < tones.Length; i++)
+                    {
+                        using (var b = new SolidBrush(tones[i])) g.FillRectangle(b, x, top, d, d);
+                        // 色相标签摆在色块正中，太靠左会和前一块的标签粘在一起
+                        SizeF size = g.MeasureString(hues[i], font);
+                        g.DrawString(hues[i], font, ink, x + (d - size.Width) / 2f, top + d + Math.Max(1, (int)Math.Round(1.5 * k)));
+                        x += d + gap;
+                    }
+                }
+            }
+
+            g.SmoothingMode = SmoothingMode.Default;
         }
     }
 

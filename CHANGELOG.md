@@ -41,6 +41,37 @@
 - 版本 4.0.0 → **4.1.0**：`AppInfo.Version`、`AssemblyInfo`、`package.ps1` / `tools\release.ps1` 默认版本、README；本文件新增本小节。
 - 兼容约定未变：`WorkCountdown.exe`、`%APPDATA%\WorkCountdown`、便携 `portable.txt` + `data\`、旧配置字段与迁移语义；旧配置没有 `clockInLocal` / `clockOutLocal` 时按空处理、行为不变。
 
+### 2026-11-17 · 弧光（Aurora Arc）：卡片内极光，颜色由主题强调色派生
+
+用户要求：把已经定稿的「弧光」设计原型（`design/arc-glow.html`，光路 A 玻内极光）落进真实实现；只有《默认》界面风格能开，纯色与磨砂玻璃两种背景风格都允许，其它皮肤置灰；光色必须由当前主题的强调色派生，不能另挑色板；展开 / 收起都要画，`reducedMotion` 要生效。
+
+**① 设置模型（`src/Models.cs`）**
+- `UiSettings.arcGlow`（默认 `false`）；JSON 读写在字段缺失时保持 `false`，`Clone()` / 落盘 / 读回自动带着它，老配置不需要迁移。
+- `Themes.ToHsl / FromHsl` 由 `private` 放宽到 `internal`，供派生动色复用同一套 HSL 换算（没有新写第二套）。
+
+**② 派生色与绘制（`src/ArcGlow.cs`（新）/ `build.ps1`）**
+- `ArcPalette` + `ArcGlow.Derive(accent)`：−45° / 0° / −100° / +42° 与高光 / 底光，饱和度下限 0.68；按 accent 缓存（39 套主题、同一套只算一次）。
+- `ArcGlow.Supported(ui)` 只看皮肤；`ArcGlow.Enabled(ui)` = 皮肤默认 + 用户开了开关。**不再用 `Skins.UsesGlass` 作为开关条件。**
+- 卡片内绘制顺序：底色 → 弧光 → sheen / 纸纹 → 内容。三层宽幕 + 五条细弧 + 右下 flare，全部裁在卡片圆角内；光幕缓存在 256×192 小图上按卡片比例拉伸（缩小再放大近似 CSS 的 blur，不引入真实抓屏模糊），漂移按秒表做 19 / 22 / 28 秒来回缓动。
+- 浅色主题（象牙白）：光色先压深一档再叠，代替 CSS 的 multiply；强度以像素分位数对原型标定（右下象限 p50 / p90 / p99 = 72 / 86 / 160，原型 73 / 89 / 160）。
+
+**③ 卡片接线（`src/Widget.cs` / `src/SettingsApplyPlan.cs`）**
+- `RenderCard` 在底色之后、sheen 之前调用 `ArcGlow.Paint`；展开 / 收起共用同一套按比例的光路。
+- 漂移融进现有 55ms `flowT`：判定抽成 `FlowFrameNeeded()`，弧光开着才算一路；`reducedMotion` / 高对比度下弧光静止、不额外重画。
+- 变化计划把 `arcGlow` 算进 `DisplayChanged`，保存后卡片立刻更新。
+
+**④ 设置页（`src/SettingsForm.cs`）**
+- 外观页新增「弧光」卡（第 3 张）：自绘 52×28 胶囊开关（轨道用派生色渐变）、状态行（「已开启 · 叠加在纯色卡片上 / 磨砂玻璃上」「已关闭 · 回到普通…」）、右侧可用性标签（「默认 · 纯色 / 磨砂玻璃」或「仅默认皮肤」）、派生色条（种子 → −100° / −45° / 0° / +42°）。
+- 非默认皮肤：开关置灰并说明「仅《默认》支持弧光」，草稿里的 `arcGlow` 保留；切背景风格不会关掉弧光；换主题 / 换皮肤 / 切背景风格时状态行与色条同步。
+- 外观页因此多了 116 DIP：外观与提醒卡 356→480、配置备份 554→678（页面本来就靠滚动，卡片与保存按钮都没被挤出去）。
+
+**⑤ 测试 / 验证**
+- `test/Test.cs` +16（派生公式六套 seed、39 套全部可派生、默认关、可用性、JSON 向后兼容、克隆与落盘读回、缓存复用、浅色场景、弧光开关只触发显示刷新）。
+- `test/Check.cs` +23（卡片像素：磨砂玻璃 / 纯色都画出、右下比左上亮、收起态也画、非默认皮肤像素完全一致；象牙白色差与文字对比度 12:1；`reducedMotion` 仍画；重画判定；外观页 5 张卡、开关可用性 / 状态行 / 派生色条 / 切背景不自动关 / 换主题同步 / 置灰不清值；**39 套主题逐个开弧光量文字对比度，最低 5.12:1（午夜蓝，不开时 8.85:1）**）。
+- `.	estuild-tests.ps1`：**Test 652 / Check 407 全绿**（改动前 636 / 384）。
+- 新增截图探针 `test/ArcGlowShot.cs`（`build-probes.ps1` 自动编译）：三套主题 × 纯色 / 玻璃 × 展开 / 收起 + 设置页，产物在 `test/visual/arc/`（不入库）。
+- 原型与最终对比图收在 `prototype/arc-glow` 分支（`design/arc-glow.html` + 最终截图），实现走 `feat/arc-glow`；**未升版本号、未打包、未 push**（用户说发版时再走流程）。
+
 ### 2026-11-16 20:30 · v4.0.0 深模块重构收尾 + 检查更新页变更记录
 
 用户要求：检查更新页展示变更记录，**每个大版本迭代都要记录**；同时准备 4.0.0 发版内容（打包 / 发布由 Lead 执行，本次没有跑 `package.ps1` / `tools\release.ps1`）。

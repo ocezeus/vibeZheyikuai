@@ -305,15 +305,7 @@ namespace WorkCountdown
             {
                 if (!Visible) return;
                 if (reminding || animating || expandAnim) return;
-                bool salaryTick = salaryOpen;
-                if (settings.ui.reducedMotion || SystemInformation.HighContrast)
-                {
-                    if (salaryTick || NoteRimActive()) Invalidate();
-                    return;
-                }
-                // 流动亮带只有默认 / 云母 / 霓虹这三套有；别的皮肤静止时不用 18fps 空转
-                if (!BarAnimated && !salaryTick && !NoteRimActive()) return;
-                Invalidate();
+                if (FlowFrameNeeded()) Invalidate();
             };
             remindT.Tick += delegate { StepReminder(); };
 
@@ -1087,6 +1079,18 @@ namespace WorkCountdown
                 if (f != null) f.Dispose();
             screenKindFont = screenTitleFont = screenCountFont = screenWhenFont =
                 screenPlaceFont = screenDetailFont = screenHintFont = null;
+        }
+
+        /// <summary>
+        /// 这一帧要不要重画：进度条流光、工资跳字、小纸条闪边、弧光漂移，只要有一路在动就按 18fps 走。
+        /// 减少动态效果时弧光是静态的，不算在内，免得白烧 CPU。
+        /// </summary>
+        internal bool FlowFrameNeeded()
+        {
+            bool salaryTick = salaryOpen;
+            if (settings.ui.reducedMotion || SystemInformation.HighContrast)
+                return salaryTick || NoteRimActive();
+            return BarAnimated || salaryTick || NoteRimActive() || ArcGlow.Enabled(settings.ui);
         }
 
         /// <summary>最后 60 分钟显示厘秒，这时才把刷新提到 20Hz；其余时间仍旧一秒一跳。</summary>
@@ -2048,6 +2052,13 @@ namespace WorkCountdown
                 else
                     using (var brush = new LinearGradientBrush(new Rectangle(0, 0, Width, Height), theme.bgTop, theme.bgBottom, 90f))
                         g.FillPath(brush, path);
+                // 弧光画在卡片底色之上、内容之下：纯色和磨砂玻璃都叠，只按《默认》皮肤判断
+                if (ArcGlow.Enabled(settings.ui))
+                {
+                    var scene = ArcScene.Of(new Rectangle(0, 0, Width, Height), collapsed, theme,
+                        settings.ui.reducedMotion ? 0.0 : ArcGlow.NowSeconds());
+                    ArcGlow.Paint(g, path, ArcGlow.For(theme), scene);
+                }
                 // 皮肤质感：顶部高光（默认皮肤 sheenAlpha=0，什么都不画）→ 纸纹（宣纸）
                 PaintSkinSheen(g, path, skin);
                 if (skin.paperGrain)

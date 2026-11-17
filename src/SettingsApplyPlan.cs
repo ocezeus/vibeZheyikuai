@@ -97,6 +97,7 @@ namespace WorkCountdown
             plan.DisplayChanged = !SameText(prevUi.skin, nextUi.skin, false)
                 || !SameText(prevUi.theme, nextUi.theme, false)
                 || prevUi.opacity != nextUi.opacity
+                || prevUi.arcGlow != nextUi.arcGlow
                 || !SameText(prevUi.bgStyle, nextUi.bgStyle, false)
                 || prevUi.showLunch != nextUi.showLunch
                 || prevUi.reducedMotion != nextUi.reducedMotion
