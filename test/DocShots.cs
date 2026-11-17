@@ -37,11 +37,15 @@ static class DocShots
         s.eveningEnabled = true; s.eveningStart = "17:50"; s.eveningEnd = "19:00";
         s.Normalize();
 
-        // 自建主题
-        var ct = new CustomTheme();
-        ct.id = "my-moss"; ct.name = "苔绿"; ct.accent = "#6F9E6A";
-        s.customThemes.Add(ct);
-        Themes.SetCustom(s.customThemes);
+        // 自建主题 = 主题文件：写到临时主题目录再 Reload（不碰用户自己的 themes\）
+        string themeDir = Path.Combine(Path.GetTempPath(), "wc-probe-doc-theme-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(themeDir);
+        ThemeFiles.Configure(themeDir);
+        var moss = Themes.FromColors("my-moss", "苔绿", "#14180E", "#6F9E6A");
+        moss.created = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        string themeError;
+        if (!ThemeFiles.TrySave(moss, null, out themeError)) Console.WriteLine("theme save failed: " + themeError);
+        Themes.Reload();
 
         // 再补两条自建固定日程
         var stand = FixedSchedule.Make("custom-stand", "custom", "站会", "10:30", "", "huang-hupo");

@@ -33,7 +33,6 @@ class FlashLiveProbe
         {
         var store = new SettingsStore();
         var s = store.Load().Settings;
-        s.ui.skin = s.ui.skin ?? "default";
         // 内存里造一条未读（不落盘）
         string first = null;
         foreach (var c in s.note.contacts) { first = c.id; break; }
@@ -57,9 +56,7 @@ class FlashLiveProbe
             form.Show();
             Application.DoEvents();
             int h = form.Height;
-            var pi = form.GetType().GetProperty("Skin", F);
-            var skinObj = pi == null ? null : pi.GetValue(form, null) as SkinDef;
-            Console.WriteLine("skin=" + (skinObj == null ? "?" : skinObj.id) + " unread=" + s.note.TotalUnread() + " size=" + form.Width + "x" + h);
+            Console.WriteLine("theme=" + s.ui.theme + " unread=" + s.note.TotalUnread() + " size=" + form.Width + "x" + h);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int lastBlink = 0;

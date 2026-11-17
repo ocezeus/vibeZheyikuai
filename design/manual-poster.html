@@ -124,7 +124,7 @@
 <header>
   <div class="lead">
     <h1>上班工具箱 · 一图说明书</h1>
-    <p class="sub">一个贴在屏幕边缘的 Windows 悬浮窗：看下班、看日程、看工资，还能用 5 位数字找同事、用 5 位字符开一个对话发两句「小纸条」。接不接飞书都能用；不联网时按班次推算。v3.7.0 起可以整块换一套界面风格（六套）；v3.8 小纸条历史保留 16 条、一屏 8 条可滚动；未读时卡片左上角每 5 秒快闪两下。</p>
+    <p class="sub">一个贴在屏幕边缘的 Windows 悬浮窗：看下班、看日程、看工资，还能用 5 位数字找同事、用 5 位字符开一个对话发两句「小纸条」。接不接飞书都能用；不联网时按班次推算。v5.0.0 起界面只保留默认风格，主题改成独立文件（*.theme.json）可直接导入导出；小纸条历史保留 16 条、一屏 8 条可滚动；未读时卡片左上角每 5 秒快闪两下。</p>
   </div>
   <div class="version">
     <div class="v">v3.8.1</div>
@@ -410,7 +410,7 @@
 
     <div class="tabcard">
       <h3><span class="idx" style="background:var(--gold)">4</span> 外观</h3>
-      <div class="li"><b>界面风格</b><span>v3.7.0：默认 + 无垠 / 云母 / 宣纸 / 仪表 / 霓虹</span></div>
+      <div class="li"><b>主题文件</b><span>v5.0.0：导入 / 导出 *.theme.json，一个主题一个文件</span></div>
       <div class="li"><b>主题</b><span>39 套内置 + 自建（背景 / 进度条 / 名字）</span></div>
       <div class="li"><b>不透明度</b><span>30–100%</span></div>
       <div class="li"><b>自动收起</b><span>0–120 秒，0 = 不自动</span></div>
@@ -479,96 +479,42 @@
   </div>
 </section>
 
-<!-- 06 界面风格 -->
+<!-- 06 主题 -->
 <section class="section" data-n="06">
   <div class="section-head">
-    <h2><span class="pill gold">皮肤</span> 六套整体皮肤，整套界面一起换</h2>
-    <span class="tag">设置 → 外观 →「界面风格」· 点一下预览 · 点「保存」后悬浮窗立即换</span>
+    <h2><span class="pill gold">主题</span> 39 套内置配色 + 一个主题一个文件</h2>
+    <span class="tag">设置 → 外观 →「主题配色」· 点一下立刻换 · 导入 / 导出 *.theme.json</span>
   </div>
 
   <figure style="margin:0">
-    <img src="../skins.png" style="width:100%;display:block" alt="六套皮肤卡片并排">
-    <figcaption class="tiny" style="margin-top:8px;text-align:center">六套卡片并排（展开态 280×188，150% 实拍）：默认 / 无垠 quiet / 云母 mica / 宣纸 paper / 仪表 instrument / 霓虹 neon</figcaption>
+    <img src="../themes.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.06)" alt="39 套主题色卡">
+    <figcaption class="tiny" style="margin-top:8px;text-align:center">39 套内置主题色卡：经典 7 套 + 中国传统色 32 套；每格是卡片缩略图，高亮色只占底部进度条与状态点</figcaption>
   </figure>
 
   <div class="rule"></div>
 
   <table>
-    <tr><th style="width:150px">风格</th><th style="width:180px">定位</th><th>配色 / 质感</th><th style="width:205px">进度条</th><th style="width:245px">装饰 / 细节</th></tr>
-    <tr><td><b>默认 Default</b></td><td>原来的样子，一直可用</td><td>39 套配色主题任选 + 背景风格（纯色 / 磨砂玻璃）</td><td>原有发光进度条 + 流动光带</td><td>卡片外呼吸柔光 + 沿边流光（v3.6 全套）</td></tr>
-    <tr><td><b>无垠 Quiet</b></td><td>最安静的一档</td><td>近黑底 + 1px 细线描边，等宽数字</td><td>2 DIP 细线，不发光</td><td>无光晕 / 扫边；卡片不填底、只留顶线</td></tr>
-    <tr><td><b>云母 Mica</b></td><td>磨砂玻璃完整版</td><td>半透明磨砂 + 柔光雾气，桌面透出来</td><td>5 DIP 圆角渐变 + 柔光</td><td>玻璃边缘高光；小纸条 / 胶囊同款</td></tr>
-    <tr><td><b>宣纸 Ink</b></td><td>浅色纸感，中文味</td><td>米白纸底 + 宋体标题 + 朱砂强调</td><td>3 DIP 朱砂渐变</td><td>纸纤维颗粒 + 朱砂「班」印章</td></tr>
-    <tr><td><b>仪表 Instrument</b></td><td>金属仪表盘</td><td>深灰金属 + 琥珀数码读数</td><td>8 DIP，24 格分刻</td><td>卡片四角 4 颗小螺丝</td></tr>
-    <tr><td><b>霓虹 Neon</b></td><td>强对比赛博夜色</td><td>近黑底 + 品红 × 青双色辉光</td><td>4 DIP 品红→青 + 双层辉光</td><td>渐变描边、数字发光</td></tr>
+    <tr><th style="width:150px">项目</th><th>说明</th></tr>
+    <tr><td><b>内置 39 套</b></td><td>经典 7 套（午夜蓝 / 极光青 / 落日橙 / 樱花粉 / 松林绿 / 石墨灰 / 象牙白）+ 中国传统色 32 套；每套定义背景渐变、三级文字、轨道、强调色、成功色、边框</td></tr>
+    <tr><td><b>自建主题</b></td><td>色卡「＋ 新建主题」：背景色 + 进度条色两个色块，其余由背景推导（深色配浅字、浅色配深字）</td></tr>
+    <tr><td><b>主题文件</b></td><td>v5.0.0：一个主题一个 <span class="kbd">%APPDATA%\WorkCountdown\themes\&lt;id&gt;.theme.json</span>（便携模式 <span class="kbd">data\themes\</span>），schema=1，含完整 colors 与 author / description，可直接手改、备份、发给别人</td></tr>
+    <tr><td><b>导入 / 导出</b></td><td>「导入主题…」选文件 → 校验后复制进主题目录并切过去；「导出当前」把当前主题存成 <span class="kbd">&lt;主题名&gt;.theme.json</span>；「删除」删文件并回退午夜蓝</td></tr>
+    <tr><td><b>迁移</b></td><td>旧配置 <span class="kbd">settings.json</span> 里的 customThemes 首次启动自动写成主题文件并从配置清掉（幂等）</td></tr>
   </table>
 
-  <div class="note">默认皮肤保留 39 套主题 + 背景风格 + 背景光效 + 字体；切到其它五套后自带固定配色，「主题配色」色卡置灰并提示「该风格自带配色，切回《默认》可选 39 套」。皮肤存在 <span class="kbd">settings.json</span> 的 <span class="kbd">ui.skin</span>，老配置没有 → 按默认。</div>
+  <div class="note">v5.0.0 起界面只保留默认风格（原 v3.7.0 六套皮肤已移除）：卡片 / 设置窗口 / 小纸条 / 右键胶囊 / 提醒共用同一套令牌，默认外观与 v4.1.0 逐像素一致；完整令牌、几何、组件、动效与验收清单见 <span class="kbd">docs/DESIGN-SPEC.md</span>。</div>
 
-  <div class="rule"></div>
-
-  <h3>六套设置页（左栏导航 + 内容卡片，外观页最上面就是「界面风格」卡）</h3>
-  <div class="grid3" style="margin-top:10px">
-    <figure style="margin:0">
-      <img src="skins/settings-default.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="默认皮肤设置页">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">默认 · 39 套主题可用</figcaption>
-    </figure>
-    <figure style="margin:0">
-      <img src="skins/settings-quiet.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="无垠皮肤设置页">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">无垠 · 近黑细线</figcaption>
-    </figure>
-    <figure style="margin:0">
-      <img src="skins/settings-mica.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="云母皮肤设置页">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">云母 · 磨砂玻璃</figcaption>
-    </figure>
-  </div>
-  <div class="grid3" style="margin-top:14px">
-    <figure style="margin:0">
-      <img src="skins/settings-paper.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="宣纸皮肤设置页">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">宣纸 · 宋体朱砂</figcaption>
-    </figure>
-    <figure style="margin:0">
-      <img src="skins/settings-instrument.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="仪表皮肤设置页">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">仪表 · 金属琥珀</figcaption>
-    </figure>
-    <figure style="margin:0">
-      <img src="skins/settings-neon.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="霓虹皮肤设置页">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">霓虹 · 品红青辉光</figcaption>
-    </figure>
-  </div>
-
-  <div class="rule"></div>
-
-  <div class="grid3">
-    <div>
-      <h3>换的不只是卡片</h3>
-      <div class="small">卡片、设置窗口、小纸条、右键胶囊、提醒卡一起换；每套皮肤的圆角、描边、字体、进度条画法都是独立令牌。</div>
-    </div>
-    <div>
-      <h3>怎么切</h3>
-      <div class="small">设置 →「外观」→「界面风格」→ 点风格块立刻预览 → 点「保存」悬浮窗立即换，不用重启；切回默认，39 套色卡立刻恢复可用。</div>
-    </div>
-    <div>
-      <h3>也记在配置里</h3>
-      <div class="small">皮肤存在 <span class="kbd">settings.json</span> 的 <span class="kbd">ui.skin</span>；老配置没有这个字段按默认皮肤，升级不会突然换脸。</div>
-    </div>
-  </div>
-
-  <div class="rule"></div>
-
-  <h3>小纸条 / 右键胶囊也跟着换（截图压在假桌面上，看玻璃与辉光；六套并排）</h3>
   <div class="grid2" style="margin-top:12px">
     <figure style="margin:0">
-      <img src="skins/sheet-note-chat.png" style="width:100%;display:block;border-radius:10px" alt="小纸条六套皮肤">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">小纸条面板：default / quiet / mica / paper / instrument / neon</figcaption>
+      <img src="../settings-color.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="调色窗">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">调色窗：背景 / 进度条两个色块 + 实时预览，保存即写入主题文件</figcaption>
     </figure>
     <figure style="margin:0">
-      <img src="skins/sheet-bubble-theme.png" style="width:100%;display:block;border-radius:10px" alt="右键胶囊六套皮肤">
-      <figcaption class="tiny" style="margin-top:6px;text-align:center">右键胶囊「修改主题」：124×40 + 246 面板尺寸不变，只换配色 / 圆角 / 字体</figcaption>
+      <img src="../theme-preview.png" style="width:100%;display:block;border-radius:10px;border:1px solid rgba(255,255,255,.07)" alt="主题预览">
+      <figcaption class="tiny" style="margin-top:6px;text-align:center">150% DPI 下预览不重叠；换主题只影响配色，不改变默认几何与动效</figcaption>
     </figure>
   </div>
 </section>
-
 <!-- 07 交互 -->
 <section class="section" data-n="07">
   <div class="section-head">
@@ -629,6 +575,7 @@
       <h3>文件位置</h3>
       <div class="kv">
         <b>设置</b><span><span class="kbd">%APPDATA%\WorkCountdown\settings.json</span></span>
+        <b>主题</b><span><span class="kbd">%APPDATA%\WorkCountdown\themes\*.theme.json</span>（便携模式 data\themes\）</span>
         <b>日志</b><span><span class="kbd">widget.log</span>（同目录）</span>
         <b>字体</b><span>exe 旁 <span class="kbd">fonts\</span>（PingFang.ttc 等）</span>
         <b>便携</b><span>exe 旁放 <span class="kbd">portable.txt</span> → data 目录</span>
@@ -659,7 +606,7 @@
 </section>
 
 <div class="footer">
-  <div><b>上班工具箱 v3.8.1</b> · 一图说明书 · 2026-11-16</div>
+  <div><b>上班工具箱 v5.0.0</b> · 一图说明书 · 2026-11-17</div>
   <div>设置入口：卡片右上角 ⚙ &nbsp;·&nbsp; 小纸条入口：右上角 ✈ &nbsp;·&nbsp; 工资入口：右上角 ¥ &nbsp;·&nbsp; 托盘：右键托盘图标</div>
 </div>
 

@@ -27,7 +27,7 @@ namespace WorkCountdown
         public bool FirstApply { get; internal set; }
         /// <summary>中文字体 / 数字字体变化，只需重建字体资源。</summary>
         public bool FontsChanged { get; internal set; }
-        /// <summary>主题、皮肤、透明度、背景风格等显示资源变化，只需刷新卡片与托盘显示。</summary>
+        /// <summary>主题、透明度、背景风格等显示资源变化，只需刷新卡片与托盘显示。</summary>
         public bool DisplayChanged { get; internal set; }
         /// <summary>窗口置顶开关变化；位置 / 贴边仍由调用者按既有即时契约处理。</summary>
         public bool TopMostChanged { get; internal set; }
@@ -94,14 +94,14 @@ namespace WorkCountdown
             LarkSettings nextLark = next.lark == null ? new LarkSettings() : next.lark;
 
             plan.FontsChanged = !SameText(FontKey(next), FontKey(previous), true);
-            plan.DisplayChanged = !SameText(prevUi.skin, nextUi.skin, false)
-                || !SameText(prevUi.theme, nextUi.theme, false)
+            // v5.0 起主题文件（themes\*.theme.json）是独立数据，不参与配置 diff；
+            // 导入 / 删除主题后由调用方自己 Themes.Reload() 再刷新显示。
+            plan.DisplayChanged = !SameText(prevUi.theme, nextUi.theme, false)
                 || prevUi.opacity != nextUi.opacity
                 || !SameText(prevUi.bgStyle, nextUi.bgStyle, false)
                 || prevUi.showLunch != nextUi.showLunch
                 || prevUi.reducedMotion != nextUi.reducedMotion
-                || !SameText(prevUi.cardGlow, nextUi.cardGlow, false)
-                || !SameThemes(previous.customThemes, next.customThemes);
+                || !SameText(prevUi.cardGlow, nextUi.cardGlow, false);
             plan.TopMostChanged = prevUi.alwaysOnTop != nextUi.alwaysOnTop;
 
             bool wantAttendance = nextLark.enabled;
@@ -162,28 +162,6 @@ namespace WorkCountdown
             return string.Equals(a == null ? "" : a.Trim(), b == null ? "" : b.Trim(),
                 ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         }
-
-        private static bool SameThemes(List<CustomTheme> a, List<CustomTheme> b)
-        {
-            int countA = a == null ? 0 : a.Count;
-            int countB = b == null ? 0 : b.Count;
-            if (countA != countB) return false;
-            for (int i = 0; i < countA; i++)
-            {
-                CustomTheme x = a[i];
-                CustomTheme y = b[i];
-                if (x == null || y == null)
-                {
-                    if (x != y) return false;
-                    continue;
-                }
-                if (!SameText(x.id, y.id, false) || !SameText(x.name, y.name, false)
-                    || !SameText(x.accent, y.accent, false) || !SameText(x.bg, y.bg, false)
-                    || !SameText(x.bar, y.bar, false)) return false;
-            }
-            return true;
-        }
-
 
         private static bool SameSchedule(Settings a, Settings b)
         {

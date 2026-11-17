@@ -6,9 +6,74 @@
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
 
-## 当前版本：v4.1.0
+## 当前版本：v5.0.0
 
-已装机（FileVersion 3.8.1.0）；日常改动**不升版本号、不出 zip、不动一图说明书**，改动全部追加在下面；用户说「发版」才走下面的发版流程。
+已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.0.0`（本轮只保留默认界面风格、主题文件化、设计规范文档；日常改动仍按下面的约定走）。
+
+### 2026-11-17 20:30 · v5.0.0 外观与主题重构：只保留默认风格 + 主题文件化 + 设计规范文档
+
+用户要求（原话整理）：继续工具箱开发；**完全重构外观和主题**；**界面风格仅保留默认**；对当前默认 UI 的所有界面设计规范做总结、输出一份可以交接的设计规范文档；**把主题单独保存为一个文件，新主题可以直接以文件形式导入**；完成后更新 release 版本。
+
+**① 界面风格只保留默认（`src/Skins.cs` 删除、六套皮肤下线）**
+- 删除 `SkinDef` / `Skins` / `SkinPicker` 与外观页「界面风格」卡；`UiSettings.skin` 字段移除，旧配置多出来的 `skin` JSON 字段直接忽略，老用户升级后统一用默认风格，不会换脸。
+- `Widget.cs` / `NotePanelForm.cs` / `BubbleMenuForm.cs` / `Frost.cs` / `CardGlowForm.cs` / `ScreenReminderForm.cs` / `SettingsForm.cs` 里所有皮肤分支（5 种进度条画法、轮廓辉光、顶部高光、纸纹、螺丝、霓虹描边、数字发光、headingFont、hairline 卡片、朱砂印章）全部删除，只保留默认画法：卡片圆角 14/18、设置窗口 12、色卡 10、胶囊 20、小纸条 18，磨砂玻璃只由 `ui.bgStyle=="glass"` 决定。
+- **默认外观逐像素不变**：用 git worktree 拉 v4.1.0 源码编「改前」exe、当前源码编「改后」exe，同探针冻结倒计时文本与流光相位后逐像素 diff —— 卡片展开/收起 @1x/@1.5x、小纸条抽屉/双栏、右键胶囊收起/主题面板、设置窗考勤页全部 **0 像素差**；只有外观页因为按计划删掉「界面风格」卡、主题卡上移而不同。
+
+**② 主题文件化（`src/ThemeFiles.cs` 新增 / `src/Models.cs` / `src/SettingsStore.cs`）**
+- 用户主题不再存在 `settings.json` 里：**一个主题一个文件** `%APPDATA%\WorkCountdown\themes\<id>.theme.json`（便携模式 `exe\data\themes\`），schema=1、app=WorkCountdown、9 个 colors 键（accent / success / bgTop / bgBottom / track / textMain / textMuted / textDim / edge），颜色 `#RRGGBB` 或 `#AARRGGBB`（edge alpha 保真），UTF-8 写无 BOM、读兼容 BOM。
+- 新 API：`ThemeFiles.LoadAll / TryRead / TrySave（path 空 = 存主题目录）/ TryExport / TryImport（复制进目录、id 与文件名自动去重）/ TryDelete / NewId / Duplicate / MigrateLegacy / TryParseColor / ColorText`；`Themes` 改成文件注册表（`BuiltIn 39 + UserThemes`、`Reload`、`IsUser`、`Get` 未知回退 `midnight`），删除 `SetCustom / IsCustom`。
+- 外观页「主题配色」卡底部新增 5 个入口：**＋ 新建主题 / 编辑 / 导入主题… / 导出当前 / 删除**；编辑与删除只对用户主题可用（内置主题置灰），导入走 OpenFileDialog（`*.theme.json;*.json`）、导出走 SaveFileDialog（默认 `<主题名>.theme.json`），失败弹 MessageBox 显示可读原因，删除当前主题回退「经典 · 午夜蓝」。
+- 旧配置迁移：`settings.json` 的 `customThemes` 在首次 Load / Import 时一次性写成主题文件并清空（幂等；同 id 已有文件跳过、撞内置 id 加 `-2`；失败保留旧字段下次重试）；`SettingsApplyPlan` 不再把 customThemes 计入配置 diff。
+- 内置 39 套主题配色与 `Mix / Alpha / Hex` 语义和 v4.1.0 **逐字节一致**（175 组工具函数用例 + 39×10 色值 dump 对比）。
+
+**③ 设计规范文档（`docs/DESIGN-SPEC.md` 新增，1415 行）**
+- 覆盖：设计原则、主题 9 色键与 39 套内置主题清单、字体/字号/间距/圆角/描边/玻璃/光效/动效令牌、全部界面几何（收起卡 224×68、展开卡 280×164/188、工资面板、小纸条 A/C、右键胶囊 6×124×40、设置窗 690×640 七页、首次引导、托盘菜单、对话框）、组件与状态表、动效时间轴（55ms 错峰 / 5s 未读角闪 420ms / 2.6s 流光 / 警戒带 2.33s / 工资 18fps 等）、主题文件 schema 与导入导出规则、可访问性、44 个「文件:行 + 函数名」源码映射、9 节验收清单、已知限制与改进项。
+
+**④ 版本 / 测试 / 文档 / 发版**
+- 版本 4.1.0 → **5.0.0**：`src/Models.cs`（`AppInfo.Version`）、`src/AssemblyInfo.cs`（5.0.0.0）、`package.ps1` / `tools/release.ps1` 默认版本、`README.md`、`src/UpdateChangelog.cs`（新增 5.0.0 条目）、设计规范文档标题。
+- `.\test\build-tests.ps1`：**Test 664 / Check 384 全绿**（v4.1.0 基线 636 / 384；皮肤断言删除、主题文件新增 28 条 Test、Check 换成「外观页只有默认风格 + 主题文件全链」断言）；`.\test\build-probes.ps1` **69/69 OK**（3 个皮肤专用探针随皮肤一起删除，其余探针改用主题文件 API）。
+- `README.md` 外观与主题 / 设置窗口 / 项目结构 / 版本与发版示例全部改 v5 口径（界面风格整节删除，新增「主题文件（v5.0.0）」与「默认界面风格（v5.0.0）」）；`package.ps1` 内嵌「使用说明.txt」同步；一图说明书删除第 06 节六套皮肤、换成 39 套主题 + 主题文件说明并重出（**2400×9927，3,024 KB**）。
+- 发版：`.\package.ps1` 一条命令（build → zip → commit → push → tag → GitHub Release 双资产：`WorkCountdown-v5.0.0.zip` + `WorkCountdown.exe`），装机 FileVersion **5.0.0.0**，更新链路实测到 5.0.0。
+
+**改动文件（本轮）**
+| 文件 | 改了什么 |
+| --- | --- |
+| `src/Skins.cs` | 删除（六套皮肤模型层下线） |
+| `src/ThemeFiles.cs` | 新增：主题文件格式、读写校验、导入导出删除、旧 customThemes 迁移、id/文件名去重 |
+| `src/Models.cs` | `UiSettings.skin` 删除；`ThemeDef` 加 author/description/created/filePath/isUser；`Themes` 改文件注册表；`Mix/Alpha` 公开；版本 5.0.0 |
+| `src/SettingsStore.cs` | 构造时 `ThemeFiles.Configure(Dir)`；Load/Import 迁移旧主题并 `Themes.Reload()` |
+| `src/SettingsApplyPlan.cs` | 去掉 skin / customThemes diff |
+| `src/Widget.cs` / `NotePanelForm.cs` / `BubbleMenuForm.cs` / `Frost.cs` / `CardGlowForm.cs` / `ScreenReminderForm.cs` | 删除全部分支，只留默认画法；主题面板改 ThemeFiles 文件 API |
+| `src/SettingsForm.cs` | 删「界面风格」卡与 SkinPicker；外观页三卡新几何；主题文件 5 个入口 |
+| `src/UpdateChangelog.cs` | 新增 5.0.0 一句话摘要 + 5 条要点 |
+| `test/Test.cs` / `test/Check.cs` | 皮肤断言替换为主题文件与默认风格断言（Test 664 / Check 384） |
+| `test/SkinCardShot.cs` / `SkinSettingsShot.cs` / `SkinNoteShot.cs` | 删除；其余探针改主题文件 API（69/69 OK） |
+| `docs/DESIGN-SPEC.md` | 新增：默认 UI 设计规范交接文档（1415 行） |
+| `README.md` / `CHANGELOG.md` / `design/manual-poster.html` / `manual-poster.png` / `package.ps1` / `tools/release.ps1` / `src/AssemblyInfo.cs` | v5.0.0 文档、版本、一图说明书 |
+
+### 2026-11-17 14:30 · 小纸条通知：五种「左上角闪烁 + 未读常驻」HTML 设计稿（未改产品代码）
+
+用户要求（原话）：**给小纸条通知做优化，用 HTML 渲染五种「卡片左上角通知闪烁光效 + 常驻通知效果」**。先出设计稿挑方案，挑完再进 C#。
+
+**① 设计稿 `design/note-notify.html`（单文件，可离线打开）**
+- 五种方案：**01 角光呼吸 / 02 斜扫光 / 03 涟漪 / 04 霓虹灯管 / 05 折角信（带未读数）**。每行同时画真实尺寸的收起 224×68、展开 280×188、以及 **2× 左上角特写**，并排对照「闪烁 / 常驻」两态；右栏写清闪烁时长、常驻表现、GDI+ 落地成本与时间轴。
+- 可交互：皮肤切「报春·我的 / 无垠 / 云母 / 宣纸 / 霓虹」五套；状态切「循环演示 / 只看常驻 / 已读对照」；速度 0.5–2×；「选这个」标记 + `1`–`5` 快捷选择，`?pick=` 记在 URL。
+- 出图用视图：`?view=bench`（五列并排，各自峰值/常驻，可出对照图）、`?view=zoom`（2× 角部对照）、`?view=loop`（出 GIF）、`?t=毫秒&freeze=1`（冻结任意时刻）。
+
+**② 素材（`design/shots/`）**
+- `note-notify-bench-flash.png` / `note-notify-bench-steady.png`：五列并排 · 闪烁峰值 / 常驻未读。
+- `note-notify-zoom.png`：2× 角部对照（左闪烁、右常驻，含 v3.8.1 现状行）。
+- `note-notify-sheet.png`：整页设计稿（1440×2671）。
+- `note-notify-loop.gif`：5.2 秒循环动图（五张小卡同时演示，647 KB）。
+
+**③ 实现规格 `design/note-notify-spec.md`（只读审计，未改源码）**
+- 现状锚点：`DrawNoteCorner` 4099–4127（inset 1 DIP、r=13/17、ext 20 DIP、4 趟描边 + 白高光 + 64×64 柔光）、`DrawNoteRim` 4131–4148、`CornerFlashAlpha` 4060–4072（5000/420ms 两下）、`MaybeBlinkUnread` 4083–4093、`NoteRimActive` 4129（新闪光必须挂进来，否则 flowT 不重绘）。
+- 关键结论：**收起态现在完全没有未读标记**（展开态只有平面图标右上 5×5 圆点）→ 常驻标记是本轮真正要补的；常驻动画 = 未读期间持续 18fps 整卡重绘（quiet / paper / instrument 平时完全空转），所以常驻优先做静态或「呼吸 2–3 轮后落静态」。
+- 其它：卡外左上角只能走 `CardGlowForm`（四边各 56 DIP、30fps，成本中）；折角信在收起态应收 16–18 DIP、别压状态点；改常量/包络要同步 `test/Test.cs` 1087–1098、`test/Check.cs` 3674–3678、`CornerFlashShot.cs`、`FlashLiveProbe.cs`、`tools/flash-probe.ps1`。
+
+**④ 验证**
+- Chrome 无头逐张出图并看过：五套皮肤 × 三种状态（闪烁 / 常驻 / 已读）、整页 1440、2× 对照图、GIF 52 帧；已读态确认光效全隐、平面图标小点隐、卡片回到干净状态。
+- **未改源码、未编译、未装机、未打包、未发版**（等用户挑方案/混搭后再实现）。
 
 ### 2026-11-17 22:20 · v4.1.0 更新记录可展开 / 本地打卡 / 循环日程
 

@@ -152,8 +152,7 @@ namespace WorkCountdown
         }
 
         /// <summary>
-        /// 卡外光的颜色（Skins.GlowColor）：颜色烘在位图里，变了才重做。
-        /// 默认皮肤传进来的就是 theme.accent，画出来和以前一样。
+        /// 卡外光的颜色：颜色烘在位图里，变了才重做。传进来的就是 theme.accent。
         /// </summary>
         public void SetGlow(Color? c)
         {

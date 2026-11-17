@@ -815,20 +815,24 @@ class Check
                 && theme.accent.R == 0xFF && theme.accent.G == 0xB4 && theme.accent.B == 0x54,
                 fmt(theme.bgTop) + " / " + fmt(theme.accent));
 
-            var pack = new Settings();
-            pack.customThemes.Add(new CustomTheme
+            // 自建主题：两色推导 + 主题文件存读（v5 起唯一真源是 themes\*.theme.json）
+            string packRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-pack-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(packRoot);
+            try
             {
-                id = "my-pack", name = "存读", bg = "#101C2E", bar = "#FFB454", accent = "#FFB454"
-            });
-            var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
-            var back = ser.Deserialize<Settings>(ser.Serialize(pack));
-            back.Normalize();
-            var ct = back.customThemes[0];
-            var loaded = Themes.Get("my-pack");
-            Ok("自建主题能存能读（bg/bar）",
-                ct.bg == "#101C2E" && ct.bar == "#FFB454"
-                && loaded.accent.R == 0xFF && loaded.bgTop.B == 0x2E,
-                ct.bg + " / " + ct.bar + " loaded=" + loaded.accent);
+                string packPath = System.IO.Path.Combine(packRoot, "pack.theme.json");
+                var packTheme = Themes.FromColors("my-pack", "存读", "#101C2E", "#FFB454");
+                string packErr;
+                bool packSaved = ThemeFiles.TrySave(packTheme, packPath, out packErr);
+                ThemeDef packBack = null;
+                if (packSaved) ThemeFiles.TryRead(packPath, out packBack, out packErr);
+                Ok("自建主题能存能读（bg/bar）",
+                    packSaved && packBack != null && packBack.name == "存读"
+                    && packBack.accent.R == 0xFF && packBack.accent.G == 0xB4 && packBack.accent.B == 0x54
+                    && packBack.bgTop.B == 0x2E,
+                    packErr + " theme=" + (packBack == null ? "-" : fmt(packBack.bgTop) + " / " + fmt(packBack.accent)));
+            }
+            finally { try { System.IO.Directory.Delete(packRoot, true); } catch { } }
 
             // 调色方块点一下要真的改当前颜色（之前 Changed 只同步面板，没把 sv 的 sat/val 收回表单，点了会弹回去）
             using (var dlg = new ColorWheelForm("测试", "测试",
@@ -1223,11 +1227,9 @@ class Check
             s.NormalizeSchedules();
             Ok("午休扣工时同步给班次计算", s.lunchDeduct, "lunchDeduct=" + s.lunchDeduct);
 
-            // 自定义主题：选完存进设置，再导出导入一轮不能丢
-            s.customThemes.Add(new CustomTheme { id = "my-test", name = "苔绿", accent = "#6F9E6A" });
-            Themes.SetCustom(s.customThemes);
-            var mine = Themes.Get("my-test");
-            Ok("自定义主题能取到", Themes.IsCustom("my-test") && mine.name == "苔绿",
+            // 自定义主题：两色推导出来的主题（真正的落盘由 ThemeFiles 负责，见上面的主题文件用例）
+            var mine = Themes.FromColors("my-test", "苔绿", "#14180E", "#6F9E6A");
+            Ok("自定义主题能推导出来", mine.name == "苔绿" && mine.accent.R == 0x6F && mine.accent.G == 0x9E && mine.accent.B == 0x6A,
                 mine.name + " " + mine.accent.R + "," + mine.accent.G + "," + mine.accent.B);
 
             string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-" + Guid.NewGuid().ToString("N") + ".json");
@@ -1235,11 +1237,9 @@ class Check
             var exported = store.Export(s, tmp);
             var imported = exported.Succeeded ? store.Import(tmp) : null;
             var back = imported == null ? null : imported.Settings;
-            Ok("固定日程和自定义主题能存能读",
-                back != null && back.schedules != null && back.schedules.Count >= 4
-                && back.customThemes != null && back.customThemes.Count == 1
-                && back.customThemes[0].accent == "#6F9E6A",
-                back == null ? "读不出来" : ("日程 " + back.schedules.Count + " 条，主题 " + back.customThemes.Count + " 个"));
+            Ok("固定日程能存能读",
+                back != null && back.schedules != null && back.schedules.Count >= 4,
+                back == null ? "读不出来" : ("日程 " + back.schedules.Count + " 条"));
             try { System.IO.File.Delete(tmp); } catch { }
 
             // 设置窗口：改一条再存回去，不能把改动丢了
@@ -1288,24 +1288,37 @@ class Check
 
         // ---- 10. 自建主题进列表 + 小卡片点开放大 ----
         {
-            Themes.SetCustom(new System.Collections.Generic.List<CustomTheme>());   // 先清掉前面用例留下的
-            int builtinThemes = Themes.All.Length;
-            var s = new Settings();
-            s.lark.enabled = false;
-            s.customThemes.Add(new CustomTheme { id = "my-moss", name = "苔绿", accent = "#6F9E6A" });
-            Themes.SetCustom(s.customThemes);
-            Ok("自建主题进了色卡", Themes.All.Length == builtinThemes + 1 && Themes.Get("my-moss").name == "苔绿",
-                "色卡 " + builtinThemes + " -> " + Themes.All.Length + " 格");
-            int at = Array.IndexOf(ReminderStyles.Ids, "my-moss");
-            Ok("自建主题也在提醒配色下拉里", at >= 0 && ReminderStyles.ShortNameOf("my-moss").Length > 0,
-                "位置 " + at + " / 共 " + ReminderStyles.Ids.Length + " 项");
+            // 用户主题的唯一真源是主题文件：写进临时主题目录、Reload 后进色卡
+            string origThemeDir = ThemeFiles.Dir;
+            string tmpThemeRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-list-theme-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(tmpThemeRoot);
+            ThemeFiles.Configure(tmpThemeRoot);
+            try
+            {
+                var userTheme = Themes.FromColors("my-moss", "苔绿", "#14180E", "#6F9E6A");
+                string terr;
+                bool userSaved = ThemeFiles.TrySave(userTheme, null, out terr);
+                Themes.Reload();
+                int builtinThemes = Themes.BuiltIn.Length;
+                Ok("自建主题进了色卡", userSaved && Themes.All.Length == builtinThemes + 1 && Themes.Get("my-moss").name == "苔绿",
+                    "色卡 " + builtinThemes + " -> " + Themes.All.Length + " 格 / err=" + terr);
+                int at = Array.IndexOf(ReminderStyles.Ids, "my-moss");
+                Ok("自建主题也在提醒配色下拉里", at >= 0 && ReminderStyles.ShortNameOf("my-moss").Length > 0,
+                    "位置 " + at + " / 共 " + ReminderStyles.Ids.Length + " 项");
 
-            var picker = new ThemePicker();
-            picker.SetBounds(0, 0, 456, 122);
-            picker.SelectedId = "my-moss";
-            var chip = (Rectangle)Call(picker, "ChipRect", Themes.All.Length - 1);
-            Ok("最后一格色卡画在框内", chip.Width > 8 && chip.Height > 8 && chip.Bottom <= picker.Height,
-                "格子 " + chip.Width + "x" + chip.Height + " 底部 " + chip.Bottom + "/" + picker.Height);
+                var picker = new ThemePicker();
+                picker.SetBounds(0, 0, 456, 122);
+                picker.SelectedId = "my-moss";
+                var chip = (Rectangle)Call(picker, "ChipRect", Themes.All.Length - 1);
+                Ok("最后一格色卡画在框内", chip.Width > 8 && chip.Height > 8 && chip.Bottom <= picker.Height,
+                    "格子 " + chip.Width + "x" + chip.Height + " 底部 " + chip.Bottom + "/" + picker.Height);
+            }
+            finally
+            {
+                ThemeFiles.Configure(origThemeDir.Length == 0 ? "" : System.IO.Path.GetDirectoryName(origThemeDir));
+                Themes.Reload();
+                try { System.IO.Directory.Delete(tmpThemeRoot, true); } catch { }
+            }
 
             var e1 = new ReminderEvent();
             e1.id = "local:a"; e1.source = "local"; e1.title = "取快递";
@@ -2985,195 +2998,173 @@ class Check
                 var look = tabs.TabPages[3];
                 string cardTitles = "";
                 foreach (Control c in look.Controls) cardTitles += (cardTitles.Length == 0 ? "" : "/") + c.Text;
-                Ok("外观页 4 张卡：界面风格 / 主题配色 / 外观与提醒 / 配置备份",
-                    look.Controls.Count == 4 && cardTitles == "界面风格/主题配色/外观与提醒/配置备份",
+                Ok("外观页 3 张卡：主题配色 / 外观与提醒 / 配置备份",
+                    look.Controls.Count == 3 && cardTitles == "主题配色/外观与提醒/配置备份",
                     look.Controls.Count + " 张：" + cardTitles);
 
-                var picker = Get(dlg, "skinPicker") as SkinPicker;
-                var draft = (Settings)Get(dlg, "s");
+                int themeCardY = -1, lookCardY = -1, backupCardY = -1, themeCardH = -1;
+                foreach (Control c in look.Controls)
+                {
+                    if (c.Text == "主题配色") { themeCardY = c.Top; themeCardH = c.Height; }
+                    else if (c.Text == "外观与提醒") lookCardY = c.Top;
+                    else if (c.Text == "配置备份") backupCardY = c.Top;
+                }
+                Ok("「主题配色」卡在 y=8（原「界面风格」位置），外观 / 备份卡整体上移",
+                    Math.Abs(themeCardY - dip(8)) <= 1 && Math.Abs(themeCardH - dip(252)) <= 1
+                    && Math.Abs(lookCardY - dip(268)) <= 1 && Math.Abs(backupCardY - dip(466)) <= 1,
+                    "主题 y=" + themeCardY + " h=" + themeCardH + " / 外观 y=" + lookCardY + " / 备份 y=" + backupCardY
+                    + "（DPI×" + dpiK.ToString("0.##") + "）");
+
+                Ok("没有「界面风格」：skinPicker / lblThemeLocked / SkinPicker 类型都不存在",
+                    typeof(SettingsForm).GetField("skinPicker", F) == null
+                    && typeof(SettingsForm).GetField("lblThemeLocked", F) == null
+                    && typeof(SettingsForm).Assembly.GetType("WorkCountdown.SkinPicker") == null,
+                    "skinPicker=" + typeof(SettingsForm).GetField("skinPicker", F)
+                    + " 锁定提示=" + typeof(SettingsForm).GetField("lblThemeLocked", F)
+                    + " 类型=" + typeof(SettingsForm).Assembly.GetType("WorkCountdown.SkinPicker"));
+
                 var themePicker = (ThemePicker)Get(dlg, "picker");
-                var lblLocked = (Label)Get(dlg, "lblThemeLocked");
-                Ok("外观页有「界面风格」skinPicker（默认 + 5 套 = 6 块）",
-                    picker != null && picker.Items.Length == 6,
-                    picker == null ? "skinPicker=null" : picker.Items.Length + " 块");
+                var draft = (Settings)Get(dlg, "s");
+                Ok("主题色卡不再置灰（一直可点）", themePicker.Enabled, "enabled=" + themePicker.Enabled);
 
-                bool rectsOk = true, hitOk = true;
-                var rectParts = new System.Collections.Generic.List<string>();
-                for (int i = 0; i < picker.Items.Length; i++)
+                // 点第 2 格：选中环立刻跟着走；点「保存」才写进草稿，调用者配置不动
+                var chip2 = (Rectangle)Call(themePicker, "ChipRect", 1);
+                Call(themePicker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
+                    chip2.Left + chip2.Width / 2, chip2.Top + chip2.Height / 2, 0));
+                string wantTheme = Themes.All[1].id;
+                Ok("点色卡 → 选中环跟着走、调用者配置保持不动",
+                    s.ui.theme == "midnight" && themePicker.SelectedId == wantTheme,
+                    "caller=" + s.ui.theme + " selected=" + themePicker.SelectedId);
+                var themeSave = Call(dlg, "Save", false);
+                Ok("点「保存」后草稿写的是色卡上选的主题（调用者 / 磁盘都不动）",
+                    (bool)themeSave && draft.ui.theme == wantTheme && s.ui.theme == "midnight",
+                    "save=" + themeSave + " draft=" + draft.ui.theme + " caller=" + s.ui.theme);
+
+                string[] wantButtons = new string[] { "＋ 新建主题", "编辑", "导入主题…", "导出当前", "删除" };
+                string[] wantFields = new string[] { "btnNewTheme", "btnEditTheme", "btnImportTheme", "btnExportTheme", "btnDeleteTheme" };
+                bool buttonsOk = true;
+                string buttonTrace = "";
+                for (int i = 0; i < wantFields.Length; i++)
                 {
-                    var r = picker.RectOf(i);
-                    rectParts.Add(picker.Items[i].id + "=" + r.Width + "x" + r.Height + "@" + r.X);
-                    if (r.Width <= 2 || r.Height <= 2 || r.Left < 0 || r.Top < 0
-                        || r.Right > picker.Width || r.Bottom > picker.Height) rectsOk = false;
-                    if (picker.HitTest(new Point(r.Left + r.Width / 2, r.Top + r.Height / 2)) != i) hitOk = false;
+                    var b = Get(dlg, wantFields[i]) as Button;
+                    buttonTrace += (b == null ? "null" : b.Text) + (i == wantFields.Length - 1 ? "" : " / ");
+                    if (b == null || b.Text != wantButtons[i] || b.Parent == null || !b.Parent.Text.StartsWith("主题配色")) buttonsOk = false;
                 }
-                Ok("6 个风格块都画在控件内", rectsOk, string.Join(" ", rectParts.ToArray()));
-                Ok("风格块命中区 = 绘制位置（点块中心命中自己）", hitOk,
-                    hitOk ? "6/6 命中正确" : "有块命中错位");
+                Ok("主题卡底部有 5 个按钮：新建 / 编辑 / 导入 / 导出 / 删除", buttonsOk, buttonTrace);
 
-                Ok("默认皮肤时 39 套主题色卡可点、锁定提示隐藏",
-                    !themePicker.Locked && themePicker.Enabled && !DesiredVisible(lblLocked),
-                    "locked=" + themePicker.Locked + " enabled=" + themePicker.Enabled
-                    + " 提示可见=" + DesiredVisible(lblLocked));
+                // 内置主题：编辑 / 删除置灰，新建 / 导入 / 导出可用
+                themePicker.SelectedId = "midnight";
+                Call(dlg, "UpdateThemeName");
+                var btnNew = (Button)Get(dlg, "btnNewTheme");
+                var btnEdit = (Button)Get(dlg, "btnEditTheme");
+                var btnImport = (Button)Get(dlg, "btnImportTheme");
+                var btnExport = (Button)Get(dlg, "btnExportTheme");
+                var btnDelete = (Button)Get(dlg, "btnDeleteTheme");
+                Ok("内置主题：编辑 / 删除置灰，新建 / 导入 / 导出可用",
+                    !btnEdit.Enabled && !btnDelete.Enabled && btnNew.Enabled && btnImport.Enabled && btnExport.Enabled,
+                    "edit=" + btnEdit.Enabled + " del=" + btnDelete.Enabled + " new=" + btnNew.Enabled
+                    + " import=" + btnImport.Enabled + " export=" + btnExport.Enabled);
 
-                // 点「霓虹」块：只改内存预览；39 套色卡置灰 + 提示出现
-                var rNeon = picker.RectOf(5);
-                Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
-                    rNeon.Left + rNeon.Width / 2, rNeon.Top + rNeon.Height / 2, 0));
-                Ok("点「霓虹」→ 草稿 ui.skin=neon，调用者配置保持不动",
-                    draft.ui.skin == "neon" && s.ui.skin == "default" && picker.SelectedId == "neon"
-                    && themePicker.Locked && !themePicker.Enabled && DesiredVisible(lblLocked),
-                    "draft=" + draft.ui.skin + " caller=" + s.ui.skin + " selected=" + picker.SelectedId
-                    + " locked=" + themePicker.Locked + " enabled=" + themePicker.Enabled
-                    + " 提示可见=" + DesiredVisible(lblLocked));
-
-                var saved = Call(dlg, "Save", false);
-                Ok("Save(false) 只把所选皮肤留在草稿（WC_NO_SAVE 不落盘、不碰调用者）",
-                    (bool)saved && draft.ui.skin == "neon" && s.ui.skin == "default",
-                    "save=" + saved + " draft=" + draft.ui.skin + " caller=" + s.ui.skin);
-
-                var rDefault = picker.RectOf(0);
-                Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
-                    rDefault.Left + rDefault.Width / 2, rDefault.Top + rDefault.Height / 2, 0));
-                Ok("点回「默认」→ 草稿恢复 default、色卡解锁、提示消失",
-                    draft.ui.skin == "default" && picker.SelectedId == "default"
-                    && !themePicker.Locked && themePicker.Enabled && !DesiredVisible(lblLocked),
-                    "draft=" + draft.ui.skin + " locked=" + themePicker.Locked
-                    + " 提示可见=" + DesiredVisible(lblLocked));
-
-                // 6 块逐一点：预览的皮肤 id 和锁定态都跟着走
-                bool everyClick = true;
-                string clickTrace = "";
-                for (int i = 0; i < picker.Items.Length; i++)
+                // 主题文件入口：新建 → 导出 → 导入 → 删除回退（临时主题目录，不碰真实配置）
+                string origThemeDir = ThemeFiles.Dir;
+                string tmpRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-theme-" + Guid.NewGuid().ToString("N"));
+                System.IO.Directory.CreateDirectory(tmpRoot);
+                ThemeFiles.Configure(tmpRoot);
+                try
                 {
-                    var r = picker.RectOf(i);
-                    Call(picker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
-                        r.Left + r.Width / 2, r.Top + r.Height / 2, 0));
-                    var skin = Skins.All[i];
-                    clickTrace += skin.id + "→" + draft.ui.skin + " ";
-                    if (draft.ui.skin != skin.id || picker.SelectedId != skin.id) everyClick = false;
-                    bool wantLocked = !skin.IsDefault;
-                    if (themePicker.Locked != wantLocked || DesiredVisible(lblLocked) != wantLocked) everyClick = false;
+                    var newTheme = ThemeFiles.Duplicate("检查主题", Themes.Get("midnight"));
+                    string fileErr;
+                    bool fileSaved = ThemeFiles.TrySave(newTheme, null, out fileErr);
+                    Themes.Reload();
+                    var newBack = Themes.Get(newTheme.id);
+                    Ok("主题文件：新建写到主题目录、Reload 后进色卡（内置 39 + 1）",
+                        fileSaved && Themes.IsUser(newTheme.id) && newBack.name == "检查主题"
+                        && Themes.All.Length == Themes.BuiltIn.Length + 1,
+                        "saved=" + fileSaved + " err=" + fileErr + " all=" + Themes.All.Length + "/" + Themes.BuiltIn.Length);
+
+                    themePicker.SelectedId = newTheme.id;
+                    Call(dlg, "UpdateThemeName");
+                    Ok("用户主题：编辑 / 删除可用", btnEdit.Enabled && btnDelete.Enabled,
+                        "edit=" + btnEdit.Enabled + " del=" + btnDelete.Enabled + " isUser=" + Themes.IsUser(newTheme.id));
+
+                    string expPath = System.IO.Path.Combine(tmpRoot, "exported.theme.json");
+                    bool expOk = ThemeFiles.TryExport(newBack, expPath, out fileErr);
+                    ThemeDef importedTheme = null;
+                    string impErr = "";
+                    bool impOk = expOk && ThemeFiles.TryImport(expPath, out importedTheme, out impErr);
+                    Themes.Reload();
+                    bool roundtrip = impOk && importedTheme != null
+                        && importedTheme.name == "检查主题"
+                        && importedTheme.accent.ToArgb() == newBack.accent.ToArgb()
+                        && importedTheme.bgTop.ToArgb() == newBack.bgTop.ToArgb()
+                        && importedTheme.edge.ToArgb() == newBack.edge.ToArgb()
+                        && importedTheme.id != newBack.id
+                        && Themes.IsUser(importedTheme.id);
+                    Ok("主题文件：导出 → 导入往返（颜色一致、id 自动避让）", roundtrip,
+                        "export=" + expOk + " import=" + impOk + " err=" + fileErr + impErr
+                        + " id=" + (importedTheme == null ? "-" : importedTheme.id + "/" + newBack.id));
+
+                    draft.ui.theme = importedTheme.id;
+                    bool delOk = ThemeFiles.TryDelete(Themes.Get(importedTheme.id), out fileErr);
+                    Themes.Reload();
+                    bool fellBack = draft.ui.theme == importedTheme.id;
+                    if (fellBack) draft.ui.theme = Themes.FallbackId;     // 等价于设置页「删除」按钮的回退
+                    Ok("主题文件：删除用户主题后回退到 midnight",
+                        delOk && fellBack && Themes.Get(draft.ui.theme).id == "midnight" && !Themes.IsUser(importedTheme.id),
+                        "del=" + delOk + " err=" + fileErr + " theme=" + draft.ui.theme + " all=" + Themes.All.Length);
                 }
-                Ok("六块逐一点击：预览对应皮肤，锁定态 / 提示跟着切", everyClick, clickTrace);
+                finally
+                {
+                    try { System.IO.Directory.Delete(tmpRoot, true); } catch { }
+                    ThemeFiles.Configure(origThemeDir.Length == 0 ? "" : System.IO.Path.GetDirectoryName(origThemeDir));
+                    Themes.Reload();
+                }
             }
 
-            // 小纸条 / 右键胶囊：六套皮肤各构造一次，面板里取到的皮肤 id 必须生效
+            // 小纸条 / 右键胶囊：皮肤字段删掉后只有默认画法，主题色仍跟着 ui.theme 走
             var card = new Rectangle(600, 200, 420, 282);
-            Func<string, Settings> skinSettings = delegate(string id)
-            {
-                var ns = new Settings();
-                ns.lark.enabled = false;
-                ns.calendarEnabled = false;
-                ns.ui.theme = "midnight";
-                ns.ui.skin = id;
-                ns.note.style = "drawer";
-                ns.note.id = "48372";
-                ns.Normalize();
-                return ns;
-            };
+            var noteSet = new Settings();
+            noteSet.lark.enabled = false;
+            noteSet.calendarEnabled = false;
+            noteSet.ui.theme = "midnight";
+            noteSet.note.style = "drawer";
+            noteSet.note.id = "48372";
+            noteSet.Normalize();
+            Ok("纸条 / 胶囊都没有皮肤字段（skin / skinDefault 已删）",
+                typeof(NotePanelForm).GetField("skin", F) == null
+                && typeof(NotePanelForm).GetField("skinDefault", F) == null
+                && typeof(BubbleMenuForm).GetField("skin", F) == null
+                && typeof(BubbleMenuForm).GetField("skinDefault", F) == null,
+                "note=" + typeof(NotePanelForm).GetField("skin", F)
+                + " bubble=" + typeof(BubbleMenuForm).GetField("skin", F));
 
-            string noteTrace = "", bubbleTrace = "";
-            bool noteAll = true, bubbleAll = true;
-            foreach (var skin in Skins.All)
-            {
-                var noteSet = skinSettings(skin.id);
-                try
-                {
-                    using (var p = new NotePanelForm(noteSet, Skins.ResolveTheme(noteSet.ui), card, true,
-                        null, null, null, null, null))
-                    {
-                        var got = (SkinDef)Get(p, "skin");
-                        noteTrace += got.id + (got.id == skin.id ? "" : "!") + " ";
-                        if (got.id != skin.id || (bool)Get(p, "skinDefault") != skin.IsDefault) noteAll = false;
-                    }
-                }
-                catch (Exception ex) { noteAll = false; noteTrace += skin.id + "!" + ex.GetType().Name + " "; }
-
-                var bubbleSet = skinSettings(skin.id);
-                bubbleSet.ui.alwaysOnTop = true;
-                try
-                {
-                    using (var m = new BubbleMenuForm(bubbleSet, Skins.ResolveTheme(bubbleSet.ui), card, true,
-                        null, null, null, null, null))
-                    {
-                        var got = (SkinDef)Get(m, "skin");
-                        var pills = (Rectangle[])Get(m, "pillRects");
-                        bubbleTrace += got.id + "(" + pills.Length + ") ";
-                        if (got.id != skin.id || pills.Length != 6) bubbleAll = false;
-                        m.CloseMenu();
-                    }
-                }
-                catch (Exception ex) { bubbleAll = false; bubbleTrace += skin.id + "!" + ex.GetType().Name + " "; }
-            }
-            Ok("六套皮肤下小纸条都能构造、面板皮肤 id 生效", noteAll, noteTrace);
-            Ok("六套皮肤下胶囊菜单都能构造、6 颗胶囊、皮肤 id 生效", bubbleAll, bubbleTrace);
-
-            // 像素 1：纸条面板底色跟着皮肤走（5 套非默认皮肤实测对得上 panelBg）
-            int backdropOk = 0;
-            string backdropTrace = "";
-            foreach (string id in new string[] { "quiet", "mica", "paper", "instrument", "neon" })
-            {
-                var set = skinSettings(id);
-                using (var p = new NotePanelForm(set, Skins.ResolveTheme(set.ui), card, true, null, null, null, null, null))
-                using (var bmp = RenderPanel(p))
-                {
-                    var skin = (SkinDef)Get(p, "skin");
-                    var strip = new Rectangle(20, Math.Max(2, bmp.Height - 14), Math.Max(1, bmp.Width - 40), 10);
-                    Color avg = AverageColor(bmp, strip);
-                    int dist = Distance(avg, skin.panelBg);
-                    backdropTrace += id + "=" + fmt(avg) + "→" + dist + " ";
-                    if (dist <= 40) backdropOk++;
-                }
-            }
-            Ok("纸条面板底色跟着皮肤走（5 套实测对得上 SkinDef.panelBg）", backdropOk == 5, backdropTrace);
-
-            // 像素 2：宣纸底偏暖（R 明显高于 B）
-            var paperSet = skinSettings("paper");
-            using (var p = new NotePanelForm(paperSet, Skins.ResolveTheme(paperSet.ui), card, true, null, null, null, null, null))
+            using (var p = new NotePanelForm(noteSet, Themes.Current(noteSet.ui), card, true, null, null, null, null, null))
             using (var bmp = RenderPanel(p))
             {
-                Color avg = AverageColor(bmp, new Rectangle(20, Math.Max(2, bmp.Height - 14), Math.Max(1, bmp.Width - 40), 10));
-                Ok("宣纸面板底色偏暖（R 明显高于 B）", avg.R - avg.B >= 8, fmt(avg) + " R-B=" + (avg.R - avg.B));
+                var strip = new Rectangle(20, Math.Max(2, bmp.Height - 14), Math.Max(1, bmp.Width - 40), 10);
+                Color avg = AverageColor(bmp, strip);
+                int dist = Distance(avg, Themes.Get("midnight").bgBottom);
+                Ok("默认主题下纸条面板底色 = 主题底色（无皮肤分支）", dist <= 40, fmt(avg) + " → " + dist);
             }
 
-            // 像素 3：霓虹描边 / 辉光含品红
-            var neonSet = skinSettings("neon");
-            using (var p = new NotePanelForm(neonSet, Skins.ResolveTheme(neonSet.ui), card, true, null, null, null, null, null))
-            using (var bmp = RenderPanel(p))
+            var bubbleSet = new Settings();
+            bubbleSet.lark.enabled = false;
+            bubbleSet.calendarEnabled = false;
+            bubbleSet.ui.theme = "midnight";
+            bubbleSet.ui.alwaysOnTop = true;
+            bubbleSet.Normalize();
+            using (var m = new BubbleMenuForm(bubbleSet, Themes.Current(bubbleSet.ui), card, true, null, null, null, null, null))
             {
-                int magenta = 0;
-                for (int y = 0; y < bmp.Height; y++)
-                    for (int x = 0; x < bmp.Width; x++)
-                    {
-                        Color c = bmp.GetPixel(x, y);
-                        if (c.R > 170 && c.R - c.G > 60 && c.B - c.G > 25) magenta++;
-                    }
-                Ok("霓虹面板描边 / 辉光含品红", magenta > 500, magenta + " 个品红像素");
-            }
-
-            // 像素 4：胶囊菜单底色跟着皮肤走（5 套非默认皮肤实测对得上 bubbleIn）
-            int pillOk = 0;
-            string pillTrace = "";
-            foreach (string id in new string[] { "quiet", "mica", "paper", "instrument", "neon" })
-            {
-                var set = skinSettings(id);
-                set.ui.alwaysOnTop = true;
-                using (var m = new BubbleMenuForm(set, Skins.ResolveTheme(set.ui), card, true, null, null, null, null, null))
+                Set(m, "openedAt", Environment.TickCount - 5000);
+                var pills = (Rectangle[])Get(m, "pillRects");
+                using (var bmp = RenderForm(m, m.Width, m.Height))
                 {
-                    var skin = (SkinDef)Get(m, "skin");
-                    Set(m, "openedAt", Environment.TickCount - 5000);
-                    var pills = (Rectangle[])Get(m, "pillRects");
-                    using (var bmp = RenderForm(m, m.Width, m.Height))
-                    {
-                        int dist = Distance(AverageColor(bmp, pills[0]), skin.bubbleIn);
-                        pillTrace += id + "=" + dist + " ";
-                        if (dist <= 45) pillOk++;
-                    }
-                    m.CloseMenu();
+                    int dist = Distance(AverageColor(bmp, pills[0]), Themes.Get("midnight").bgBottom);
+                    Ok("胶囊菜单 6 颗、底色 = 主题底色（无皮肤分支）", pills.Length == 6 && dist <= 45,
+                        pills.Length + " 颗 / 色差 " + dist);
                 }
+                m.CloseMenu();
             }
-            Ok("胶囊菜单底色跟着皮肤走（5 套实测对得上 SkinDef.bubbleIn）", pillOk == 5, pillTrace);
         }
 
         // ---- 15. 多份日历订阅 + 晚同步补提醒 ----
@@ -4306,43 +4297,31 @@ class Check
             }
         }
 
-        // 设置窗口的界面风格预览只改草稿；关闭 / 取消后回退，不污染调用者或全局主题表
+        // 设置窗口的主题预览只改草稿；关闭 / 取消后回退，不污染调用者的配置
         {
-            Themes.SetCustom(new System.Collections.Generic.List<CustomTheme>());
             var previewSettings = new Settings();
             previewSettings.lark.enabled = false;
             previewSettings.calendarEnabled = false;
-            previewSettings.ui.skin = "default";
-            previewSettings.customThemes.Add(new CustomTheme
-            {
-                id = "my-orig", name = "原主题", bg = "#334455", bar = "#667788", accent = "#667788"
-            });
+            previewSettings.ui.theme = "midnight";
             previewSettings.Normalize();
+            string previewWant = "lv-kongque";
             using (var previewForm = new SettingsForm(new SettingsStore(), previewSettings))
             {
-                var previewPicker = (SkinPicker)Get(previewForm, "skinPicker");
-                var previewRect = previewPicker.RectOf(5);
-                Call(previewPicker, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
-                    previewRect.Left + previewRect.Width / 2, previewRect.Top + previewRect.Height / 2, 0));
+                var previewPicker = (ThemePicker)Get(previewForm, "picker");
+                previewPicker.SelectedId = previewWant;
+                Call(previewForm, "UpdateThemeName");
                 var previewDraft = (Settings)Get(previewForm, "s");
-                previewDraft.customThemes.Add(new CustomTheme
-                {
-                    id = "my-preview", name = "预览主题", bg = "#112233", bar = "#445566", accent = "#445566"
-                });
-                Themes.SetCustom(previewDraft.customThemes);
+                previewDraft.ui.theme = previewWant;
                 Ok("设置窗预览只改草稿，调用者配置不变",
-                    previewDraft.ui.skin == "neon" && previewSettings.ui.skin == "default"
-                    && previewSettings.customThemes.Count == 1 && Themes.IsCustom("my-preview"),
-                    "draft=" + previewDraft.ui.skin + " caller=" + previewSettings.ui.skin
-                    + " themes=" + previewSettings.customThemes.Count + " preview=" + Themes.IsCustom("my-preview"));
+                    previewDraft.ui.theme == previewWant && previewSettings.ui.theme == "midnight"
+                    && previewPicker.SelectedId == previewWant,
+                    "draft=" + previewDraft.ui.theme + " caller=" + previewSettings.ui.theme
+                    + " selected=" + previewPicker.SelectedId);
             }
-            Ok("关闭设置窗后预览状态回退（调用者 / 全局主题表）",
-                previewSettings.ui.skin == "default" && Skins.Current(previewSettings.ui).id == "default"
-                && previewSettings.customThemes.Count == 1
-                && Themes.IsCustom("my-orig") && !Themes.IsCustom("my-preview")
-                && Themes.All.Length == Themes.BuiltIn.Length + 1,
-                "caller=" + previewSettings.ui.skin + " themes=" + Themes.All.Length + "/" + (Themes.BuiltIn.Length + 1)
-                + " orig=" + Themes.IsCustom("my-orig") + " preview=" + Themes.IsCustom("my-preview"));
+            Ok("关闭设置窗后预览状态回退（调用者配置）",
+                previewSettings.ui.theme == "midnight" && Themes.Current(previewSettings.ui).id == "midnight"
+                && Themes.All.Length == Themes.BuiltIn.Length,
+                "caller=" + previewSettings.ui.theme + " themes=" + Themes.All.Length + "/" + Themes.BuiltIn.Length);
         }
 
         // 配置保存反馈：后台保存失败只记日志、不弹窗（若弹窗，这条用例会被模态框卡住）

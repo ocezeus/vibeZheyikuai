@@ -81,7 +81,7 @@ class NoteRealShot
         Directory.CreateDirectory(dir);
 
         int w = 392, h = 282;
-        using (var p = new NotePanelForm(s, Skins.ResolveTheme(s.ui), new Rectangle(0, 0, 420, 282), true,
+        using (var p = new NotePanelForm(s, Themes.Current(s.ui), new Rectangle(0, 0, 420, 282), true,
                    null, null, null, null, null))
         {
 

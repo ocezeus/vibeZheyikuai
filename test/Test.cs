@@ -421,8 +421,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "4.1.0/4.1.0");
-            Check("程序集版本是 4.1.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "4.1.0.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "5.0.0/5.0.0");
+            Check("程序集版本是 5.0.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "5.0.0.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");
@@ -1096,185 +1096,320 @@ internal static class Test
             Check("420ms 之后熄灭", WidgetForm.CornerFlashAlpha(420).ToString("0.00") + "/" + WidgetForm.CornerFlashAlpha(900).ToString("0.00"), "0.00/0.00");
             Check("负数/超时也不亮", WidgetForm.CornerFlashAlpha(-5).ToString("0.00") + "/" + WidgetForm.CornerFlashAlpha(421).ToString("0.00"), "0.00/0.00");
         }
-        // ---- 20) v3.7.0 六套整体界面主题（皮肤）：表 / 默认与归一化 / 序列化 / 配色 / 令牌 ----
+        // ---- 20) v5.0 主题文件化：ThemeFiles 读写 / 校验 / 导入导出 / 迁移 / 注册表 ----
         {
             Func<Color, string> hex = delegate(Color c)
             {
-                return "#" + c.R.ToString("X2") + c.G.ToString("X2") + c.B.ToString("X2");
+                return "#" + c.A.ToString("X2") + c.R.ToString("X2") + c.G.ToString("X2") + c.B.ToString("X2");
             };
-            Func<string, UiSettings> skinUi = delegate(string id)
+            Func<string, ThemeDef> mkTheme = delegate(string id)
             {
-                var u = new UiSettings();
-                u.skin = id;
-                return u;
+                var t = new ThemeDef();
+                t.id = id;
+                t.name = "测试主题 " + id;
+                t.author = "测试";
+                t.description = "一句话";
+                t.created = "2026-11-17 20:00:00";
+                t.accent = Color.FromArgb(255, 0x4C, 0x8D, 0xFF);
+                t.success = Color.FromArgb(255, 0x46, 0xD3, 0x9A);
+                t.bgTop = Color.FromArgb(255, 0x12, 0x16, 0x1F);
+                t.bgBottom = Color.FromArgb(255, 0x1B, 0x21, 0x30);
+                t.track = Color.FromArgb(255, 0x2A, 0x32, 0x42);
+                t.textMain = Color.FromArgb(255, 0xE8, 0xED, 0xF7);
+                t.textMuted = Color.FromArgb(255, 0x8B, 0x95, 0xA8);
+                t.textDim = Color.FromArgb(255, 0x6C, 0x76, 0x8A);
+                t.edge = Color.FromArgb(10, 255, 255, 255);   // edge 带 alpha：文件里必须保真
+                return t;
             };
-            Func<string, string, bool> glassOf = delegate(string id, string style)
-            {
-                var u = new UiSettings();
-                u.skin = id;
-                u.bgStyle = style;
-                return Skins.UsesGlass(u);
-            };
-            Func<string, string> skinAccent = delegate(string id)
-            {
-                return hex(Skins.ResolveTheme(skinUi(id)).accent);
-            };
 
-            Check("皮肤数量", Skins.All.Length.ToString(), "6");
-            var skinIds = new HashSet<string>();
-            int dupSkin = 0;
-            foreach (var sk in Skins.All) if (sk == null || !skinIds.Add(sk.id)) dupSkin++;
-            Check("皮肤 id 不重复", dupSkin.ToString(), "0");
+            // ---- 20.0 UI 侧替代接口：取当前主题 / 磨砂玻璃 / 描边 / 外光 / 配色工具 ----
+            var uiCurrent = new UiSettings();
+            uiCurrent.theme = "ivory";
+            Check("Themes.Current 跟随 ui.theme", Themes.Current(uiCurrent).id + "/" + Themes.Current(null).id, "ivory/midnight");
+            Check("Themes.Get 未知 id / null 回退 midnight", Themes.Get("nope").id + "/" + Themes.Get(null).id, "midnight/midnight");
+            Check("Themes.UsesGlass 只看背景风格",
+                Themes.UsesGlass(null) + "/" + Themes.UsesGlass(new UiSettings()) + "/"
+                + Themes.UsesGlass(new UiSettings { bgStyle = "glass" }), "False/False/True");
+            var midT = Themes.Get("midnight");
+            Check("主题卡片描边 / 外光 = edge / accent",
+                hex(Themes.CardBorderColor(midT)) + "/" + hex(Themes.GlowColor(midT)),
+                hex(midT.edge) + "/" + hex(midT.accent));
+            // Mix / Alpha：含 alpha 插值（v4 同名工具函数的等价实现，默认外观像素不变）
+            Check("Themes.Mix 含 alpha 插值",
+                hex(Themes.Mix(Color.FromArgb(0, 10, 20, 30), Color.FromArgb(255, 10, 20, 30), 0.5)),
+                hex(Color.FromArgb(128, 10, 20, 30)));
+            Check("Themes.Mix 端点 / 越界 clamp",
+                hex(Themes.Mix(Color.Red, Color.Blue, 0)) + "/" + hex(Themes.Mix(Color.Red, Color.Blue, 1)) + "/" + hex(Themes.Mix(Color.Red, Color.Blue, 5)),
+                hex(Color.Red) + "/" + hex(Color.Blue) + "/" + hex(Color.Blue));
+            Check("Themes.Alpha 只改 alpha",
+                hex(Themes.Alpha(Color.FromArgb(255, 1, 2, 3), 0.5)) + "/" + hex(Themes.Alpha(Color.FromArgb(255, 1, 2, 3), 2)),
+                hex(Color.FromArgb(128, 1, 2, 3)) + "/" + hex(Color.FromArgb(255, 1, 2, 3)));
+            Check("Themes.Hex 非法值仍是洋红", hex(Themes.Hex("bogus")), "#FFFF00FF");
 
-            string skinIdList = "", skinNameList = "", skinLightList = "", skinTagList = "";
-            foreach (var sk in Skins.All)
+            // ---- 20.1 新配置没有 skin 字段；老配置的 skin 被忽略；坏 theme 回退 ----
+            var freshUi = new Settings();
+            Check("新配置主题默认 midnight", freshUi.ui.theme, "midnight");
+            string jsonNoSkin = serializer.Serialize(freshUi);
+            Check("序列化不再出现 skin 字段",
+                jsonNoSkin.IndexOf("\"skin\"", StringComparison.Ordinal) < 0 ? "absent" : "present", "absent");
+            var legacySkin = serializer.Deserialize<Settings>("{\"ui\":{\"theme\":\"ivory\",\"skin\":\"neon\"}}");
+            legacySkin.Normalize();
+            Check("老配置的 skin 字段被忽略、theme 照常保留", legacySkin.ui.theme, "ivory");
+            var badTheme = new Settings();
+            badTheme.ui.theme = "bogus";
+            badTheme.Normalize();
+            Check("坏 theme 归一化回 midnight", badTheme.ui.theme, "midnight");
+            var pendingMigrate = new Settings();
+            pendingMigrate.customThemes.Add(new CustomTheme { id = "my-pending", name = "待迁移", accent = "#123456" });
+            pendingMigrate.ui.theme = "my-pending";
+            pendingMigrate.Normalize();
+            Check("旧列表还没迁完时保留选中的旧主题", pendingMigrate.ui.theme, "my-pending");
+
+            // ---- 20.2 主题目录 / 扩展名 ----
+            string root = NewTempDir();
+            try
             {
-                skinIdList += (skinIdList.Length == 0 ? "" : "/") + sk.id;
-                skinNameList += (skinNameList.Length == 0 ? "" : "/") + sk.name;
-                skinLightList += sk.light ? "1" : "0";
-                skinTagList += (skinTagList.Length == 0 ? "" : "/") + (string.IsNullOrWhiteSpace(sk.tagline) ? "0" : "1");
+                StoreIn(root);   // 构造 SettingsStore 即完成 ThemeFiles.Configure
+                Check("主题目录 = 配置目录下的 themes", System.IO.Path.Combine(root, "themes"), ThemeFiles.Dir);
+                Check("主题文件扩展名", ThemeFiles.Extension, ".theme.json");
+
+                // ---- 20.3 保存 round-trip：字段 / 9 个颜色 / edge alpha / UTF-8 BOM ----
+                var t1 = mkTheme("my-round");
+                t1.name = "春·青";
+                t1.author = "阿哲";
+                t1.description = "春天的青";
+                string path1 = System.IO.Path.Combine(ThemeFiles.Dir, ThemeFiles.FileNameFor(t1.id));
+                string tfErr;
+                Check("主题保存成功", ThemeFiles.TrySave(t1, path1, out tfErr) + "/" + tfErr, "True/");
+                string text1 = ReadAllText(path1);
+                Check("主题文件 Pretty 且 schema/app 正确",
+                    text1.Contains("\"schema\":1") + "/" + text1.Contains("\"app\":\"WorkCountdown\"")
+                    + "/" + text1.Contains("\n  \"colors\""),
+                    "True/True/True");
+                Check("主题文件含 9 个颜色键",
+                    System.Text.RegularExpressions.Regex.Matches(text1,
+                        "\"(accent|success|bgTop|bgBottom|track|textMain|textMuted|textDim|edge)\":").Count.ToString(), "9");
+                Check("edge alpha 落盘为 #AARRGGBB", text1.Contains("\"edge\":\"#0AFFFFFF\"").ToString(), "True");
+                ThemeDef back1;
+                Check("主题 round-trip 成功", ThemeFiles.TryRead(path1, out back1, out tfErr) + "/" + tfErr, "True/");
+                Check("round-trip 字段 / 颜色 / edge alpha / 文件元数据",
+                    back1.id + "/" + back1.name + "/" + back1.author + "/" + back1.description + "/" + back1.created
+                    + "/" + hex(back1.accent) + "/" + hex(back1.edge) + "/" + back1.isUser + "/" + (back1.filePath == path1),
+                    "my-round/春·青/阿哲/春天的青/2026-11-17 20:00:00/#FF4C8DFF/#0AFFFFFF/True/True");
+                string bomPath = System.IO.Path.Combine(root, "bom.theme.json");
+                System.IO.File.WriteAllText(bomPath, "\uFEFF" + text1, new System.Text.UTF8Encoding(false));
+                ThemeDef bomTheme;
+                Check("带 BOM 的主题文件也能读",
+                    ThemeFiles.TryRead(bomPath, out bomTheme, out tfErr) + "/" + (bomTheme == null ? "-" : bomTheme.id),
+                    "True/my-round");
+
+                // ---- 20.4 坏文件 / 缺字段 / 坏颜色 / 坏 schema / 坏 app：读取失败、LoadAll 跳过 ----
+                string badJson = System.IO.Path.Combine(ThemeFiles.Dir, "bad.theme.json");
+                System.IO.File.WriteAllText(badJson, "{ not json", new System.Text.UTF8Encoding(false));
+                ThemeDef badRead;
+                Check("非法 JSON 读取失败并给原因",
+                    ThemeFiles.TryRead(badJson, out badRead, out tfErr) + "/" + (badRead == null) + "/" + (tfErr.Length > 0),
+                    "False/True/True");
+                string noId = System.IO.Path.Combine(ThemeFiles.Dir, "noid.theme.json");
+                System.IO.File.WriteAllText(noId, text1.Replace("\"id\":\"my-round\",", ""), new System.Text.UTF8Encoding(false));
+                Check("缺 id 读取失败", ThemeFiles.TryRead(noId, out badRead, out tfErr) + "/" + (tfErr.IndexOf("id", StringComparison.Ordinal) >= 0), "False/True");
+                string noColors = System.IO.Path.Combine(ThemeFiles.Dir, "nocolors.theme.json");
+                System.IO.File.WriteAllText(noColors, "{\"schema\":1,\"app\":\"WorkCountdown\",\"id\":\"x\",\"name\":\"x\"}", new System.Text.UTF8Encoding(false));
+                Check("缺 colors 读取失败", ThemeFiles.TryRead(noColors, out badRead, out tfErr) + "/" + (tfErr.IndexOf("colors", StringComparison.Ordinal) >= 0), "False/True");
+                string badColor = System.IO.Path.Combine(ThemeFiles.Dir, "badcolor.theme.json");
+                System.IO.File.WriteAllText(badColor, text1.Replace("#0AFFFFFF", "#GGGGGG"), new System.Text.UTF8Encoding(false));
+                ThemeDef bc;
+                Check("坏颜色读取失败并指出颜色键",
+                    ThemeFiles.TryRead(badColor, out bc, out tfErr) + "/" + (tfErr.IndexOf("edge", StringComparison.Ordinal) >= 0), "False/True");
+                string badSchema = System.IO.Path.Combine(ThemeFiles.Dir, "schema.theme.json");
+                System.IO.File.WriteAllText(badSchema, text1.Replace("\"schema\":1", "\"schema\":99"), new System.Text.UTF8Encoding(false));
+                Check("不支持的 schema 跳过", ThemeFiles.TryRead(badSchema, out bc, out tfErr) + "/" + (tfErr.IndexOf("版本", StringComparison.Ordinal) >= 0), "False/True");
+                string badApp = System.IO.Path.Combine(ThemeFiles.Dir, "app.theme.json");
+                System.IO.File.WriteAllText(badApp, text1.Replace("\"app\":\"WorkCountdown\"", "\"app\":\"OtherApp\""), new System.Text.UTF8Encoding(false));
+                Check("app 不是 WorkCountdown 的跳过", ThemeFiles.TryRead(badApp, out bc, out tfErr) + "/" + (tfErr.IndexOf("WorkCountdown", StringComparison.Ordinal) >= 0), "False/True");
+                var loaded = ThemeFiles.LoadAll();
+                Check("LoadAll 跳过坏文件只留合法主题", loaded.Count.ToString(), "1");
+                Check("LoadAll 认出的主题是 my-round", loaded[0].id, "my-round");
+                Themes.Reload();
+                Check("坏主题不进注册表、Get 回退 midnight",
+                    Themes.UserThemes.Length + "/" + Themes.Get("not-exists").id + "/" + (Themes.All.Length - Themes.BuiltIn.Length),
+                    "1/midnight/1");
+
+                // ---- 20.5 导出到任意路径 → 导入到另一个主题目录（id / 文件名自动去重）→ 删除后回退 ----
+                string exportPath = System.IO.Path.Combine(root, "share", "分享.theme.json");
+                Check("导出主题文件成功", ThemeFiles.TryExport(t1, exportPath, out tfErr) + "/" + System.IO.File.Exists(exportPath), "True/True");
+                Check("导出不修改传入对象元数据", (t1.filePath == null) + "/" + t1.isUser, "True/False");
+                string root2 = NewTempDir();
+                try
+                {
+                    ThemeFiles.Configure(root2);
+                    ThemeDef imported;
+                    Check("导入成功并返回新主题", ThemeFiles.TryImport(exportPath, out imported, out tfErr) + "/" + tfErr, "True/");
+                    Check("导入后 id / 文件路径落在新目录 / 标记为用户主题",
+                        imported.id + "/" + imported.filePath.StartsWith(System.IO.Path.Combine(root2, "themes"), StringComparison.OrdinalIgnoreCase) + "/" + imported.isUser,
+                        "my-round/True/True");
+                    ThemeDef importedAgain;
+                    Check("同名再导入自动去重",
+                        ThemeFiles.TryImport(exportPath, out importedAgain, out tfErr) + "/" + (importedAgain.id != imported.id), "True/True");
+                    Check("去重后缀是 -2", importedAgain.id, "my-round-2");
+                    Themes.Reload();
+                    Check("导入的主题进入 All / UserThemes",
+                        (Themes.All.Length - Themes.BuiltIn.Length) + "/" + Themes.UserThemes.Length + "/" + Themes.IsUser("my-round-2"),
+                        "2/2/True");
+                    Check("删除只允许主题目录里的文件（内置 / 目录外都拒绝）",
+                        ThemeFiles.TryDelete(midT, out tfErr).ToString() + "/"
+                        + ThemeFiles.TryDelete(new ThemeDef { id = "x", filePath = exportPath }, out tfErr),
+                        "False/False");
+                    Check("删除导入的主题成功", ThemeFiles.TryDelete(importedAgain, out tfErr) + "/" + tfErr, "True/");
+                    Check("删除后文件不在了", System.IO.File.Exists(importedAgain.filePath).ToString(), "False");
+                    Themes.Reload();
+                    Check("删除后注册表少一套、Get 回退 midnight",
+                        Themes.All.Length + "/" + Themes.Get("my-round-2").id,
+                        (Themes.BuiltIn.Length + 1) + "/midnight");
+                }
+                finally { DeleteTempDir(root2); }
+
+                // ---- 20.6 旧 settings.customThemes → 主题文件（幂等 / 撞内置 id 自动改名） ----
+                string migrateRoot = NewTempDir();
+                try
+                {
+                    ThemeFiles.Configure(migrateRoot);
+                    var legacyList = new List<CustomTheme>();
+                    legacyList.Add(new CustomTheme { id = "my-old", name = "旧主题", bg = "#223344", bar = "#A4CB72" });
+                    legacyList.Add(new CustomTheme { id = "midnight", name = "撞内置", accent = "#FF0000" });
+                    int failed;
+                    int written = ThemeFiles.MigrateLegacy(legacyList, out failed);
+                    Check("迁移写出旧主题文件", written + "/" + failed, "2/0");
+                    Check("迁移后的文件都在主题目录",
+                        System.IO.Directory.GetFiles(System.IO.Path.Combine(migrateRoot, "themes"), "*.theme.json").Length.ToString(), "2");
+                    Themes.Reload();
+                    Check("迁移主题进入注册表（撞内置 id 自动加后缀）",
+                        Themes.IsUser("my-old") + "/" + Themes.IsUser("midnight-2") + "/" + Themes.Get("midnight").name,
+                        "True/True/经典 · 午夜蓝");
+                    Check("重复迁移幂等不再写文件",
+                        ThemeFiles.MigrateLegacy(legacyList, out failed) + "/" + failed, "0/0");
+                }
+                finally { DeleteTempDir(migrateRoot); }
             }
-            Check("皮肤 id 顺序", skinIdList, "default/quiet/mica/paper/instrument/neon");
-            Check("皮肤名字", skinNameList, "默认/无垠/云母/宣纸/仪表/霓虹");
-            Check("只有宣纸是浅色皮肤", skinLightList, "000100");
-            Check("每套皮肤都有一句定位说明", skinTagList, "1/1/1/1/1/1");
-
-            Check("Skins.Get 未知 id / null 回退默认",
-                Skins.Get("nope").id + "/" + Skins.Get(null).id, "default/default");
-            Check("Skins.Get 大小写 / 带空白也认得出（规范成小写 id）",
-                Skins.Get("NEON").id + "/" + Skins.Get(" neon ").id + "/" + Skins.Get("Quiet").id,
-                "neon/neon/quiet");
-            Check("Skins.Current 按 id 取皮肤",
-                Skins.Current(skinUi("mica")).name + "/" + Skins.Current(skinUi("paper")).name, "云母/宣纸");
-            Check("Skins.Current(null) 回退默认", Skins.Current(null).id, "default");
-            Check("Skins.IsDefault 认默认 / 认其它",
-                Skins.IsDefault(new UiSettings()).ToString() + "/" + Skins.IsDefault(skinUi("neon")).ToString(),
-                "True/False");
-
-            var skinFresh = new Settings();
-            Check("新配置默认皮肤", skinFresh.ui.skin, "default");
-
-            // 老配置 / 手改坏的配置：Normalize 把 null / 空 / 未知 / 大小写 / 空白都归到合法 id
-            string[] badSkins = new string[] { null, "", "   ", "BOGUS", "NEON", "  neon ", "quiet " };
-            string badSkinNorm = "";
-            foreach (string bad in badSkins)
+            finally
             {
-                var badSet = new Settings();
-                badSet.ui.skin = bad;
-                badSet.Normalize();
-                badSkinNorm += (badSkinNorm.Length == 0 ? "" : "/") + badSet.ui.skin;
+                DeleteTempDir(root);
             }
-            Check("Normalize 把 null / 空 / 未知 / 大小写错 / 带空白 skin 归一化",
-                badSkinNorm, "default/default/default/default/neon/neon/quiet");
 
-            string legalKept = "";
-            foreach (var sk in Skins.All)
+            // ---- 20.7 SettingsStore.Load / Import 自动迁移；settings.json 不再保存主题内容 ----
+            string storeRoot = NewTempDir();
+            try
             {
-                var legalSet = new Settings();
-                legalSet.ui.skin = sk.id;
-                legalSet.Normalize();
-                legalKept += legalSet.ui.skin == sk.id ? "1" : "0";
-            }
-            Check("六个合法 id 原样保留", legalKept, "111111");
+                var store = StoreIn(storeRoot);
+                var cfg = new Settings();
+                cfg.customThemes.Add(new CustomTheme { id = "my-legacy-ui", name = "旧配置主题", bg = "#223344", bar = "#A4CB72" });
+                cfg.ui.theme = "my-legacy-ui";
+                System.IO.File.WriteAllText(store.SettingsPath,
+                    new JavaScriptSerializer().Serialize(cfg), new System.Text.UTF8Encoding(false));
 
-            string skinRound = "";
-            foreach (var sk in Skins.All)
+                string previousNoSave = Environment.GetEnvironmentVariable("WC_NO_SAVE");
+                Environment.SetEnvironmentVariable("WC_NO_SAVE", "0");
+                try
+                {
+                    var load = store.Load();
+                    Check("Load 把旧 customThemes 迁成主题文件",
+                        load.Status + "/" + System.IO.File.Exists(System.IO.Path.Combine(storeRoot, "themes", "my-legacy-ui.theme.json")),
+                        "Loaded/True");
+                    Check("Load 后旧列表清空、选中的旧主题仍保留",
+                        load.Settings.customThemes.Count + "/" + load.Settings.ui.theme, "0/my-legacy-ui");
+                    string disk = ReadAllText(store.SettingsPath);
+                    var diskCfg = new JavaScriptSerializer().Deserialize<Settings>(disk);
+                    Check("settings.json 不再保存主题内容",
+                        (diskCfg.customThemes == null || diskCfg.customThemes.Count == 0)
+                        + "/" + (disk.IndexOf("旧配置主题", StringComparison.Ordinal) < 0 ? "absent" : "present"),
+                        "True/absent");
+                    var load2 = store.Load();
+                    Check("重复 Load 不重复迁移", load2.Status + "/" + System.IO.Directory.GetFiles(
+                        System.IO.Path.Combine(storeRoot, "themes"), "*.theme.json").Length, "Loaded/1");
+                }
+                finally
+                {
+                    Environment.SetEnvironmentVariable("WC_NO_SAVE", previousNoSave);
+                }
+            }
+            finally { DeleteTempDir(storeRoot); }
+
+            // ---- 20.7b WC_NO_SAVE=1：迁移仍写主题文件（独立数据），配置快照一个字节都不动 ----
+            string noSaveRoot = NewTempDir();
+            try
             {
-                var roundSet = new Settings();
-                roundSet.ui.skin = sk.id;
-                var roundBack = serializer.Deserialize<Settings>(serializer.Serialize(roundSet));
-                roundBack.Normalize();
-                skinRound += roundBack.ui.skin == sk.id ? "1" : "0";
+                var noSaveStore = StoreIn(noSaveRoot);
+                var noSaveCfg = new Settings();
+                noSaveCfg.customThemes.Add(new CustomTheme { id = "my-nosave", name = "不落盘主题", accent = "#6F9E6A" });
+                System.IO.File.WriteAllText(noSaveStore.SettingsPath,
+                    new JavaScriptSerializer().Serialize(noSaveCfg), new System.Text.UTF8Encoding(false));
+                byte[] before = System.IO.File.ReadAllBytes(noSaveStore.SettingsPath);
+                var noSaveLoad = noSaveStore.Load();
+                Check("WC_NO_SAVE 下迁移仍写主题文件",
+                    noSaveLoad.Status + "/" + System.IO.File.Exists(System.IO.Path.Combine(noSaveRoot, "themes", "my-nosave.theme.json")),
+                    "Loaded/True");
+                Check("WC_NO_SAVE 下配置文件一个字节都不动", FileBytesEqual(noSaveStore.SettingsPath, before).ToString(), "True");
             }
-            Check("六套皮肤 JavaScriptSerializer 往返都保留", skinRound, "111111");
+            finally { DeleteTempDir(noSaveRoot); }
 
-            var oldSkinJson = serializer.Deserialize<Settings>("{\"ui\":{\"theme\":\"midnight\"}}");
-            oldSkinJson.Normalize();
-            Check("老配置没有 skin 字段补默认", oldSkinJson.ui.skin, "default");
-            var badSkinJson = serializer.Deserialize<Settings>("{\"ui\":{\"skin\":\"bogus\"}}");
-            badSkinJson.Normalize();
-            Check("坏配置的 skin 归一化成默认", badSkinJson.ui.skin, "default");
+            string importRoot = NewTempDir();
+            try
+            {
+                var importStore = StoreIn(importRoot);
+                var importCfg = new Settings();
+                importCfg.customThemes.Add(new CustomTheme { id = "my-import", name = "导入旧主题", accent = "#6F9E6A" });
+                importCfg.ui.theme = "my-import";
+                string importPath = System.IO.Path.Combine(importRoot, "in.json");
+                System.IO.File.WriteAllText(importPath, new JavaScriptSerializer().Serialize(importCfg), new System.Text.UTF8Encoding(false));
+                var importedCfg = importStore.Import(importPath);
+                Check("Import 同样迁移旧主题文件",
+                    importedCfg.Status + "/" + importedCfg.Settings.customThemes.Count + "/"
+                    + System.IO.File.Exists(System.IO.Path.Combine(importRoot, "themes", "my-import.theme.json")) + "/"
+                    + importedCfg.Settings.ui.theme,
+                    "Imported/0/True/my-import");
+            }
+            finally { DeleteTempDir(importRoot); }
 
-            // ResolveTheme：默认皮肤跟随 39 套主题；其它五套各自带固定配色
-            var followMidnight = new Settings();
-            followMidnight.ui.skin = "default";
-            followMidnight.ui.theme = "midnight";
-            var followIvory = new Settings();
-            followIvory.ui.skin = "default";
-            followIvory.ui.theme = "ivory";
-            Check("默认皮肤跟随 ui.theme（换主题配色跟着变）",
-                Skins.ResolveTheme(followMidnight.ui).id + "/" + Skins.ResolveTheme(followIvory.ui).id,
-                "midnight/ivory");
-            Check("默认皮肤的 ResolveTheme 就是那套主题",
-                hex(Skins.ResolveTheme(followIvory.ui).accent) + "/" + hex(Skins.ResolveTheme(followIvory.ui).bgTop),
-                hex(Themes.Get("ivory").accent) + "/" + hex(Themes.Get("ivory").bgTop));
-            Check("五套皮肤各自带固定 accent",
-                skinAccent("quiet") + "/" + skinAccent("mica") + "/" + skinAccent("paper") + "/"
-                + skinAccent("instrument") + "/" + skinAccent("neon"),
-                "#96A9FF/#6EA8FE/#B23A2C/#FFB02E/#FF3CAC");
-            Check("云母 / 宣纸的底色",
-                hex(Skins.ResolveTheme(skinUi("mica")).bgTop) + "/" + hex(Skins.ResolveTheme(skinUi("paper")).bgTop),
-                "#161D2C/#FDFAF2");
-            Check("只有默认皮肤不带固定配色",
-                (Skins.Get("default").colors == null) + "/" + (Skins.Get("neon").colors != null), "True/True");
+            // ---- 20.8 主题文件不参与配置 diff；Duplicate / NewId / 工具 ----
+            var diffA = new Settings();
+            diffA.Normalize();
+            var diffB = diffA.Clone();
+            diffB.customThemes.Add(new CustomTheme { id = "my-diff", name = "diff", accent = "#123456" });
+            var diffState = new SettingsApplyState();
+            diffState.SyncFingerprint = SyncEngine.Fingerprint(diffB);
+            var diffPlan = SettingsChangePlanner.Plan(diffA, diffB, diffState);
+            Check("只改旧 customThemes 不触发显示变化", diffPlan.DisplayChanged.ToString(), "False");
 
-            // UsesGlass：云母恒开；默认皮肤看「背景风格」；其它四套恒关
-            Check("磨砂玻璃：云母恒开，默认皮肤看背景风格",
-                glassOf("mica", "solid") + "/" + glassOf("default", "glass") + "/" + glassOf("default", "solid"),
-                "True/True/False");
-            Check("磨砂玻璃：无垠 / 宣纸 / 仪表 / 霓虹恒关（背景风格设玻璃也不开）",
-                glassOf("quiet", "glass") + "/" + glassOf("paper", "glass")
-                + "/" + glassOf("instrument", "glass") + "/" + glassOf("neon", "glass"),
-                "False/False/False/False");
-            Check("Skins.UsesGlass(null) 不炸", Skins.UsesGlass(null).ToString(), "False");
+            string dupRoot = NewTempDir();
+            try
+            {
+                ThemeFiles.Configure(dupRoot);
+                Themes.Reload();
+                var seed = mkTheme("my-seed");
+                var dupTheme = ThemeFiles.Duplicate("我的新主题", seed);
+                Check("Duplicate 换 id / 保留配色 / 未落盘",
+                    dupTheme.name + "/" + (dupTheme.id != seed.id) + "/" + hex(dupTheme.accent) + "/" + (dupTheme.filePath == null) + "/" + dupTheme.isUser,
+                    "我的新主题/True/#FF4C8DFF/True/False");
+                string dupError;
+                Check("Duplicate 结果可直接保存到主题目录",
+                    ThemeFiles.TrySave(dupTheme, null, out dupError) + "/" + System.IO.File.Exists(
+                        System.IO.Path.Combine(dupRoot, "themes", ThemeFiles.FileNameFor(dupTheme.id))) + "/" + dupError,
+                    "True/True/");
+                var dupTheme2 = ThemeFiles.Duplicate("我的新主题", seed);
+                Check("同名再建主题 id 自动去重", dupTheme2.id != dupTheme.id ? "unique" : "same", "unique");
+                Check("NewId 生成 my- 前缀 slug", ThemeFiles.NewId("春·青"), "my-春-青");
+                Check("id 冲突自动加 -2 后缀", ThemeFiles.UniqueId("midnight"), "midnight-2");
+                Check("文件名非法字符替换", ThemeFiles.FileNameFor("a/b:c*d"), "a-b-c-d.theme.json");
+                Check("同名主题 id 在磁盘上也不重复", ThemeFiles.NewId("我的新主题") != dupTheme.id ? "unique" : "same", "unique");
+            }
+            finally { DeleteTempDir(dupRoot); }
 
-            // ---- 形态 / 装饰令牌抽查 ----
-            var skinQuiet = Skins.Get("quiet");
-            Check("无垠：圆角 10/10 + 细线进度条 + 数字不发光 + 细线卡片",
-                skinQuiet.radiusCollapsed + "/" + skinQuiet.radiusExpanded + "/" + skinQuiet.progress
-                + "/" + skinQuiet.numberGlow + "/" + skinQuiet.hairlineCards,
-                "10/10/Hairline/False/True");
-            var skinMica = Skins.Get("mica");
-            Check("云母：玻璃 + 胶囊进度条 + 顶部高光",
-                skinMica.glass + "/" + skinMica.progress + "/" + skinMica.sheenAlpha.ToString("0.00", CultureInfo.InvariantCulture),
-                "True/Pill/0.15");
-            var skinPaper = Skins.Get("paper");
-            Check("宣纸：圆角 5 + 笔触进度条 + 宋体标题 + 纸纹 + 印章",
-                skinPaper.radiusCollapsed + "/" + skinPaper.radiusExpanded + "/" + skinPaper.progress
-                + "/" + skinPaper.headingFont + "/" + skinPaper.paperGrain + "/" + skinPaper.seal,
-                "5/5/Brush/Noto Serif SC/True/True");
-            var skinInstrument = Skins.Get("instrument");
-            Check("仪表：圆角 6 + 分刻进度条 + 四角螺丝 + 琥珀数字 + 数字发光",
-                skinInstrument.radiusCollapsed + "/" + skinInstrument.radiusExpanded + "/" + skinInstrument.progress
-                + "/" + skinInstrument.screws + "/" + hex(skinInstrument.numberColor.Value) + "/" + skinInstrument.numberGlow,
-                "6/6/Segmented/True/#FFC24A/True");
-            var skinNeon = Skins.Get("neon");
-            Check("霓虹：圆角 14 + 霓虹进度条 + 渐变描边 + 数字发光",
-                skinNeon.radiusCollapsed + "/" + skinNeon.radiusExpanded + "/" + skinNeon.progress
-                + "/" + skinNeon.neonEdge + "/" + skinNeon.numberGlow,
-                "14/14/Neon/True/True");
-            var skinDefault = Skins.Get("default");
-            Check("默认皮肤形态和 v3.6 一致（14/18 + 默认进度条 + 不发光）",
-                skinDefault.radiusCollapsed + "/" + skinDefault.radiusExpanded + "/" + skinDefault.progress
-                + "/" + skinDefault.numberGlow + "/" + skinDefault.glass,
-                "14/18/Default/False/False");
-            string skinWinRadius = "";
-            foreach (var sk in Skins.All) skinWinRadius += (skinWinRadius.Length == 0 ? "" : "/") + sk.radiusWindow;
-            Check("六套皮肤的窗口圆角", skinWinRadius, "12/14/20/8/10/16");
-            string skinDefaultTheme = "";
-            foreach (var sk in Skins.All) skinDefaultTheme += string.IsNullOrEmpty(sk.defaultThemeId) ? "0" : "1";
-            Check("每套皮肤都有默认主题 id（色卡高亮用）", skinDefaultTheme, "111111");
-
-            // CardBorderColor / GlowColor：皮肤指定了就用，否则回到主题
-            var midnightTheme = Themes.Get("midnight");
-            Check("默认皮肤卡片描边 / 外光 = 主题 edge / accent",
-                hex(Skins.CardBorderColor(skinDefault, midnightTheme)) + "/" + hex(Skins.GlowColor(skinDefault, midnightTheme)),
-                hex(midnightTheme.edge) + "/" + hex(midnightTheme.accent));
-            Check("皮肤自带的描边 / 外光优先于主题",
-                hex(Skins.CardBorderColor(skinInstrument, midnightTheme)) + "/"
-                + hex(Skins.GlowColor(skinInstrument, midnightTheme)) + "/"
-                + hex(Skins.GlowColor(skinNeon, midnightTheme)),
-                "#3E3F35/#FFB02E/#FF3CAC");
+            // 收尾：把注册表恢复成只有内置主题，别影响后面用例
+            string resetRoot = NewTempDir();
+            ThemeFiles.Configure(resetRoot);
+            Themes.Reload();
+            DeleteTempDir(resetRoot);
+            Check("收尾后只剩 39 套内置主题", Themes.All.Length.ToString(), "39");
         }
 
         // 20. 提醒引擎：日程视图、提醒候选、去重与展示反馈（业务测试只走模块接口）
@@ -2529,6 +2664,9 @@ internal static class Test
                 Check("现状 日志仍在配置目录", System.IO.Path.GetFileName(store.LogPath), "widget.log");
                 Check("现状 测试程序默认不是便携模式", store.Portable.ToString(), "False");
 
+                // 注意：导出 / 导入一律用临时目录的 store；默认 store 只用来检查路径契约，
+                // 避免 Import 的主题迁移写进用户真实配置目录。
+                var rootStore = StoreIn(root);
                 var cfg = new Settings();
                 cfg.Normalize();
                 cfg.mode = "flex";
@@ -2536,15 +2674,16 @@ internal static class Test
                 cfg.ui.theme = "ivory";
                 cfg.customThemes.Add(new CustomTheme { id = "my-keep", name = "保留", accent = "#6F9E6A" });
                 string export = System.IO.Path.Combine(root, "roundtrip.json");
-                var exported = store.Export(cfg, export);
+                var exported = rootStore.Export(cfg, export);
                 Check("现状 导出显式路径成功", exported.Succeeded.ToString(), "True");
                 Check("现状 导出文件完整", System.IO.File.Exists(export) + "/" + ReadAllText(export).TrimEnd().EndsWith("}").ToString(), "True/True");
-                var imported = store.Import(export);
+                var imported = rootStore.Import(export);
                 var back = imported.Succeeded ? imported.Settings : null;
-                Check("现状 导入导出往返保留日程/主题",
+                Check("现状 导入导出往返保留日程、旧主题迁成文件",
                     (back != null) + "/" + (back == null ? -1 : back.schedules.Count) + "/" +
-                    (back == null || back.customThemes.Count != 1 ? "-" : back.customThemes[0].id),
-                    "True/3/my-keep");
+                    (back == null ? "-" : back.customThemes.Count.ToString()) + "/" +
+                    System.IO.File.Exists(System.IO.Path.Combine(root, "themes", "my-keep.theme.json")),
+                    "True/3/0/True");
 
                 // Normalize 的迁移/规范化现状（Save 以后要克隆快照，这些规则本身不变）
                 var fresh = new Settings();
@@ -2811,9 +2950,12 @@ internal static class Test
                             cfg.mode + "/" + (cfg.schedules == null) + "/" + cfg.customThemes.Count,
                             "bogus/True/1");
                         var imported = store.Import(outPath);
-                        Check("AC4 导入导出往返且内容已规范化",
-                            imported.Status + "/" + imported.Settings.mode + "/" + imported.Settings.schedules.Count + "/" + imported.Settings.customThemes[0].id,
-                            "Imported/flex/3/my-io");
+                        Check("AC4 导入导出往返且内容已规范化（旧主题迁成文件）",
+                            imported.Status + "/" + imported.Settings.mode + "/" + imported.Settings.schedules.Count
+                            + "/" + imported.Settings.customThemes.Count + "/" + imported.Settings.ui.theme,
+                            "Imported/flex/3/0/midnight");
+                        Check("AC4 导入把旧自建主题迁进主题目录",
+                            System.IO.File.Exists(System.IO.Path.Combine(configDir, "themes", "my-io.theme.json")).ToString(), "True");
 
                         string badPath = System.IO.Path.Combine(configDir, "bad.json");
                         System.IO.File.WriteAllText(badPath, "{ not json", new System.Text.UTF8Encoding(false));
@@ -2979,7 +3121,7 @@ internal static class Test
 
                 var next = cfg.Clone();
                 next.ui.opacity = 55;
-                next.ui.skin = "neon";
+                next.ui.theme = "ivory";
                 var change = apply.Apply(next);
                 Check("AC1 外观变化只标记显示资源",
                     change.DisplayChanged + "/" + change.FontsChanged + "/" + change.AttendancePollChanged
@@ -3193,25 +3335,25 @@ internal static class Test
                     {
                         var candidate = new Settings();
                         candidate.Normalize();
-                        candidate.ui.skin = "neon";
+                        candidate.ui.theme = "ivory";
                         var ok = commit.Commit(candidate, "测试保存");
                         Check("AC4 保存成功后才应用变化",
                             ok.IsSuccess + "/" + ok.Applied + "/" + target.AdoptCalls + "/" + target.DisplayCalls + "/" + target.AfterCalls,
                             "True/True/1/1/1");
-                        Check("AC4 保存成功落盘的是候选配置", store.Load().Settings.ui.skin, "neon");
+                        Check("AC4 保存成功落盘的是候选配置", store.Load().Settings.ui.theme, "ivory");
 
                         // 导入与普通保存走同一个提交 + 变化计划；都只在 Saved 之后应用。
                         var importedCandidate = candidate.Clone();
-                        importedCandidate.ui.skin = "quiet";
+                        importedCandidate.ui.theme = "graphite";
                         var importedResult = commit.Commit(importedCandidate, "导入配置");
                         Check("AC5 导入与普通保存共用同一提交 / 应用约定",
                             importedResult.IsSuccess + "/" + importedResult.Plan.HasChanges
-                            + "/" + target.AdoptCalls + "/" + importedCandidate.ui.skin,
-                            "True/True/2/quiet");
+                            + "/" + target.AdoptCalls + "/" + importedCandidate.ui.theme,
+                            "True/True/2/graphite");
 
                         storage.FailStage = "commit";
                         var edited = candidate.Clone();
-                        edited.ui.skin = "quiet";
+                        edited.ui.theme = "graphite";
                         edited.note.nickname = "保留的编辑";
                         int adoptBefore = target.AdoptCalls;
                         int displayBefore = target.DisplayCalls;
@@ -3221,7 +3363,7 @@ internal static class Test
                             + "/" + (target.AdoptCalls == adoptBefore) + "/" + (target.DisplayCalls == displayBefore),
                             "True/False/True/True/True");
                         Check("AC4 保存失败保留待修改内容",
-                            edited.ui.skin + "/" + edited.note.nickname, "quiet/保留的编辑");
+                            edited.ui.theme + "/" + edited.note.nickname, "graphite/保留的编辑");
                         Check("AC4 保存失败显示的是失败消息而不是成功",
                             (failed.Message.Length > 0 && failed.Message.IndexOf("失败") >= 0).ToString(), "True");
 
@@ -3358,7 +3500,7 @@ internal static class Test
                 Check("26.2 版本从新到旧", ordered.ToString(), "True");
                 Check("26.3 版本唯一", unique.ToString(), "True");
                 // 补丁版本并入大版本条目（4.0.1 仍归 4.0.0 / 4.0 那条），所以这里只要求 Latest
-                // 覆盖当前版本的「主.次」；换大版本（4.1.0）时必须新加一条，否则这里会红。
+                // 覆盖当前版本的「主.次」；换大版本（5.0.0）时必须新加一条，否则这里会红。
                 int[] cur = parts(AppInfo.Version);
                 int[] latestParts = UpdateChangelog.Latest == null ? new int[0] : parts(UpdateChangelog.Latest.Version);
                 bool covers = latestParts.Length >= 2 && cur.Length >= 2

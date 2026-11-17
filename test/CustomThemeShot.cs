@@ -24,16 +24,16 @@ class CustomThemeShot
 
         var store = new SettingsStore();
         var s = store.Load().Settings;
-        var ct = new CustomTheme();
-        ct.id = "my-test";
-        ct.name = "夜航橙";
-        ct.bg = "#101C2E";
-        ct.bar = "#FFB454";
-        ct.accent = "#FFB454";
-        s.customThemes.Add(ct);
-        s.ui.theme = ct.id;
-        Themes.SetCustom(s.customThemes);
-        var t = Themes.Get(ct.id);
+        // 用户主题 = 主题文件：写到临时主题目录再 Reload（不碰用户自己的 themes\）
+        string themeDir = Path.Combine(Path.GetTempPath(), "wc-probe-theme-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(themeDir);
+        ThemeFiles.Configure(themeDir);
+        var t = Themes.FromColors("my-test", "夜航橙", "#101C2E", "#FFB454");
+        t.created = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        string themeError;
+        if (!ThemeFiles.TrySave(t, null, out themeError)) Console.WriteLine("theme save failed: " + themeError);
+        Themes.Reload();
+        s.ui.theme = t.id;
         Console.WriteLine("theme bgTop=" + t.bgTop + " accent=" + t.accent + " text=" + t.textMain);
 
         using (var form = new WidgetForm(store, s))
@@ -56,7 +56,7 @@ class CustomThemeShot
             Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
         }
 
-        using (var dlg = new ColorWheelForm("编辑主题", ct.name, ColorTranslator.FromHtml(ct.bg), ColorTranslator.FromHtml(ct.bar)))
+        using (var dlg = new ColorWheelForm("编辑主题", t.name, t.bgTop, t.accent))
         {
             dlg.Show();
             for (int i = 0; i < 6; i++) { Application.DoEvents(); Thread.Sleep(50); }

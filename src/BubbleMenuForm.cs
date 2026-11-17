@@ -103,9 +103,7 @@ namespace WorkCountdown
         [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr hObject);
 
         private readonly Settings settings;
-        private SkinDef skin;              // 整体界面主题（皮肤）：胶囊 / 面板 / 色卡的配色圆角都从这取
-        private readonly bool skinDefault; // 默认皮肤：外观必须和 v3.6 完全一致
-        private readonly bool glass;       // 磨砂玻璃（默认皮肤的「背景风格」或云母皮肤）
+        private readonly bool glass;       // 磨砂玻璃（背景风格 = glass）
         private ThemeDef theme;
         private readonly Rectangle card;
         private readonly bool topMost;
@@ -185,13 +183,9 @@ namespace WorkCountdown
             Action<string> onPreview = null, Action onUpdateCheck = null, Action onUpdateApply = null)
         {
             this.settings = settings;
-            this.skin = Skins.Current(settings.ui);
-            this.skinDefault = skin.IsDefault;
-            this.glass = Skins.UsesGlass(settings.ui);
-            // 默认皮肤继续用调用方传进来的主题；其它皮肤用自带配色（Widget 现在传的已经是 ResolveTheme，
-            // 这里再兜一次，旧调用点也不会把皮肤配色盖掉）。
-            this.theme = skin.colors != null ? skin.colors
-                : (theme != null ? theme : Skins.ResolveTheme(settings.ui));
+            this.glass = Frost.On(settings.ui);
+            // 调用方传进来的主题优先；没传就按设置里的主题。
+            this.theme = theme != null ? theme : Themes.Current(settings.ui);
             this.card = card;
             this.topMost = topMost;
             this.onTheme = onTheme;
@@ -204,11 +198,8 @@ namespace WorkCountdown
             this.onUpdateCheck = onUpdateCheck;
             this.onUpdateApply = onUpdateApply;
 
-            // 皮肤不跟 39 套主题走：色卡高亮显示这套皮肤默认对应的那块（skin.defaultThemeId），
-            // 点色卡还是照旧记下选择（切回默认皮肤时才生效）。
-            selectedTheme = skin.colors != null
-                ? (string.IsNullOrEmpty(skin.defaultThemeId) ? this.theme.id : skin.defaultThemeId)
-                : this.theme.id;
+            // 色卡高亮当前主题
+            selectedTheme = this.theme.id;
             pinned = settings.ui.alwaysOnTop;
 
             using (var g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f;
@@ -239,10 +230,7 @@ namespace WorkCountdown
             for (int i = 0; i < Labels.Length; i++)
                 pillRects[i] = new Rectangle(pad, pad + i * (pillH + gap), pillW, pillH);
 
-            // 胶囊文字字体跟皮肤走：宣纸宋体、仪表 Bahnschrift（其它皮肤 / 默认皮肤还是界面中文字体）
-            fPill = !skinDefault && !string.IsNullOrWhiteSpace(skin.headingFont)
-                ? UiFont.MakeFamily(skin.headingFont, 8.75f, FontStyle.Regular)
-                : UiFont.Make(8.75f, FontStyle.Regular);
+            fPill = UiFont.Make(8.75f, FontStyle.Regular);
             fTitle = UiFont.Make(9.75f, FontStyle.Bold);
             fSub = UiFont.Make(7.5f, FontStyle.Regular);
             fChip = UiFont.Make(8.25f, FontStyle.Bold);
@@ -342,31 +330,26 @@ namespace WorkCountdown
         private Color Muted { get { return theme.textMuted; } }
         private Color Dim { get { return theme.textDim; } }
         private Color Accent { get { return theme.accent; } }
-        private Color SurfaceTop { get { return skinDefault ? Mix(theme.bgTop, Color.White, LightTheme ? 0.02 : 0.04) : Mix(skin.panelBg, Color.White, 0.03); } }
-        private Color SurfaceBottom { get { return skinDefault ? theme.bgBottom : skin.panelBg; } }
+        private Color SurfaceTop { get { return Mix(theme.bgTop, Color.White, LightTheme ? 0.02 : 0.04); } }
+        private Color SurfaceBottom { get { return theme.bgBottom; } }
         private Color FieldBg { get { return LightTheme ? Rgba(Color.Black, 12) : Rgba(Color.White, 14); } }
         private Color FieldBorder { get { return LightTheme ? Rgba(Color.Black, 26) : Rgba(Color.White, 22); } }
         private Color HoverTint { get { return LightTheme ? Rgba(Color.Black, 14) : Rgba(Color.White, 10); } }
         private Color OnAccent
         {
-            get
-            {
-                if (!skinDefault) return skin.accentInk;
-                return Luminance(Accent) > 0.55 ? Color.FromArgb(23, 17, 17) : Color.White;
-            }
+            get { return Luminance(Accent) > 0.55 ? Color.FromArgb(23, 17, 17) : Color.White; }
         }
 
-        // ---- 皮肤圆角（默认皮肤保持 v3.6 的数值）----
-        /// <summary>胶囊 / 长开面板的圆角：收起用 skin.radiusPill；长开时默认皮肤保持 18、皮肤也走 radiusPill。</summary>
+        // ---- 圆角（和 v3.6 一致）----
+        /// <summary>胶囊 / 长开面板的圆角：收起用胶囊高度的一半，长开时用 PanelRadiusDip。</summary>
         private int PillCorner(bool expanded)
         {
-            if (!expanded) return skinDefault ? pillH / 2 : S(skin.radiusPill);
-            return skinDefault ? S(PanelRadiusDip) : S(skin.radiusPill);
+            return expanded ? S(PanelRadiusDip) : pillH / 2;
         }
-        private int CardCorner { get { return S(skinDefault ? 9 : skin.radiusCard); } }
-        private int ChipCorner { get { return S(skinDefault ? 10 : skin.radiusCard); } }
-        private int RowCorner { get { return S(skinDefault ? 11 : skin.radiusCard); } }
-        private int FieldCorner { get { return S(skinDefault ? 8 : skin.radiusCard); } }
+        private int CardCorner { get { return S(9); } }
+        private int ChipCorner { get { return S(10); } }
+        private int RowCorner { get { return S(11); } }
+        private int FieldCorner { get { return S(8); } }
 
         // ---------------- 主题色卡 ----------------
 
@@ -803,8 +786,7 @@ namespace WorkCountdown
                 if (i < 0 || i >= swatches.Count) return;
                 ThemeDef t = swatches[i];
                 selectedTheme = t.id;
-                // 默认皮肤：立刻换色预览；其它皮肤配色固定，只记下选择（切回默认皮肤时生效）
-                if (skinDefault) theme = t;
+                theme = t;
                 if (onTheme != null) onTheme(t.id);
                 Invalidate();
                 return;
@@ -831,10 +813,10 @@ namespace WorkCountdown
                 : new Rectangle(item.X + S(12), item.Y + S(88), item.Width - S(24), S(32));
 
             editingField = true;
-            // WinForms 控件不支持半透明底色：给编辑器算两个不透明色（皮肤用 panelBg 当基色）
-            Color baseBg = skinDefault ? theme.bgBottom : skin.panelBg;
-            Color solidBg = LightTheme ? Mix(baseBg, Color.White, 0.55) : Mix(baseBg, Color.Black, skinDefault ? 0.25 : 0.18);
-            Color solidBorder = LightTheme ? Mix(baseBg, Color.Black, 0.25) : Mix(baseBg, Color.White, skinDefault ? 0.30 : 0.16);
+            // WinForms 控件不支持半透明底色：给编辑器算两个不透明色
+            Color baseBg = theme.bgBottom;
+            Color solidBg = LightTheme ? Mix(baseBg, Color.White, 0.55) : Mix(baseBg, Color.Black, 0.25);
+            Color solidBorder = LightTheme ? Mix(baseBg, Color.Black, 0.25) : Mix(baseBg, Color.White, 0.30);
             var ed = new FieldEditor(title ? "标题" : "地点", title ? eventTitle : eventPlace,
                 new Rectangle(Left + field.X, Top + field.Y, field.Width, field.Height),
                 solidBg, Ink, Accent, solidBorder, scale, topMost);
@@ -864,7 +846,7 @@ namespace WorkCountdown
         private void OpenNewTheme()
         {
             if (onNewTheme == null) return;
-            ThemeDef seed = theme != null ? theme : Skins.ResolveTheme(settings.ui);
+            ThemeDef seed = theme != null ? theme : Themes.Current(settings.ui);
             string id = null;
             editingField = true;      // 弹窗期间失焦，别把气泡收掉
             try
@@ -880,8 +862,7 @@ namespace WorkCountdown
             if (!string.IsNullOrEmpty(id))
             {
                 selectedTheme = id;
-                // 默认皮肤立刻应用新主题；其它皮肤配色固定，只把色卡选中环移过去
-                if (skinDefault) theme = Themes.Get(id);
+                theme = Themes.Get(id);
                 BuildSwatches();
                 ScrollThemeToSelected();
                 BuildHits();
@@ -1107,61 +1088,28 @@ namespace WorkCountdown
             g.TranslateTransform(-anchorX, -anchorY);
 
             int radius = PillCorner(expanded);
-            bool lit = isActive || on || hover;     // 皮肤的高亮态（选中 / 置顶 / 悬停）
+            bool lit = isActive || on || hover;     // 高亮态（选中 / 置顶 / 悬停）
             using (var path = RoundPath(r, radius))
             {
                 if (glass)
                 {
                     Frost.PaintSurface(g, path, r, theme, a / 255.0, 0.86);
                 }
-                else if (skinDefault)
-                {
-                    using (var br = new LinearGradientBrush(new Rectangle(r.X, r.Y, Math.Max(1, r.Width), Math.Max(1, r.Height)),
-                        Alpha(SurfaceTop, a), Alpha(SurfaceBottom, a), 90f))
-                        g.FillPath(br, path);
-                }
                 else
                 {
-                    // 非默认皮肤：霓虹先画外圈辉光（窗口四周留了 PadDip，露得出来），再填皮肤面板底色。
-                    // 底色从 panelBg 稍微提亮一点点到 panelBg，跟设计里的「面板 + 极淡高光」一致。
-                    if (skin.neonEdge && lit) PaintNeonGlow(g, path, r, a, isActive || on);
                     using (var br = new LinearGradientBrush(new Rectangle(r.X, r.Y, Math.Max(1, r.Width), Math.Max(1, r.Height)),
                         Alpha(SurfaceTop, a), Alpha(SurfaceBottom, a), 90f))
                         g.FillPath(br, path);
-                    PaintItemSheen(g, path, r, a);
                 }
                 if (hover && !isActive)
                     using (var b = new SolidBrush(Alpha(HoverTint, a))) g.FillPath(b, path);
-                if (!skinDefault)
-                {
-                    // 皮肤细边：平时是 panelEdge，选中 / 置顶 / 悬停换成强调色；霓虹用 品红→青 渐变描边
-                    if (skin.neonEdge && lit)
-                    {
-                        using (var grad = new LinearGradientBrush(new Rectangle(r.X, r.Y, Math.Max(1, r.Width), Math.Max(1, r.Height)),
-                            Alpha(Accent, a), Alpha(skin.accent2, a), 35f))
-                        using (var pen = new Pen(grad, Math.Max(1.2f, scale * 1.2f)))
-                            g.DrawPath(pen, path);
-                    }
-                    else
-                    {
-                        Color skinBorder = isActive ? Alpha(Accent, (int)(a * 0.85))
-                            : on ? Alpha(Accent, (int)(a * 0.70))
-                            : hover ? Alpha(Accent, (int)(a * 0.58))
-                            : Alpha(skin.panelEdge, a);
-                        using (var pen = new Pen(skinBorder, Math.Max(1f, scale)))
-                            g.DrawPath(pen, path);
-                    }
-                }
-                else
-                {
-                    // 主题色细边：胶囊 / 长开的卡片统一用强调色，1 DIP 细线，状态只改透明度
-                    Color border = isActive ? Alpha(Accent, (int)(a * 0.72))
-                        : on ? Alpha(Accent, (int)(a * 0.66))
-                        : hover ? Alpha(Accent, (int)(a * 0.58))
-                        : Alpha(Accent, (int)(a * 0.46));
-                    using (var pen = new Pen(border, Math.Max(1f, scale)))
-                        g.DrawPath(pen, path);
-                }
+                // 主题色细边：胶囊 / 长开的卡片统一用强调色，1 DIP 细线，状态只改透明度
+                Color border = isActive ? Alpha(Accent, (int)(a * 0.72))
+                    : on ? Alpha(Accent, (int)(a * 0.66))
+                    : hover ? Alpha(Accent, (int)(a * 0.58))
+                    : Alpha(Accent, (int)(a * 0.46));
+                using (var pen = new Pen(border, Math.Max(1f, scale)))
+                    g.DrawPath(pen, path);
 
                 if (expanded)
                 {
@@ -1175,42 +1123,6 @@ namespace WorkCountdown
             g.Restore(state);
         }
 
-        /// <summary>皮肤胶囊 / 面板的高光：顶部一层很淡的白色渐变（宣纸最明显，无垠几乎看不见）。</summary>
-        private void PaintItemSheen(Graphics g, GraphicsPath path, Rectangle r, int a)
-        {
-            if (skin.sheenAlpha <= 0) return;
-            GraphicsState st = g.Save();
-            try
-            {
-                g.SetClip(path, CombineMode.Intersect);
-                int bandH = Math.Max(1, (int)Math.Round(r.Height * 0.55));
-                var band = new Rectangle(r.X, r.Y, Math.Max(1, r.Width), bandH);
-                using (var br = new LinearGradientBrush(band,
-                    Alpha(Color.White, (int)(a * Math.Min(0.8, skin.sheenAlpha * 0.8))),
-                    Color.FromArgb(0, 255, 255, 255), 90f))
-                    g.FillRectangle(br, band);
-            }
-            finally { g.Restore(st); }
-        }
-
-        /// <summary>霓虹外辉光：沿圆角叠几层宽一点的强调色描边（填充前画，内侧会被底色盖住）。</summary>
-        private void PaintNeonGlow(Graphics g, GraphicsPath path, Rectangle r, int a, bool strong)
-        {
-            double k = strong ? 1.0 : 0.6;
-            for (int i = 3; i >= 1; i--)
-            {
-                float wid = Math.Max(2f, S(1.5f + i * 2.2f));
-                using (var pen = new Pen(Alpha(Accent, (int)(a * 0.10 * i * k)), wid))
-                    g.DrawPath(pen, path);
-            }
-            for (int i = 2; i >= 1; i--)
-            {
-                float wid = Math.Max(2f, S(1.5f + i * 2.2f));
-                using (var pen = new Pen(Alpha(skin.accent2, (int)(a * 0.06 * i * k)), wid))
-                    g.DrawPath(pen, path);
-            }
-        }
-
         private void DrawHead(Graphics g, int index, Rectangle r, int a, bool active, bool on, bool muted)
         {
             Color ink = Alpha(Ink, muted ? (int)(a * 0.5) : a);
@@ -1221,13 +1133,9 @@ namespace WorkCountdown
             float iconY = r.Y + (pillH - iconSize) / 2f;
             DrawIcon(g, IconOf(index), new RectangleF(iconX, iconY, iconSize, iconSize), icon);
 
-            // 仪表皮肤：选中态在胶囊右端点一颗带辉光的 LED 小灯（设计里「分刻 + 指示灯」的味道）
-            bool led = !skinDefault && skin.screws && (active || on);
-            if (led) DrawLed(g, r, a, muted ? 0.6f : 1f);
-
             string label = index == (int)BubbleAction.Pin ? (pinned ? "已置顶" : "窗口置顶") : Labels[index];
             float textX = r.X + S(12) + iconSize + S(9);
-            float maxW = r.Width - S(12) - (textX - r.X) - (led ? S(12) : 0);
+            float maxW = r.Width - S(12) - (textX - r.X);
             DrawTextMid(g, label, fPill, ink, textX, r.Y + pillH / 2f, maxW);
 
             // 长开后右边补一句「39 套」，让人知道下面还有一整份主题表
@@ -1237,22 +1145,6 @@ namespace WorkCountdown
                 float cw = Measure(g, cnt, fChipSub);
                 DrawTextMid(g, cnt, fChipSub, Alpha(Dim, a), r.Right - S(12) - cw, r.Y + pillH / 2f, cw + S(2));
             }
-        }
-
-        /// <summary>仪表皮肤的 LED 小灯：实心点 + 几圈很淡的辉光。</summary>
-        private void DrawLed(Graphics g, Rectangle r, int a, float alphaMul)
-        {
-            float cx = r.Right - S(11);
-            float cy = r.Y + pillH / 2f;
-            float rr = Math.Max(1.6f, S(2.0f));
-            for (int i = 3; i >= 1; i--)
-            {
-                float gr = rr * (1f + i * 1.5f);
-                using (var br = new SolidBrush(Alpha(Accent, (int)(a * 0.10 * i * alphaMul))))
-                    g.FillEllipse(br, cx - gr, cy - gr, gr * 2, gr * 2);
-            }
-            using (var br = new SolidBrush(Alpha(Accent, (int)(a * alphaMul))))
-                g.FillEllipse(br, cx - rr, cy - rr, rr * 2, rr * 2);
         }
 
         private void DrawBody(Graphics g, int index, Rectangle r, int a, bool isActive)
@@ -1680,11 +1572,9 @@ namespace WorkCountdown
         private void DrawThemeCard(Graphics g, Rectangle chip, ThemeDef t, int a)
         {
             bool sel = t.id == selectedTheme;
-            int tileRadius = skinDefault ? S(8) : S(skin.radiusCard);
+            int tileRadius = S(8);
             using (var path = RoundPath(chip, tileRadius))
             {
-                // 霓虹：选中的色卡先铺一圈辉光（设计里 .tile.on 的 0 0 14px 光）
-                if (!skinDefault && skin.neonEdge && sel) PaintThemeGlow(g, path, chip, a);
                 using (var br = new LinearGradientBrush(
                     new Rectangle(chip.X, chip.Y, Math.Max(1, chip.Width), Math.Max(1, chip.Height)),
                     Alpha(t.bgTop, a), Alpha(t.bgBottom, a), 90f))
@@ -1700,20 +1590,10 @@ namespace WorkCountdown
                 int textX = block.Right + S(1);
                 DrawThemeName(g, t, new Rectangle(textX, chip.Y, Math.Max(1, chip.Right - S(1) - textX), chip.Height), a);
 
+                // 主题色细边：选中的色卡用强调色，其余用主题描边色
                 int edgeA = sel ? a : (int)Math.Round(a * 0.5);
-                Color edgeColor = sel ? Accent : (skinDefault ? theme.edge : skin.panelEdge);
+                Color edgeColor = sel ? Accent : theme.edge;
                 using (var pen = new Pen(Alpha(edgeColor, edgeA), Math.Max(1f, scale * (sel ? 1.7f : 1f))))
-                    g.DrawPath(pen, path);
-            }
-        }
-
-        /// <summary>霓虹色卡的选中辉光（画在底色之前，只留外侧）。</summary>
-        private void PaintThemeGlow(Graphics g, GraphicsPath path, Rectangle chip, int a)
-        {
-            for (int i = 3; i >= 1; i--)
-            {
-                float wid = Math.Max(1.5f, S(1f + i * 1.6f));
-                using (var pen = new Pen(Alpha(Accent, (int)(a * 0.13 * i)), wid))
                     g.DrawPath(pen, path);
             }
         }

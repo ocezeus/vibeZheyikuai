@@ -36,7 +36,6 @@ class CornerFlashShot
         s.mode = "fixed";
         s.startTime = "09:00";
         s.endTime = "18:00";
-        s.ui.skin = "default";
         s.ui.theme = "midnight";
         s.note.id = "48372";
         s.note.AddContact("62015", "阿哲");

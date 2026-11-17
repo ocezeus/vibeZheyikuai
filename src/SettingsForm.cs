@@ -41,9 +41,10 @@ namespace WorkCountdown
         private SettingsRail rail;          // 左栏导航（自绘）
         private SettingsHead head;          // 内容区标题条（自绘，宣纸时画印章）
         private Panel footerBar;            // 底部按钮条
-        private SkinPicker skinPicker;      // 外观页「界面风格」的 6 个块
-        private Label lblThemeLocked;       // 非默认皮肤时「主题配色」上的提示
-        private Button btnNewTheme;         // ＋ 新建主题（非默认皮肤时置灰）
+        private Button btnNewTheme;         // ＋ 新建主题
+        private Button btnImportTheme;      // 导入主题…
+        private Button btnExportTheme;      // 导出当前
+        private Button btnDeleteTheme;      // 删除（仅用户主题）
         private int curPage = 0;
         private int tabChrome;              // 表头 + 边框占的高度
         private int tabHeader;              // 表头高度（要裁掉这么多）
@@ -157,16 +158,15 @@ namespace WorkCountdown
         {
             this.store = store;
             this.original = settings == null ? new Settings() : settings;
-            // 设置窗口改的是一份深拷贝草稿：预览（界面风格 / 自建主题）只作用于草稿，
+            // 设置窗口改的是一份深拷贝草稿：预览（主题配色）只作用于草稿，
             // 取消或保存失败都不会把未提交的修改漏进调用者的运行配置。
             this.s = settings == null ? new Settings() : settings.Clone();
             if (this.s == null) this.s = new Settings();
             this.initialTab = initialTab;
             UiFont.Configure(this.s.ui.textFont, this.s.ui.numberFont);
             this.s.NormalizeSchedules();          // 直接 new 出来的 Settings 也要有固定日程
-            this.s.NormalizeCustomThemes();
 
-            // 先按当前皮肤定色：下面创建控件时拿到的就是对的颜色（默认皮肤 = 原来的浅色）
+            // 先按当前主题定色：下面创建控件时拿到的就是对的颜色
             Ui.Apply(this.s.ui);
 
             Text = "上班工具箱 " + AppInfo.Version + " · 设置";
@@ -212,14 +212,13 @@ namespace WorkCountdown
         }
 
         /// <summary>
-        /// 草稿里的预览可能改过全局主题表 / 设置窗口配色；取消 / 失败关闭时恢复调用者的状态。
+        /// 草稿里的预览改过设置窗口配色；取消 / 失败关闭时恢复调用者的状态。
         /// 保存成功时 Widget 会重新加载落盘配置并再设置一次，不会被这里覆盖。
         /// </summary>
         private void RestoreGlobalPreviewState()
         {
             if (globalsRestored) return;
             globalsRestored = true;
-            Themes.SetCustom(original.customThemes);
             Ui.Apply(original.ui);
         }
 
@@ -411,11 +410,10 @@ namespace WorkCountdown
             if (contentHost != null) contentHost.PerformLayout();
         }
 
-        // ---------------- 皮肤 ----------------
+        // ---------------- 主题配色 ----------------
 
         /// <summary>
-        /// 换肤：所有颜色重新从当前皮肤的 SkinDef / ThemeDef 取一遍，然后整棵控件树刷色重画。
-        /// 默认皮肤走的是和 v3.6 一样的那套浅色，观感不变。
+        /// 换主题：所有颜色重新从当前 ThemeDef 取一遍，然后整棵控件树刷色重画。
         /// </summary>
         private void ApplySkin()
         {
@@ -431,7 +429,6 @@ namespace WorkCountdown
             }
             if (footerBar != null) { footerBar.BackColor = Ui.FooterBg; footerBar.Invalidate(); }
             if (picker != null) { picker.BackColor = Ui.Surface; picker.Invalidate(); }
-            if (skinPicker != null) { skinPicker.BackColor = Ui.Surface; skinPicker.Invalidate(); }
             if (head != null) { head.Invalidate(); }
             if (rail != null)
             {
@@ -439,7 +436,7 @@ namespace WorkCountdown
                 rail.Invalidate();
             }
             SkinTree(Controls);
-            UpdateSkinUi();
+            UpdateThemeUi();
             Invalidate(true);
         }
 
@@ -494,7 +491,7 @@ namespace WorkCountdown
                     {
                         c.BackColor = Ui.WindowBg;
                     }
-                    else if (c is ScheduleList || c is EventCardList || c is ThemePicker || c is SkinPicker)
+                    else if (c is ScheduleList || c is EventCardList || c is ThemePicker)
                     {
                         c.BackColor = Ui.Surface;
                         c.Invalidate();
@@ -522,8 +519,8 @@ namespace WorkCountdown
                 b.BackColor = Ui.Accent;
                 b.ForeColor = Ui.AccentInk;
                 b.FlatAppearance.BorderSize = 0;
-                b.FlatAppearance.MouseOverBackColor = Skins.Mix(Ui.Accent, Color.White, 0.12);
-                b.FlatAppearance.MouseDownBackColor = Skins.Mix(Ui.Accent, Color.Black, 0.16);
+                b.FlatAppearance.MouseOverBackColor = Themes.Mix(Ui.Accent, Color.White, 0.12);
+                b.FlatAppearance.MouseDownBackColor = Themes.Mix(Ui.Accent, Color.Black, 0.16);
             }
             else if (tag == "accent" || tag == "accent-edit")
             {
@@ -546,29 +543,9 @@ namespace WorkCountdown
             }
         }
 
-        /// <summary>皮肤相关的联动：风格块选中态、主题色卡能不能点、提示文字。</summary>
-        private void UpdateSkinUi()
+        /// <summary>主题相关的联动：当前主题名、编辑 / 删除按钮只对用户主题可用。</summary>
+        private void UpdateThemeUi()
         {
-            var skin = Skins.Current(s.ui);
-            bool def = skin.IsDefault;
-            if (skinPicker != null) { skinPicker.SelectedId = skin.id; skinPicker.Invalidate(); }
-            if (picker != null)
-            {
-                picker.Locked = !def;
-                picker.Enabled = def;
-                picker.Invalidate();
-            }
-            if (lblThemeLocked != null)
-            {
-                lblThemeLocked.Visible = !def;
-                lblThemeLocked.ForeColor = Ui.Muted;
-            }
-            if (btnNewTheme != null)
-            {
-                btnNewTheme.Enabled = def;
-                btnNewTheme.ForeColor = def ? Ui.Accent : Ui.Muted;
-                btnNewTheme.FlatAppearance.BorderColor = def ? Ui.Accent : Ui.Edge;
-            }
             UpdateThemeName();
             if (rail != null) rail.Invalidate();
             if (head != null) head.Invalidate();
@@ -1945,97 +1922,88 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildThemes(TabPage page)
         {
-            BuildSkinCard(page);
-
-            var g = CardBox(page, "主题配色", 8, 116, 492, 232);
-            lblThemeLocked = new Label();
-            lblThemeLocked.Text = "该风格自带配色，切回《默认》可选 " + Themes.All.Length + " 套";
-            lblThemeLocked.SetBounds(150, 5, 326, 18);
-            lblThemeLocked.TextAlign = ContentAlignment.MiddleRight;
-            lblThemeLocked.Font = UiFont.Make(8f, FontStyle.Regular);
-            lblThemeLocked.ForeColor = Ui.Muted;
-            lblThemeLocked.BackColor = Color.Transparent;
-            lblThemeLocked.Tag = "hint";
-            lblThemeLocked.Visible = false;
-            g.Controls.Add(lblThemeLocked);
+            var g = CardBox(page, "主题配色", 8, 8, 492, 252);
 
             picker = new ThemePicker();
             picker.SetBounds(14, 30, 456, 122);
             picker.SelectedIdChanged += delegate { UpdateThemeName(); };
             g.Controls.Add(picker);
-            lblThemeName = Lbl("", 14, 160, 210, 20);
+
+            lblThemeName = Lbl("", 14, 156, 456, 20);
             lblThemeName.ForeColor = Ui.Muted;
             lblThemeName.Tag = "hint";
             g.Controls.Add(lblThemeName);
 
-            btnEditTheme = AccentButton("编辑", 240, 156, 70, 28);
+            // 按钮行：＋ 新建主题 / 编辑 / 导入主题… / 导出当前 / 删除
+            btnNewTheme = AccentButton("＋ 新建主题", 14, 178, 84, 28);
+            btnNewTheme.Click += delegate { NewCustomTheme(); };
+            g.Controls.Add(btnNewTheme);
+
+            btnEditTheme = AccentButton("编辑", 106, 178, 70, 28);
             btnEditTheme.Tag = "accent-edit";
             btnEditTheme.Click += delegate { EditCustomTheme(); };
             g.Controls.Add(btnEditTheme);
 
-            btnNewTheme = AccentButton("＋ 新建主题", 316, 156, 154, 28);
-            btnNewTheme.Click += delegate { NewCustomTheme(); };
-            g.Controls.Add(btnNewTheme);
+            btnImportTheme = FlatButton("导入主题…", 184, 178, 92, 28);
+            btnImportTheme.Click += delegate { ImportTheme(); };
+            g.Controls.Add(btnImportTheme);
+
+            btnExportTheme = FlatButton("导出当前", 284, 178, 86, 28);
+            btnExportTheme.Click += delegate { ExportTheme(); };
+            g.Controls.Add(btnExportTheme);
+
+            btnDeleteTheme = FlatButton("删除", 378, 178, 86, 28);
+            btnDeleteTheme.Click += delegate { DeleteTheme(); };
+            g.Controls.Add(btnDeleteTheme);
 
             // 背景风格：纯色 / 磨砂玻璃（作用于悬浮卡片、小纸条面板、右键胶囊气泡）
-            g.Controls.Add(Lbl("背景风格", 14, 198, 62, 22));
+            g.Controls.Add(Lbl("背景风格", 14, 216, 62, 22));
             rbBgSolid = new RadioButton();
             rbBgSolid.Text = "纯色";
-            rbBgSolid.SetBounds(84, 196, 64, 24);
+            rbBgSolid.SetBounds(84, 214, 64, 24);
             rbBgSolid.ForeColor = Ui.Ink;
             rbBgSolid.BackColor = Color.Transparent;
             g.Controls.Add(rbBgSolid);
             rbBgGlass = new RadioButton();
             rbBgGlass.Text = "磨砂玻璃";
-            rbBgGlass.SetBounds(156, 196, 96, 24);
+            rbBgGlass.SetBounds(156, 214, 96, 24);
             rbBgGlass.ForeColor = Ui.Ink;
             rbBgGlass.BackColor = Color.Transparent;
             g.Controls.Add(rbBgGlass);
-            g.Controls.Add(Hint("磨砂玻璃：半透明 + 磨砂颗粒", 258, 198, 222, 20));
-        }
-
-        /// <summary>「界面风格」卡片：6 个可点的风格块，点一下立刻预览，点「保存」才落盘。</summary>
-        private void BuildSkinCard(TabPage page)
-        {
-            var g = CardBox(page, "界面风格", 8, 8, 492, 100);
-
-            var tip = new Label();
-            tip.Text = "6 套 · 点一下立刻预览，点「保存」后悬浮窗跟着换";
-            tip.SetBounds(150, 5, 326, 18);
-            tip.TextAlign = ContentAlignment.MiddleRight;
-            tip.Font = UiFont.Make(8f, FontStyle.Regular);
-            tip.ForeColor = Ui.Muted;
-            tip.BackColor = Color.Transparent;
-            tip.Tag = "hint";
-            g.Controls.Add(tip);
-
-            skinPicker = new SkinPicker();
-            skinPicker.SetBounds(14, 26, 464, 60);
-            skinPicker.SelectedId = s.ui.skin;
-            skinPicker.SelectedIdChanged += delegate { SelectSkin(skinPicker.SelectedId); };
-            g.Controls.Add(skinPicker);
-        }
-
-        /// <summary>点一个风格块：只改内存里的 ui.skin，并立刻按新皮肤重画整个设置窗口。</summary>
-        private void SelectSkin(string id)
-        {
-            s.ui.skin = Skins.Get(id).id;
-            ApplySkin();
+            g.Controls.Add(Hint("磨砂玻璃：半透明 + 磨砂颗粒", 258, 216, 222, 20));
         }
 
         private void UpdateThemeName()
         {
             if (lblThemeName == null || picker == null) return;
             var t = Themes.Get(picker.SelectedId);
-            lblThemeName.Text = "当前：" + (Themes.IsCustom(t.id) ? "我的主题 · " : "") + t.name;
+            lblThemeName.Text = "当前：" + (Themes.IsUser(t.id) ? "我的主题 · " : "") + t.name;
             if (btnEditTheme != null)
             {
-                bool locked = !Skins.Current(s.ui).IsDefault;
-                bool custom = Themes.IsCustom(t.id);
-                btnEditTheme.Enabled = !locked && custom;
-                btnEditTheme.ForeColor = (!locked && custom) ? Ui.Accent : Ui.Muted;
-                btnEditTheme.FlatAppearance.BorderColor = (!locked && custom) ? Ui.Accent : Ui.Edge;
+                bool user = Themes.IsUser(t.id);
+                btnEditTheme.Enabled = user;
+                btnEditTheme.ForeColor = user ? Ui.Accent : Ui.Muted;
+                btnEditTheme.FlatAppearance.BorderColor = user ? Ui.Accent : Ui.Edge;
             }
+            if (btnDeleteTheme != null)
+            {
+                bool user = Themes.IsUser(Themes.Get(picker.SelectedId).id);
+                btnDeleteTheme.Enabled = user;
+                btnDeleteTheme.ForeColor = user ? Ui.Ink : Ui.Muted;
+                btnDeleteTheme.FlatAppearance.BorderColor = user ? Ui.Edge : Ui.Edge;
+            }
+        }
+
+        /// <summary>选中某个主题（只改草稿里的 ui.theme，点「保存」才落盘）。</summary>
+        private void SelectTheme(string id)
+        {
+            if (picker == null) return;
+            picker.SelectedId = id;
+            picker.Invalidate();
+            ThemeDef t = Themes.Get(id);
+            // 预览：设置窗口自己先按新主题重新上色（悬浮窗由 Widget 在 OK 后重建）
+            if (t != null) s.ui.theme = t.id;
+            UpdateThemeName();
         }
 
         private void NewCustomTheme()
@@ -2044,46 +2012,119 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             using (var dlg = new ColorWheelForm("新建主题", "我的主题", seed.bgTop, seed.accent))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                var ct = new CustomTheme();
-                ct.id = "my-" + Guid.NewGuid().ToString("N").Substring(0, 6);
-                ct.name = dlg.ThemeName;
-                ct.bg = dlg.BgHex;
-                ct.bar = dlg.BarHex;
-                ct.accent = dlg.BarHex;
-                s.customThemes.Add(ct);
-                Themes.SetCustom(s.customThemes);
-                picker.SelectedId = ct.id;
-                picker.Invalidate();
-                UpdateThemeName();
+                string name = string.IsNullOrWhiteSpace(dlg.ThemeName) ? "我的主题" : dlg.ThemeName.Trim();
+                var t = Themes.FromColors(ThemeFiles.NewId(name), name, dlg.BgHex, dlg.BarHex);
+                t.created = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+                string error;
+                if (!ThemeFiles.TrySave(t, null, out error))
+                {
+                    MessageBox.Show(this, "主题没有保存成功：\n" + error, "新建主题",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                Themes.Reload();
+                SelectTheme(t.id);
             }
         }
 
         private void EditCustomTheme()
         {
-            CustomTheme ct = null;
-            foreach (var item in s.customThemes)
-                if (item != null && item.id == picker.SelectedId) { ct = item; break; }
-            if (ct == null)
+            ThemeDef cur = Themes.Get(picker.SelectedId);
+            if (cur == null || !Themes.IsUser(cur.id))
             {
                 MessageBox.Show(this, "内置主题不能直接改。点「＋ 新建主题」可以基于它另存一套。",
                     "编辑主题", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-            var t = Themes.Get(ct.id);
-            Color bg = ParseHex(ct.bg, t.bgTop);
-            Color bar = ParseHex(string.IsNullOrWhiteSpace(ct.bar) ? ct.accent : ct.bar, t.accent);
-            using (var dlg = new ColorWheelForm("编辑主题", ct.name, bg, bar))
+            Color bg = cur.bgTop;
+            Color bar = cur.accent;
+            using (var dlg = new ColorWheelForm("编辑主题", cur.name, bg, bar))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                ct.name = dlg.ThemeName;
-                ct.bg = dlg.BgHex;
-                ct.bar = dlg.BarHex;
-                ct.accent = dlg.BarHex;
-                Themes.SetCustom(s.customThemes);
-                picker.Invalidate();
-                picker.SelectedId = ct.id;
-                UpdateThemeName();
+                // 只暴露「背景 + 进度条」两色：其余颜色按这两色重新推导，和新建一致
+                string name = string.IsNullOrWhiteSpace(dlg.ThemeName) ? cur.name : dlg.ThemeName.Trim();
+                var t = Themes.FromColors(cur.id, name, dlg.BgHex, dlg.BarHex);
+                t.author = cur.author == null ? "" : cur.author;
+                t.description = cur.description == null ? "" : cur.description;
+                t.created = string.IsNullOrWhiteSpace(cur.created)
+                    ? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") : cur.created;
+                t.filePath = cur.filePath;
+                t.isUser = true;
+                string error;
+                if (!ThemeFiles.TrySave(t, cur.filePath, out error))
+                {
+                    MessageBox.Show(this, "主题没有保存成功：\n" + error, "编辑主题",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                Themes.Reload();
+                SelectTheme(t.id);
             }
+        }
+
+        private void ImportTheme()
+        {
+            using (var dlg = new OpenFileDialog())
+            {
+                dlg.Title = "导入主题";
+                dlg.Filter = "主题文件 (*.theme.json;*.json)|*.theme.json;*.json|所有文件 (*.*)|*.*";
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                ThemeDef t;
+                string error;
+                if (!ThemeFiles.TryImport(dlg.FileName, out t, out error))
+                {
+                    MessageBox.Show(this, "主题没有导入成功：\n" + error, "导入主题",
+                        MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+                Themes.Reload();
+                SelectTheme(t.id);
+                MessageBox.Show(this, "已导入主题「" + t.name + "」，点「保存」后生效。", "导入主题",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private void ExportTheme()
+        {
+            ThemeDef t = Themes.Get(picker.SelectedId);
+            if (t == null) return;
+            using (var dlg = new SaveFileDialog())
+            {
+                dlg.Title = "导出当前主题";
+                dlg.Filter = "主题文件 (*.theme.json)|*.theme.json";
+                dlg.FileName = (string.IsNullOrWhiteSpace(t.name) ? t.id : t.name) + ".theme.json";
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                string error;
+                bool ok = ThemeFiles.TryExport(t, dlg.FileName, out error);
+                MessageBox.Show(this, ok ? "已导出到：\n" + dlg.FileName : "主题没有导出成功：\n" + error,
+                    ok ? "导出完成" : "导出失败", MessageBoxButtons.OK,
+                    ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            }
+        }
+
+        private void DeleteTheme()
+        {
+            ThemeDef t = Themes.Get(picker.SelectedId);
+            if (t == null || !Themes.IsUser(t.id))
+            {
+                MessageBox.Show(this, "内置主题不能删除。", "删除主题",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (MessageBox.Show(this, "删除用户主题「" + t.name + "」？文件会一起删掉。", "删除主题",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+            string error;
+            if (!ThemeFiles.TryDelete(t, out error))
+            {
+                MessageBox.Show(this, "删除失败：\n" + error, "删除主题",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            Themes.Reload();
+            // 删的正好是当前主题 → 回退到午夜蓝
+            // 删的正好是当前主题 → 回退到午夜蓝
+            if (s.ui.theme == t.id) s.ui.theme = Themes.FallbackId;
+            SelectTheme(Themes.Get(s.ui.theme).id);
         }
 
         private static Color ParseHex(string text, Color fallback)
@@ -2100,7 +2141,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildLook(TabPage page)
         {
-            var g = CardBox(page, "外观与提醒", 8, 356, 492, 190);
+            var g = CardBox(page, "外观与提醒", 8, 268, 492, 190);
 
             g.Controls.Add(Lbl("不透明度", 14, 28, 58, 24));
             numOpacity = Num(94, 76, 28, 56, 30, 100);
@@ -2166,7 +2207,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildBackup(TabPage page)
         {
-            var g = CardBox(page, "配置备份", 8, 554, 492, 112);
+            var g = CardBox(page, "配置备份", 8, 466, 492, 112);
             g.Controls.Add(Hint("换电脑或给同事复用：导出一份，带过去再导入。", 14, 24, 466, 18));
 
             var btnExport = FlatButton("导出配置…", 14, 48, 108, 30);
@@ -2218,13 +2259,11 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 Settings before = s.Clone();
                 s.CopyFrom(imported.Settings);
                 s.Normalize();
-                Themes.SetCustom(s.customThemes);
                 var saved = store.Save(s);
                 if (!saved.Succeeded)
                 {
                     // 导入没有真正提交：回到导入前的草稿，调用者的运行配置完全没被碰过。
                     s.CopyFrom(before);
-                    Themes.SetCustom(s.customThemes);
                     schedIndex = 0;
                     LoadValues();
                     ApplySkin();
@@ -2252,13 +2291,11 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             var fresh = new Settings();
             fresh.Normalize();
             s.CopyFrom(fresh);
-            Themes.SetCustom(s.customThemes);
             var saved = store.Save(s);
             if (!saved.Succeeded)
             {
                 // 没有真正提交：保留恢复默认之前的内容，调用者的运行配置不变。
                 s.CopyFrom(before);
-                Themes.SetCustom(s.customThemes);
                 schedIndex = 0;
                 LoadValues();
                 ApplySkin();
@@ -2333,11 +2370,6 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             {
                 picker.SelectedId = s.ui.theme;
                 picker.Invalidate();
-            }
-            if (skinPicker != null)
-            {
-                skinPicker.SelectedId = s.ui.skin;
-                skinPicker.Invalidate();
             }
             UpdateThemeName();
 
@@ -2440,7 +2472,6 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.opacity = (int)numOpacity.Value;
             s.ui.autoCollapseSeconds = (int)numAutoCollapse.Value;
             s.ui.theme = Themes.Get(picker.SelectedId).id;
-            s.ui.skin = skinPicker != null ? Skins.Get(skinPicker.SelectedId).id : Skins.DefaultId;
             s.ui.alwaysOnTop = cbTopMost.Checked;
             s.ui.showLunch = cbShowLunch.Checked;
             s.ui.reducedMotion = cbReducedMotion.Checked;
@@ -2527,7 +2558,6 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         internal SettingsSaveResult PersistDraft()
         {
             s.Normalize();          // 固定日程同步回午休 / 晚休 / 下班的旧字段
-            Themes.SetCustom(s.customThemes);
             return store.Save(s);
         }
 
@@ -3033,14 +3063,13 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
     }
 
     /// <summary>
-    /// 设置窗口 / 对话框的共用色。以前是一组 readonly 浅色，现在由 Apply(ui) 按当前皮肤刷新：
-    /// 默认皮肤算出来的值和 v3.6 完全一样，其它五套换成 SkinDef 里那套令牌。
+    /// 设置窗口 / 对话框的共用色。由 Apply(ui) 按当前主题刷新：
+    /// 默认算出来的值和 v3.6 完全一样（只有强调色跟着主题走）。
     /// </summary>
     internal static class Ui
     {
         public static readonly Color AccentDefault = Color.FromArgb(64, 124, 245);
 
-        public static SkinDef Skin = Skins.Get(Skins.DefaultId);
         public static ThemeDef Theme = Themes.Get("midnight");
 
         public static Color Accent = AccentDefault;
@@ -3052,7 +3081,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         public static Color WindowEdge = Color.FromArgb(226, 231, 239);
         public static Color CardBg = Color.White;
         public static Color CardBorder = Color.FromArgb(230, 234, 242);
-        public static Color Surface = Color.White;          // 卡片表面（无垠 = 窗口底：不填卡片底）
+        public static Color Surface = Color.White;          // 卡片表面
         public static Color Edge = Color.FromArgb(214, 220, 232);
         public static Color InputBg = Color.White;
         public static Color InputInk = Color.Black;
@@ -3061,8 +3090,6 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         public static Color RailBg = Color.FromArgb(238, 241, 246);
         public static Color RailActive = Color.White;
         public static Color RailHover = Color.FromArgb(244, 246, 250);
-        public static Color SealBg = Color.Transparent;
-        public static Color SealInk = Color.White;
         // 自绘列表（固定日程 / 日程小卡片）里的行色
         public static Color RowBg = Color.FromArgb(250, 251, 253);
         public static Color RowActive = Color.FromArgb(240, 245, 255);
@@ -3076,60 +3103,42 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         public static int RadiusCard = 10;
         public static int RadiusWindow = 12;
         public static int RadiusPill = 20;
-        public static bool HairlineCards;
-        public static bool Screws;
-        public static bool NeonEdge;
-        public static bool Seal;
-        public static double Sheen;
-        public static string HeadingFont;
 
         public static void Apply(UiSettings ui)
         {
-            var skin = Skins.Current(ui);
-            var theme = Skins.ResolveTheme(ui);
-            Skin = skin;
-            Theme = theme;
-            bool def = skin.IsDefault;
+            Theme = Themes.Current(ui);
 
-            Accent = def ? AccentDefault : theme.accent;
-            AccentInk = skin.accentInk;
-            Ink = skin.windowInk;
-            Muted = skin.windowMuted;
-            Dim = Skins.Mix(skin.windowMuted, skin.windowBg, 0.35);
-            WindowBg = skin.windowBg;
-            WindowEdge = skin.windowEdge;
-            CardBg = skin.cardBg;
-            CardBorder = skin.cardEdge;
-            Surface = skin.hairlineCards ? skin.windowBg : skin.cardBg;
-            Edge = def ? Color.FromArgb(214, 220, 232) : skin.windowEdge;
-            InputBg = def ? Color.White : Skins.Mix(skin.cardBg, skin.windowBg, 0.45);
-            InputInk = def ? Color.Black : skin.windowInk;
-            Hover = Skins.Mix(skin.windowBg, Accent, def ? 0.05 : 0.12);
-            FooterBg = skin.footerBg;
-            RailBg = skin.railBg;
-            RailActive = skin.railActiveBg;
-            RailHover = Skins.Mix(skin.railActiveBg, skin.railBg, 0.55);
-            SealBg = skin.seal ? (skin.colors != null ? skin.colors.accent : theme.accent) : Color.Transparent;
-            SealInk = skin.accentInk;
+            Accent = AccentDefault;
+            AccentInk = Color.White;
+            Ink = Color.FromArgb(38, 46, 64);
+            Muted = Color.FromArgb(120, 128, 146);
+            Dim = Themes.Mix(Muted, WindowBg, 0.35);
+            WindowBg = Color.FromArgb(246, 248, 251);
+            WindowEdge = Color.FromArgb(226, 231, 239);
+            CardBg = Color.White;
+            CardBorder = Color.FromArgb(230, 234, 242);
+            Surface = Color.White;
+            Edge = Color.FromArgb(214, 220, 232);
+            InputBg = Color.White;
+            InputInk = Color.Black;
+            Hover = Themes.Mix(WindowBg, Accent, 0.05);
+            FooterBg = Color.White;
+            RailBg = Color.FromArgb(238, 241, 246);
+            RailActive = Color.White;
+            RailHover = Themes.Mix(RailActive, RailBg, 0.55);
 
-            RowBg = def ? Color.FromArgb(250, 251, 253) : Skins.Mix(skin.cardBg, skin.windowInk, 0.05);
-            RowActive = def ? Color.FromArgb(240, 245, 255) : Skins.Mix(skin.cardBg, Accent, 0.14);
-            RowText = def ? Color.FromArgb(38, 46, 64) : skin.windowInk;
-            RowSub = def ? Color.FromArgb(120, 128, 146) : skin.windowMuted;
-            RowBorder = def ? Color.FromArgb(226, 231, 240) : skin.windowEdge;
-            Track = def ? Color.FromArgb(238, 241, 246) : Skins.Mix(skin.cardBg, skin.windowBg, 0.5);
-            Thumb = def ? Color.FromArgb(188, 196, 210) : Skins.Mix(skin.windowMuted, skin.cardBg, 0.4);
-            RowTheme = def ? Themes.Get("midnight") : theme;
+            RowBg = Color.FromArgb(250, 251, 253);
+            RowActive = Color.FromArgb(240, 245, 255);
+            RowText = Color.FromArgb(38, 46, 64);
+            RowSub = Color.FromArgb(120, 128, 146);
+            RowBorder = Color.FromArgb(226, 231, 240);
+            Track = Color.FromArgb(238, 241, 246);
+            Thumb = Color.FromArgb(188, 196, 210);
+            RowTheme = Themes.Get("midnight");
 
-            RadiusCard = skin.radiusCard;
-            RadiusWindow = skin.radiusWindow;
-            RadiusPill = skin.radiusPill;
-            HairlineCards = skin.hairlineCards;
-            Screws = skin.screws;
-            NeonEdge = skin.neonEdge;
-            Seal = skin.seal;
-            Sheen = skin.sheenAlpha;
-            HeadingFont = skin.headingFont;
+            RadiusCard = 10;
+            RadiusWindow = 12;
+            RadiusPill = 20;
         }
 
         /// <summary>圆角矩形路径；半径 0 时退化成直角矩形。</summary>
@@ -3173,73 +3182,22 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
             using (var path = Ui.RoundPath(r, radius))
             {
-                if (Ui.HairlineCards)
-                {
-                    // 无垠：不填卡片底，只留一条 1px 分组线（和设计稿的 .sc 一样）
-                    using (var b = new SolidBrush(Ui.WindowBg)) g.FillPath(b, path);
-                    using (var p = new Pen(Ui.WindowEdge, Math.Max(1f, k)))
-                        g.DrawLine(p, r.X, 0.5f, r.Right, 0.5f);
-                }
-                else
-                {
-                    using (var b = new SolidBrush(Ui.CardBg)) g.FillPath(b, path);
-                    if (Ui.Sheen > 0.001)
-                    {
-                        // 顶部高光：云母 / 宣纸的「质感」来源
-                        var sr = new Rectangle(0, 0, Width, Math.Max(2, (int)(Height * 0.45f)));
-                        var state = g.Save();
-                        g.SetClip(path, CombineMode.Intersect);
-                        using (var br = new LinearGradientBrush(sr,
-                            Skins.Alpha(Color.White, Ui.Sheen), Color.FromArgb(0, Color.White), 90f))
-                            g.FillRectangle(br, sr);
-                        g.Restore(state);
-                    }
-                    using (var p = new Pen(Ui.CardBorder, Math.Max(1f, k))) g.DrawPath(p, path);
-                    if (Ui.NeonEdge)
-                    {
-                        using (var p = new Pen(Skins.Alpha(Ui.Theme.accent, 0.18), 3f * k)) g.DrawPath(p, path);
-                        using (var p = new Pen(Skins.Alpha(Ui.Theme.accent, 0.55), 1.4f * k)) g.DrawPath(p, path);
-                    }
-                }
+                using (var b = new SolidBrush(Ui.CardBg)) g.FillPath(b, path);
+                using (var p = new Pen(Ui.CardBorder, Math.Max(1f, k))) g.DrawPath(p, path);
             }
 
-            if (Ui.Screws) PaintScrews(g, k);
-
-            using (var f = UiFont.MakeFamily(Ui.HeadingFont, 9.5f, FontStyle.Bold))
+            using (var f = UiFont.Make(9.5f, FontStyle.Bold))
             using (var b = new SolidBrush(Ui.Ink))
                 g.DrawString(Text, f, b, 14, 6);
             g.SmoothingMode = SmoothingMode.Default;
         }
-
-        /// <summary>仪表皮肤：四角小螺丝。</summary>
-        private void PaintScrews(Graphics g, float k)
-        {
-            float rad = 2.1f * k;
-            float inset = 7f * k;
-            Color body = Skins.Mix(Ui.CardBg, Ui.Ink, 0.32);
-            Color slot = Skins.Mix(Ui.CardBg, Color.White, 0.55);
-            PointF[] pts = new PointF[]
-            {
-                new PointF(inset, inset), new PointF(Width - inset, inset),
-                new PointF(inset, Height - inset), new PointF(Width - inset, Height - inset)
-            };
-            foreach (var p in pts)
-            {
-                using (var b = new SolidBrush(body))
-                    g.FillEllipse(b, p.X - rad, p.Y - rad, rad * 2, rad * 2);
-                using (var pen = new Pen(slot, Math.Max(1f, 0.9f * k)))
-                    g.DrawLine(pen, p.X - rad * 0.55f, p.Y, p.X + rad * 0.55f, p.Y);
-            }
-        }
     }
 
-    /// <summary>主题色卡：一格一套配色，底色为主、高亮色压一条底边。非默认皮肤时置灰并可点。</summary>
+    /// <summary>主题色卡：一格一套配色，底色为主、高亮色压一条底边。</summary>
     public class ThemePicker : Control
     {
         private string selectedId = "";
         public event EventHandler SelectedIdChanged;
-        /// <summary>非默认皮肤：色卡不可点、画成置灰（提示「该风格自带配色」）。</summary>
-        public bool Locked;
 
         public ThemePicker()
         {
@@ -3279,16 +3237,10 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                 Rectangle r = ChipRect(i);
                 if (r.Bottom > Height) break;
                 Color top = t.bgTop, bottom = t.bgBottom, accent = t.accent;
-                if (Locked)
-                {
-                    top = Skins.Mix(t.bgTop, Ui.CardBg, 0.62);
-                    bottom = Skins.Mix(t.bgBottom, Ui.CardBg, 0.62);
-                    accent = Skins.Mix(t.accent, Ui.CardBg, 0.55);
-                }
                 using (var path = Ui.RoundPath(r, 5))
                 {
                     using (var b = new LinearGradientBrush(r, top, bottom, 90f)) g.FillPath(b, path);
-                    bool sel = !Locked && t.id == selectedId;
+                    bool sel = t.id == selectedId;
                     using (var p = new Pen(sel ? Ui.Accent : Ui.CardBorder, sel ? 2f : 1f))
                         g.DrawPath(p, path);
                 }
@@ -3301,7 +3253,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (Locked || !Enabled) return;
+            if (!Enabled) return;
             int index = HitTest(e.Location);
             if (index < 0) return;
             SelectedId = Themes.All[index].id;
@@ -3314,168 +3266,6 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             for (int i = 0; i < Themes.All.Length; i++)
                 if (ChipRect(i).Contains(p)) return i;
             return -1;
-        }
-    }
-
-    /// <summary>
-    /// 外观页「界面风格」：默认 + 5 套皮肤，一排 6 个可点的风格块（缩略配色 + 名字 + 一句定位）。
-    /// 选中画 2px 强调色描边；点一下由 SettingsForm 立刻预览（只改内存里的 ui.skin）。
-    /// </summary>
-    public class SkinPicker : Control
-    {
-        private string selectedId = Skins.DefaultId;
-        private int hover = -1;
-        public event EventHandler SelectedIdChanged;
-
-        public SkinPicker()
-        {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
-                | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = Color.White;
-            Cursor = Cursors.Hand;
-        }
-
-        public string SelectedId
-        {
-            get { return selectedId; }
-            set { selectedId = Skins.Get(value).id; Invalidate(); }
-        }
-
-        /// <summary>6 个风格块（顺序 = Skins.All：默认 / 无垠 / 云母 / 宣纸 / 仪表 / 霓虹）。</summary>
-        public SkinDef[] Items { get { return Skins.All; } }
-
-        /// <summary>第 index 个风格块的命中矩形（给验收/探针反射用）。</summary>
-        public Rectangle RectOf(int index)
-        {
-            int n = Skins.All.Length;
-            if (n <= 0 || index < 0 || index >= n) return Rectangle.Empty;
-            var g = CreateGraphics();
-            try
-            {
-                float k = g.DpiX / 96f;
-                int gap = (int)Math.Round(6 * k);
-                int w = Math.Max(1, (Width - (n - 1) * gap) / n);
-                int h = Math.Max(1, Math.Min(Height, (int)Math.Round(60 * k)));
-                return new Rectangle(index * (w + gap), 0, w, h);
-            }
-            finally { g.Dispose(); }
-        }
-
-        /// <summary>点在哪一块上（-1 = 空白）。</summary>
-        public int HitTest(Point p)
-        {
-            for (int i = 0; i < Skins.All.Length; i++)
-                if (RectOf(i).Contains(p)) return i;
-            return -1;
-        }
-
-        /// <summary>每个风格块底下的一句定位（比 SkinDef.tagline 短，72 DIP 宽放得下）。</summary>
-        private static string ShortTag(SkinDef s)
-        {
-            if (s == null) return "";
-            switch (s.id)
-            {
-                case "quiet": return "近黑细线";
-                case "mica": return "磨砂玻璃";
-                case "paper": return "宣纸朱砂";
-                case "instrument": return "金属琥珀";
-                case "neon": return "品红霓虹";
-                default: return Themes.All.Length + " 套主题";
-            }
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-            g.Clear(BackColor);
-            float k = g.DpiX / 96f;
-            var all = Skins.All;
-            for (int i = 0; i < all.Length; i++)
-            {
-                var skin = all[i];
-                Rectangle r = RectOf(i);
-                if (r.Width <= 2 || r.Height <= 2) continue;
-                bool sel = skin.id == selectedId;
-                bool hov = i == hover;
-
-                int radius = Math.Max(2, (int)Math.Round(6 * k));
-                using (var path = Ui.RoundPath(r, radius))
-                {
-                    using (var b = new SolidBrush(skin.windowBg)) g.FillPath(b, path);
-                    // 上半截是这套皮肤的「窗口底 → 卡片底」渐变，底边压一条强调色
-                    int stripH = Math.Max(6, (int)Math.Round(26 * k));
-                    var strip = new Rectangle(r.X, r.Y, r.Width, stripH);
-                    var state = g.Save();
-                    g.SetClip(path, CombineMode.Intersect);
-                    Color bgTop = skin.colors != null ? skin.colors.bgTop : Ui.Theme.bgTop;
-                    Color bgBottom = skin.colors != null ? skin.colors.bgBottom : Ui.Theme.bgBottom;
-                    using (var b = new LinearGradientBrush(strip, bgTop, bgBottom, 90f)) g.FillRectangle(b, strip);
-                    Color accent = skin.colors != null ? skin.colors.accent : Ui.Theme.accent;
-                    Color accent2 = skin.accent2.IsEmpty ? accent : skin.accent2;
-                    using (var b = new LinearGradientBrush(
-                        new Rectangle(strip.X, strip.Bottom - Math.Max(2, (int)(3 * k)), strip.Width, Math.Max(2, (int)(3 * k))),
-                        accent, accent2, 0f))
-                        g.FillRectangle(b, strip.X, strip.Bottom - Math.Max(2, (int)(3 * k)),
-                            strip.Width, Math.Max(2, (int)(3 * k)));
-                    // 缩略图左上角一个小圆点（和设计稿的色卡一样）
-                    float dot = 2.2f * k;
-                    using (var b = new SolidBrush(accent))
-                        g.FillEllipse(b, r.X + 5 * k, r.Y + 5 * k, dot * 2, dot * 2);
-                    g.Restore(state);
-                }
-
-                using (var f = UiFont.MakeFamily(skin.headingFont, 9f, FontStyle.Bold))
-                using (var b = new SolidBrush(skin.windowInk))
-                {
-                    var nr = new RectangleF(r.X, r.Y + 25 * k, r.Width, 16 * k);
-                    var sf = new StringFormat();
-                    sf.Alignment = StringAlignment.Center;
-                    sf.LineAlignment = StringAlignment.Center;
-                    g.DrawString(skin.name, f, b, nr, sf);
-                }
-                using (var f = UiFont.MakeFamily(skin.headingFont, 7.5f, FontStyle.Regular))
-                using (var b = new SolidBrush(skin.windowMuted))
-                {
-                    var tr = new RectangleF(r.X, r.Y + 40 * k, r.Width, 14 * k);
-                    var sf = new StringFormat();
-                    sf.Alignment = StringAlignment.Center;
-                    sf.LineAlignment = StringAlignment.Center;
-                    g.DrawString(ShortTag(skin), f, b, tr, sf);
-                }
-
-                int border = sel || hov ? 2 : 1;
-                using (var path = Ui.RoundPath(r, radius))
-                using (var p = new Pen(sel ? Ui.Accent : (hov ? Skins.Mix(Ui.Accent, Ui.Muted, 0.45) : Ui.Edge), border * k))
-                    g.DrawPath(p, path);
-            }
-            g.SmoothingMode = SmoothingMode.Default;
-        }
-
-        protected override void OnMouseMove(MouseEventArgs e)
-        {
-            base.OnMouseMove(e);
-            int h = HitTest(e.Location);
-            if (h != hover) { hover = h; Invalidate(); }
-        }
-
-        protected override void OnMouseLeave(EventArgs e)
-        {
-            base.OnMouseLeave(e);
-            if (hover != -1) { hover = -1; Invalidate(); }
-        }
-
-        protected override void OnMouseDown(MouseEventArgs e)
-        {
-            base.OnMouseDown(e);
-            int index = HitTest(e.Location);
-            if (index < 0) return;
-            string id = Skins.All[index].id;
-            if (id == selectedId) return;
-            selectedId = id;
-            Invalidate();
-            if (SelectedIdChanged != null) SelectedIdChanged(this, EventArgs.Empty);
         }
     }
 
@@ -3534,7 +3324,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             var mark = new Rectangle(pad, (int)Math.Round(15 * k), (int)Math.Round(20 * k), (int)Math.Round(20 * k));
             using (var path = Ui.RoundPath(mark, (int)Math.Round(6 * k)))
             using (var b = new SolidBrush(Ui.Accent)) g.FillPath(b, path);
-            using (var f = UiFont.MakeFamily(Ui.HeadingFont, 9.5f, FontStyle.Bold))
+            using (var f = UiFont.Make(9.5f, FontStyle.Bold))
             {
                 var sf = new StringFormat();
                 sf.Alignment = StringAlignment.Center;
@@ -3743,7 +3533,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             using (var b = new SolidBrush(Ui.WindowBg)) g.FillRectangle(b, ClientRectangle);
 
             int left = (int)Math.Round(16 * k);
-            using (var f = UiFont.MakeFamily(Ui.HeadingFont, 13f, FontStyle.Bold))
+            using (var f = UiFont.Make(13f, FontStyle.Bold))
             {
                 string title = Titles[pageIndex];
                 SizeF ts = g.MeasureString(title, f);
@@ -3754,28 +3544,6 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                     g.DrawString(SubTitles[pageIndex], sf, sb,
                         left + (int)ts.Width + (int)Math.Round(14 * k),
                         (int)Math.Round(9 * k) + (int)Math.Round(ts.Height * 0.42f));
-            }
-
-            // 宣纸：外观页标题右侧一枚朱砂「班」印（26 DIP，圆角 3，白字，略歪 -4°）
-            if (Ui.Seal && pageIndex == 3)
-            {
-                int size = (int)Math.Round(26 * k);
-                int x = Width - (int)Math.Round(16 * k) - size;
-                int y = (int)Math.Round(9 * k);
-                var state = g.Save();
-                g.TranslateTransform(x + size / 2f, y + size / 2f);
-                g.RotateTransform(-4f);
-                var box = new Rectangle(-size / 2, -size / 2, size, size);
-                using (var path = Ui.RoundPath(box, (int)Math.Round(3 * k)))
-                using (var b = new SolidBrush(Ui.SealBg)) g.FillPath(b, path);
-                using (var f = UiFont.MakeFamily(Ui.HeadingFont, 12f, FontStyle.Bold))
-                {
-                    var sf = new StringFormat();
-                    sf.Alignment = StringAlignment.Center;
-                    sf.LineAlignment = StringAlignment.Center;
-                    using (var b = new SolidBrush(Ui.SealInk)) g.DrawString("班", f, b, box, sf);
-                }
-                g.Restore(state);
             }
 
             g.SmoothingMode = SmoothingMode.Default;

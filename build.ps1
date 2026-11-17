@@ -116,7 +116,7 @@ $sources = @(
     (Join-Path $src 'ReminderEngine.cs'),
     (Join-Path $src 'SyncEngine.cs'),
     (Join-Path $src 'SyncAdapters.cs'),
-    (Join-Path $src 'Skins.cs'),
+    (Join-Path $src 'ThemeFiles.cs'),
     (Join-Path $src 'Frost.cs'),
     (Join-Path $src 'Updates.cs'),
     (Join-Path $src 'UpdateChangelog.cs'),

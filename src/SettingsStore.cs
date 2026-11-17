@@ -255,6 +255,7 @@ namespace WorkCountdown
             Portable = DetectPortable(exeDir);
             Dir = ResolveSettingsDir(exeDir, Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Portable);
             InitPaths();
+            ThemeFiles.Configure(Dir);
         }
 
         /// <summary>测试 / 宿主注入存储与目录；生产用无参构造。</summary>
@@ -266,6 +267,7 @@ namespace WorkCountdown
             Dir = dir;
             Portable = portable;
             InitPaths();
+            ThemeFiles.Configure(Dir);
         }
 
         /// <summary>保持历史位置：普通模式在 %APPDATA%\WorkCountdown，便携模式在 exe 旁的 data。</summary>
@@ -322,7 +324,10 @@ namespace WorkCountdown
             }
         }
 
-        /// <summary>从别的配置文件导入（覆盖当前设置）。返回规范化后的独立快照，失败返回可检查结果。</summary>
+        /// <summary>
+        /// 从别的配置文件导入（覆盖当前设置）。返回规范化后的独立快照，失败返回可检查结果。
+        /// 和 Load 一样先把旧 customThemes 迁移成主题文件（theme 文件是独立数据），再交给调用方。
+        /// </summary>
         public SettingsImportResult Import(string path)
         {
             if (string.IsNullOrEmpty(path)) return SettingsImportResult.Failure(ImportFailureMessage);
@@ -331,6 +336,8 @@ namespace WorkCountdown
                 string text = storage.ReadAllText(path);
                 Settings loaded = storage.Deserialize(text);
                 if (loaded == null) return SettingsImportResult.Failure(ImportFailureMessage);
+                MigrateThemes(loaded);
+                Themes.Reload();
                 loaded.Normalize();
                 return SettingsImportResult.FromSettings(loaded);
             }
@@ -344,6 +351,8 @@ namespace WorkCountdown
         /// <summary>
         /// 加载配置。旧配置的迁移/规范化一旦产生差异就用安全写入落盘，之后重复加载不会再变；
         /// WC_NO_SAVE=1 时只在内存里规范化，不写真实配置。
+        /// v5.0 起旧 customThemes 先一次性迁成 themes\*.theme.json（主题文件是独立数据，
+        /// 不属于配置快照，所以 WC_NO_SAVE=1 下迁移照写；迁移是幂等的，同一 id 不会重复生成）。
         /// </summary>
         public SettingsLoadResult Load()
         {
@@ -357,6 +366,8 @@ namespace WorkCountdown
                         Settings loaded = storage.Deserialize(text);
                         if (loaded != null)
                         {
+                            MigrateThemes(loaded);
+                            Themes.Reload();
                             loaded.Normalize();
                             bool changed = false;
                             try
@@ -378,13 +389,43 @@ namespace WorkCountdown
             catch (Exception ex)
             {
                 Log("读取设置失败: " + ex.GetType().Name + " / " + ex.Message);
+                Themes.Reload();
                 var fallback = new Settings();
                 fallback.Normalize();
                 return SettingsLoadResult.FromFallback(fallback, LoadFailureMessage);
             }
+            Themes.Reload();
             var fresh = new Settings();
             fresh.Normalize();
             return SettingsLoadResult.FromDefaults(fresh);
+        }
+
+        /// <summary>
+        /// 旧配置 settings.customThemes → themes\*.theme.json（一次性、幂等）。
+        /// 全部成功（含「已经迁移过」）才清空旧列表；有失败就保留，下次加载再试，不丢用户主题。
+        /// </summary>
+        private void MigrateThemes(Settings settings)
+        {
+            if (settings == null || settings.customThemes == null || settings.customThemes.Count == 0) return;
+            try
+            {
+                settings.NormalizeCustomThemes();   // 兼容清理：空 id 补一个、重复 id 加后缀
+                int failed;
+                int written = ThemeFiles.MigrateLegacy(settings.customThemes, out failed);
+                if (failed == 0)
+                {
+                    if (written > 0) Log("配置迁移：已把 " + written + " 个旧自建主题写成 themes\\*.theme.json。");
+                    settings.customThemes.Clear();
+                }
+                else
+                {
+                    Log("配置迁移：旧自建主题 " + written + " 个写成文件，" + failed + " 个失败（保留旧字段下次再试）。");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("配置迁移失败: " + ex.GetType().Name + " / " + ex.Message);
+            }
         }
 
         /// <summary>

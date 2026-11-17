@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>小纸条 · 左上角「到达闪烁 + 未读常驻」动效实验（灵感池）</title>
+<style>
+/* ============================================================
+   小纸条通知动效实验台
+   皮肤：红·报春  accent #EF859C  bgTop #1D1013  bgBottom #301B1F
+   卡片：收起 224×68 r14 / 展开 280×188 r18
+   小卡 = 未读常驻（常亮）对照   大卡 = 完整 6.5s 循环（0–1s 到达闪烁 → 沉降常驻）
+   ============================================================ */
+:root{
+  --ct:#1D1013; --cb:#301B1F; --ac:#EF859C; --trk:#60353E;
+  --tx:#FDF3F5; --mu:#F9D1D9; --dm:#F6BBC8;
+  --page:#090C11; --ink:#E9EDF5; --ink2:#94A1B6; --ink3:#6E7C92;
+  --line:rgba(255,255,255,.075);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  min-height:100vh;
+  background:
+    radial-gradient(900px 430px at 10% -10%, rgba(239,133,156,.11), transparent 60%),
+    radial-gradient(820px 420px at 94% 4%, rgba(110,140,255,.075), transparent 62%),
+    var(--page);
+  color:var(--ink);
+  font-family:"Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.page{width:1280px;margin:0 auto;padding:18px 24px 16px}
+
+/* ---------- 页头 ---------- */
+header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:22px}
+h1{margin:0;font-size:19px;line-height:1.22;letter-spacing:.2px;font-weight:600}
+h1 b{color:var(--ac);font-weight:700}
+.sub{margin:6px 0 0;font-size:11.5px;line-height:1.55;color:var(--ink2)}
+.sub code{font-family:Consolas,monospace;font-size:11px;color:#C9D3E4;background:rgba(255,255,255,.06);
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.pill{flex:none;display:flex;align-items:center;gap:7px;height:26px;padding:0 12px;border-radius:999px;
+  font-size:11.5px;color:#DCE3F0;background:rgba(255,255,255,.05);border:1px solid var(--line);white-space:nowrap}
+.pill i{width:6px;height:6px;border-radius:50%;background:#5ED39B;box-shadow:0 0 8px #5ED39B;
+  animation:devblink 2s ease-in-out infinite}
+html[data-frozen] .pill i{background:var(--ac);box-shadow:0 0 8px var(--ac);animation:none}
+
+/* ---------- 舞台 ---------- */
+.stage{margin-top:10px;padding:12px 12px 8px;border-radius:20px;
+  background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.012));
+  border:1px solid var(--line);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 24px 60px rgba(0,0,0,.5)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}
+.cand{position:relative;border-radius:15px;padding:10px 12px 8px;
+  background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.008));
+  border:1px solid rgba(255,255,255,.06)}
+.cand-h{display:flex;align-items:baseline;gap:7px;height:17px;font-size:12px;font-weight:600;color:#EDF1F8}
+.cand-h .idx{color:var(--ac);font-weight:700}
+.cand-h em{font-style:normal;font-size:10.5px;font-weight:400;color:var(--ink3);letter-spacing:.2px}
+.cards{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:6px;min-height:205px}
+figure{margin:0;display:flex;flex-direction:column;align-items:center}
+figcaption{display:flex;align-items:center;gap:5px;margin-top:4px;font-size:10.5px;line-height:1;color:var(--ink3);white-space:nowrap}
+figcaption .chip{width:5px;height:5px;border-radius:50%;flex:none}
+figcaption .cyc{background:var(--ac);box-shadow:0 0 6px var(--ac)}
+figcaption .sta{background:#5C6A80}
+footer{margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:18px;
+  font-size:10.5px;color:var(--ink3);letter-spacing:.1px}
+
+/* ============================================================
+   卡片本体（两个尺寸，内容照抄真实卡片）
+   ============================================================ */
+.cw{position:relative;display:inline-block;flex:none}
+.card{position:relative;z-index:1;border-radius:14px;overflow:visible;
+  background:linear-gradient(180deg,var(--ct),var(--cb));
+  border:1px solid rgba(255,255,255,.09);
+  box-shadow:0 10px 24px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);
+  color:var(--tx);
+}
+.card.mini{width:224px;height:68px}
+.card.big{width:280px;height:188px;border-radius:18px}
+.fx{position:absolute;inset:0;z-index:1;border-radius:inherit;overflow:hidden;pointer-events:none}
+.cont{position:relative;z-index:2}
+.card.mini .cont{height:100%}
+.card.big .cont{height:100%;padding:11px 16px 10px;display:flex;flex-direction:column}
+.outer{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:visible}
+
+/* 收起卡内容 */
+.m-row{display:flex;align-items:center;gap:6px;padding:8px 14px 0;font-size:9.5px;line-height:1.2;color:var(--mu)}
+.m-dot{width:5px;height:5px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac);flex:none}
+.m-rt{margin-left:auto;color:var(--mu)}
+.m-num{margin:2px 0 0 12px;font:700 23px/26px Consolas,"Courier New",monospace;letter-spacing:.01em;color:var(--tx)}
+.m-bar{position:absolute;left:14px;right:14px;bottom:6px;height:3px;border-radius:2px;background:var(--trk);overflow:hidden}
+.m-bar i{display:block;height:100%;width:62%;border-radius:2px;
+  background:linear-gradient(90deg,rgba(239,133,156,.42),var(--ac))}
+
+/* 展开卡内容 */
+.b-r1{display:flex;align-items:center;gap:7px;font-size:10px;line-height:1.3;color:var(--tx)}
+.b-dot{width:6px;height:6px;border-radius:50%;background:var(--ac);box-shadow:0 0 7px var(--ac);flex:none}
+.b-tools{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--dm);font-size:12px;line-height:1}
+.b-tools .chev{opacity:.75}
+.b-cap{margin-top:7px;font-size:10.5px;line-height:1.3;color:var(--mu)}
+.b-num{font:700 34px/36px Consolas,"Courier New",monospace;letter-spacing:.01em;color:var(--tx);margin-top:1px}
+.b-bar{position:relative;height:4px;border-radius:2px;background:var(--trk);overflow:hidden;margin-top:7px}
+.b-bar i{display:block;height:100%;width:62%;border-radius:2px;
+  background:linear-gradient(90deg,rgba(239,133,156,.42),var(--ac))}
+.b-sub{margin-top:6px;display:flex;align-items:center;gap:6px;font-size:10.5px;line-height:1.35;color:var(--mu);white-space:nowrap}
+.b-sub b{font-weight:600;color:var(--tx);font-family:inherit}
+.b-extra{margin-top:auto;font-size:9.5px;line-height:1.3;color:var(--dm);letter-spacing:.01em}
+
+/* ============================================================
+   通用「常亮」呼吸关键帧（常驻态复用）
+   ============================================================ */
+@keyframes brO {0%,100%{opacity:.55}50%{opacity:1}}
+@keyframes brO2{0%,100%{opacity:.38}50%{opacity:.82}}
+@keyframes brG {0%,100%{opacity:.45;transform:scale(.97)}50%{opacity:.92;transform:scale(1.05)}}
+@keyframes brS {0%,100%{transform:scale(1);opacity:.82}50%{transform:scale(1.06);opacity:1}}
+@keyframes ping{0%{transform:scale(.85);opacity:.78}100%{transform:scale(2.55);opacity:0}}
+@keyframes blinkP{0%,46%{opacity:1}50%{opacity:.22}54%{opacity:1}56%{opacity:.3}60%,100%{opacity:1}}
+@keyframes devblink{0%,100%{opacity:.45}50%{opacity:1}}
+
+/* ============================================================
+   ① 呼吸亮带
+   ============================================================ */
+.c1-band{position:absolute;left:0;top:0;width:118px;height:2.5px;border-radius:0 3px 3px 0;
+  background:linear-gradient(90deg,rgba(255,228,235,.95),rgba(239,133,156,.92) 42%,rgba(239,133,156,0));
+  box-shadow:0 0 10px rgba(239,133,156,.75),0 0 22px rgba(239,133,156,.32);
+  animation:c1band 6.5s ease-in-out infinite}
+.c1-band::after{content:"";position:absolute;left:0;top:0;width:2.5px;height:60px;border-radius:0 0 3px 3px;
+  background:linear-gradient(180deg,rgba(255,228,235,.95),rgba(239,133,156,.9) 42%,rgba(239,133,156,0));
+  box-shadow:0 0 10px rgba(239,133,156,.7)}
+.c1-glow{position:absolute;left:-46px;top:-56px;width:192px;height:152px;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(239,133,156,.56),rgba(239,133,156,0) 74%);
+  filter:blur(8px);opacity:.45;animation:c1glow 6.5s ease-in-out infinite}
+.c1-band.steady{animation:brO 3.25s ease-in-out infinite}
+.c1-glow.steady{animation:brG 3.25s ease-in-out infinite}
+@keyframes c1band{
+  0%{opacity:.75} 2%{opacity:1} 4.5%{opacity:.4} 7.5%{opacity:1} 10%{opacity:.45} 13%{opacity:1}
+  18%{opacity:.82} 28%{opacity:1} 40%{opacity:.72} 52%{opacity:1} 64%{opacity:.72} 76%{opacity:1}
+  88%{opacity:.78} 100%{opacity:.75}
+}
+@keyframes c1glow{
+  0%{opacity:.45;transform:scale(.96)} 3%{opacity:.92;transform:scale(1.05)}
+  6%{opacity:.38;transform:scale(.98)} 9%{opacity:.9;transform:scale(1.06)}
+  13%{opacity:.48;transform:scale(1)} 20%{opacity:.6;transform:scale(1.01)}
+  32%{opacity:.88;transform:scale(1.04)} 44%{opacity:.54;transform:scale(1)}
+  56%{opacity:.84;transform:scale(1.03)} 68%{opacity:.54;transform:scale(1)}
+  80%{opacity:.8;transform:scale(1.02)} 92%{opacity:.54;transform:scale(1)}
+  100%{opacity:.45;transform:scale(.96)}
+}
+
+/* ============================================================
+   ② 斜向反光扫过
+   ============================================================ */
+.c2-sweep{position:absolute;left:0;top:-60%;width:72px;height:230%;pointer-events:none;
+  background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,224,231,.06) 24%,
+    rgba(255,228,235,.22) 39%,rgba(255,248,250,.66) 48%,rgba(255,190,205,.5) 53%,
+    rgba(255,228,235,.14) 64%,rgba(255,255,255,0));
+  filter:blur(1.2px);will-change:transform;
+  animation:c2sweep 6.5s cubic-bezier(.22,.68,.28,1) infinite}
+.c2-corner{position:absolute;left:-8px;top:-8px;width:88px;height:88px;
+  background:linear-gradient(135deg,rgba(255,232,238,.26),rgba(239,133,156,.1) 44%,rgba(239,133,156,0) 64%);
+  animation:brO2 3.25s ease-in-out infinite}
+.c2-edge{position:absolute;left:1px;top:1px;width:104px;height:2.5px;transform-origin:0 0;transform:rotate(24deg);
+  background:linear-gradient(90deg,rgba(255,240,244,1),rgba(255,190,205,.55) 40%,rgba(239,133,156,0));
+  filter:blur(.2px);animation:brO 3.25s ease-in-out infinite}
+.c2-gleam{position:absolute;left:1px;top:1px;width:14px;height:2.5px;border-radius:2px;
+  transform-origin:0 0;transform:rotate(24deg);
+  background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,245,248,.98),rgba(255,255,255,0));
+  filter:blur(.4px);opacity:0;animation:c2gleam 3.25s ease-in-out infinite}
+@keyframes c2gleam{
+  0%{transform:rotate(24deg) translateX(0);opacity:0}
+  14%{opacity:1}
+  58%{transform:rotate(24deg) translateX(88px);opacity:.85}
+  74%{opacity:0}
+  100%{transform:rotate(24deg) translateX(88px);opacity:0}
+}
+@keyframes c2sweep{
+  0%{transform:rotate(24deg) translateX(-175px)}
+  14%{transform:rotate(24deg) translateX(330px)}
+  16%{transform:rotate(24deg) translateX(-175px)}
+  28%{transform:rotate(24deg) translateX(330px)}
+  31%{transform:rotate(24deg) translateX(-175px)}
+  86%{transform:rotate(24deg) translateX(-175px)}
+  100%{transform:rotate(24deg) translateX(330px)}
+}
+
+/* ============================================================
+   ③ 涟漪脉冲（圆角矩形扩散）
+   ============================================================ */
+.c3-core{position:absolute;left:13px;top:11.5px;width:12px;height:12px;border-radius:50%;background:var(--ac);
+  box-shadow:0 0 9px var(--ac),0 0 20px rgba(239,133,156,.5);animation:brS 3.25s ease-in-out infinite}
+.card.mini .c3-core{left:11px;top:8.2px;width:11px;height:11px}
+.c3-ping{position:absolute;left:7px;top:5.5px;width:24px;height:24px;border-radius:8px;opacity:0;
+  border:1.5px solid rgba(239,133,156,.8);animation:ping 3.25s ease-out infinite}
+.card.mini .c3-ping{left:7px;top:4.4px;width:19px;height:19px;border-radius:6px}
+.c3-b{position:absolute;left:8px;top:6.5px;width:22px;height:22px;border-radius:8px;opacity:0;display:block;
+  border:1.6px solid rgba(239,133,156,.9);box-shadow:0 0 12px rgba(239,133,156,.4);
+  animation:c3burst 6.5s ease-out infinite}
+.card.mini .c3-b{left:7.5px;top:4.6px;width:18px;height:18px;border-radius:6px}
+.c3-b.d1{animation-delay:.16s}
+.c3-b.d2{animation-delay:.32s}
+@keyframes c3burst{
+  0%{transform:scale(.5);opacity:.95}
+  16%{transform:scale(4.6);opacity:0}
+  100%{transform:scale(4.6);opacity:0}
+}
+
+/* ============================================================
+   ④ 霓虹击穿（接触不良闪）
+   ============================================================ */
+.c4-tube{position:absolute;left:5px;top:5px;width:110px;height:2.5px;border-radius:2px;
+  background:linear-gradient(90deg,#FFE4E9,#FFD3DC 58%,rgba(255,211,220,.45) 86%,rgba(255,211,220,.06));
+  box-shadow:0 0 4px #FFC2CF,0 0 12px rgba(239,133,156,.95),0 0 26px rgba(239,133,156,.55);
+  animation:c4ignite 6.5s steps(1,end) infinite}
+.c4-tube::after{content:"";position:absolute;left:-1.25px;top:0;width:2.5px;height:58px;border-radius:2px;
+  background:#FFD3DC;box-shadow:0 0 4px #FFC2CF,0 0 12px rgba(239,133,156,.95),0 0 26px rgba(239,133,156,.5)}
+.c4-halo{position:absolute;left:-32px;top:-38px;width:200px;height:158px;border-radius:50%;
+  background:radial-gradient(closest-side,rgba(239,133,156,.6),rgba(239,133,156,0) 72%);
+  filter:blur(8px);opacity:.7;animation:c4ignite 6.5s steps(1,end) infinite;animation-delay:-.06s}
+.c4-hot{position:absolute;left:3.5px;top:3.5px;width:6px;height:6px;border-radius:50%;background:#FFEDF1;
+  box-shadow:0 0 8px #FFC2CF,0 0 20px rgba(239,133,156,.95);
+  animation:c4ignite 6.5s steps(1,end) infinite;animation-delay:-.04s}
+.c4-tube.steady{animation:blinkP 3.25s steps(1,end) infinite}
+.c4-halo.steady{animation:brO2 3.25s ease-in-out infinite}
+.c4-hot.steady{animation:brO 3.25s steps(1,end) infinite}
+@keyframes c4ignite{
+  0%{opacity:.1} 1%{opacity:1} 2.2%{opacity:.12} 3%{opacity:1} 4.6%{opacity:.15} 6%{opacity:1}
+  7.5%{opacity:.2} 9%{opacity:.9} 10.5%{opacity:.12} 13%{opacity:1} 17%{opacity:.55} 22%{opacity:.98}
+  54%{opacity:.98} 55.5%{opacity:.22} 57%{opacity:.98} 58.5%{opacity:.28} 60%{opacity:.98} 100%{opacity:.98}
+}
+
+/* ============================================================
+   ⑤ 折角 + 未读数角标
+   ============================================================ */
+.c5-fold{position:absolute;left:0;top:0;width:34px;height:34px;z-index:1;
+  background:linear-gradient(135deg,rgba(255,205,216,.45),rgba(239,133,156,.16) 58%,rgba(239,133,156,.04) 82%);
+  clip-path:polygon(0 0,100% 0,0 100%);
+  animation:c5fold 6.5s ease-out infinite}
+.c5-fold::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(135deg,transparent 62%,rgba(255,238,243,.95) 65.5%,rgba(239,133,156,.55) 68.5%,rgba(239,133,156,0) 71%)}
+.c5-badge{position:absolute;left:7px;top:8px;z-index:3;min-width:15px;height:15px;padding:0 3px;border-radius:5px;
+  background:linear-gradient(180deg,#FFB5C5,#EF859C);color:#31101A;
+  font:700 10px/15px Consolas,"Courier New",monospace;text-align:center;
+  box-shadow:0 0 0 1.5px rgba(29,16,19,.92),0 0 14px rgba(239,133,156,.85);
+  transform-origin:30% 60%;animation:c5pop 6.5s cubic-bezier(.2,.9,.3,1.4) infinite}
+.c5-badge.static{animation:none;transform:none}
+.card.big .c5-badge{left:10px;top:11px;min-width:16px;height:16px;border-radius:5px;font:700 10.5px/16px Consolas,monospace}
+.c5-flash{position:absolute;left:-12px;top:-14px;width:64px;height:64px;border-radius:50%;opacity:0;
+  background:radial-gradient(closest-side,rgba(255,205,216,.85),rgba(239,133,156,.34) 46%,rgba(239,133,156,0) 74%);
+  filter:blur(2px);animation:c5flash 6.5s ease-out infinite}
+.c5-ping{position:absolute;left:6px;top:7px;width:17px;height:17px;border-radius:6px;opacity:0;
+  border:1px solid rgba(239,133,156,.8);animation:ping 3.25s ease-out infinite}
+.card.big .c5-ping{left:9px;top:10px;width:18px;height:18px}
+@keyframes c5pop{
+  0%{transform:scale(0) rotate(-24deg);opacity:0}
+  2.5%{transform:scale(1.38) rotate(6deg);opacity:1}
+  5%{transform:scale(.9) rotate(-3deg);opacity:1}
+  7.5%{transform:scale(1.12) rotate(2deg)}
+  10%{transform:scale(.96)}
+  13%{transform:scale(1)}
+  20%,100%{transform:scale(1);opacity:1}
+}
+@keyframes c5flash{
+  0%{opacity:0;transform:scale(.45)} 2.5%{opacity:1;transform:scale(1)}
+  7%{opacity:.16;transform:scale(1.14)} 11%{opacity:.55;transform:scale(1.06)}
+  17%{opacity:.2;transform:scale(1.1)} 26%,100%{opacity:.14;transform:scale(1)}
+}
+@keyframes c5fold{0%{opacity:0;transform:scale(.4);transform-origin:0 0}8%{opacity:1;transform:scale(1.08)}
+  12%{transform:scale(1)} 20%,100%{opacity:1;transform:scale(1)}}
+/* 角标占用左上角时，内容右移让位（角标替代状态点） */
+.card.has-badge .m-row{padding-left:30px}
+.card.has-badge .m-row .m-dot{display:none}
+.card.has-badge .m-num{margin-left:28px}
+.card.has-badge .b-r1 .b-dot{display:none}
+.card.big.has-badge .cont{padding-left:34px}
+
+/* ============================================================
+   ⑥ 双层描边 + 外扩光晕
+   ============================================================ */
+.c6-stroke{position:absolute;inset:2.5px;border-radius:14.5px;
+  border:1.5px solid rgba(239,133,156,.9);
+  box-shadow:inset 0 0 12px rgba(239,133,156,.28),0 0 10px rgba(239,133,156,.35);
+  animation:c6stroke 6.5s ease-in-out infinite}
+.card.mini .c6-stroke{inset:2px;border-radius:11px}
+.c6-stroke.steady{animation:brO 3.25s ease-in-out infinite}
+.cw .c6-halo{position:absolute;inset:-15px;border-radius:32px;
+  background:radial-gradient(closest-side,rgba(239,133,156,.4),rgba(239,133,156,0) 74%);
+  filter:blur(9px);opacity:.4;animation:c6halo 6.5s ease-in-out infinite}
+.cw.mini .c6-halo{inset:-11px;border-radius:24px}
+.c6-halo.steady{animation:brO2 3.25s ease-in-out infinite}
+.c6-ring{position:absolute;inset:-10px;border-radius:26px;border:1.5px solid rgba(239,133,156,.62);
+  opacity:0;animation:c6ring 6.5s ease-out infinite}
+.c6-ring.r2{animation-delay:.2s}
+.cw.mini .c6-ring{inset:-7px;border-radius:20px}
+.c6-ring.pingring{animation:ping 3.25s ease-out infinite}
+@keyframes c6stroke{
+  0%{opacity:.4} 3%{opacity:1} 6%{opacity:.55} 9%{opacity:1} 14%{opacity:.66}
+  20%{opacity:.78} 30%{opacity:1} 42%{opacity:.8} 54%{opacity:1} 66%{opacity:.8}
+  78%{opacity:1} 90%{opacity:.8} 100%{opacity:.4}
+}
+@keyframes c6halo{
+  0%{opacity:.38;transform:scale(.98)} 3%{opacity:1;transform:scale(1.02)}
+  7%{opacity:.42;transform:scale(1)} 11%{opacity:.95;transform:scale(1.02)}
+  15%{opacity:.46;transform:scale(1)} 22%{opacity:.58;transform:scale(1.01)}
+  34%{opacity:.9;transform:scale(1.03)} 46%{opacity:.58;transform:scale(1.01)}
+  58%{opacity:.86;transform:scale(1.03)} 70%{opacity:.56;transform:scale(1)}
+  82%{opacity:.8;transform:scale(1.02)} 92%{opacity:.55;transform:scale(1)}
+  100%{opacity:.38;transform:scale(.98)}
+}
+@keyframes c6ring{0%{transform:scale(.96);opacity:.9}12%{transform:scale(1.14);opacity:0}100%{opacity:0}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div>
+      <h1>小纸条 · 左上角 <b>到达闪烁</b> + <b>未读常驻</b> 动效实验</h1>
+      <p class="sub">6 个候选 · 真实卡片尺寸 224×68 / 280×188（圆角 14 / 18）· 皮肤「红 · 报春」#EF859C ·
+        每个候选一个 6.5s 循环：0–1s 到达闪烁 → 之后未读常驻 ·
+        冻结帧 <code>?t=220&amp;freeze=1</code></p>
+    </div>
+    <div class="pill" id="mode"><i></i><span>循环播放中</span></div>
+  </header>
+
+  <div class="stage">
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <footer>
+    <div>小卡（左）＝ 未读常驻态常亮对照　·　大卡（右）＝ 到达闪烁 → 沉降常驻完整循环</div>
+    <div>纯 HTML/CSS/JS · 无外部依赖 · 可离线打开</div>
+  </footer>
+</div>
+
+<script>
+/* ------------------------------------------------------------------
+   卡片内容（照抄真实卡片）
+   ------------------------------------------------------------------ */
+var CONTENT = {
+  mini:
+    '<div class="m-row"><i class="m-dot"></i><span>距离下班</span><span class="m-rt">晚 4h19m</span></div>' +
+    '<div class="m-num">06:59:53</div>' +
+    '<div class="m-bar"><i></i></div>',
+  big:
+    '<div class="b-r1"><i class="b-dot"></i><span>工作中</span>' +
+      '<span class="b-tools"><span>✈</span><span>¥</span><span>⚙</span><span>↻</span><span class="chev">›</span></span></div>' +
+    '<div class="b-cap">距离下班</div>' +
+    '<div class="b-num">06:59:52</div>' +
+    '<div class="b-bar"><i></i></div>' +
+    '<div class="b-sub">上班 <b>12:06</b> · 预计下班 <b>20:30</b></div>' +
+    '<div class="b-sub"><i class="b-dot" style="width:5px;height:5px"></i>距晚休 <b>4h19m</b></div>' +
+    '<div class="b-extra">已工作 1h24m · 应勤 8h30m</div>'
+};
+
+/* ------------------------------------------------------------------
+   6 个候选：inner(size) = 卡内效果层；outer(size) = 卡外效果层
+   big  = 完整循环（闪烁 + 沉降）
+   mini = 未读常驻态（只放常亮标记）
+   ------------------------------------------------------------------ */
+var CANDS = [
+  {
+    name: '呼吸亮带', note: '左上圆角亮带 + 柔光呼吸（v3.8.1 的强化版）',
+    inner: function (s) {
+      return s === 'big'
+        ? '<div class="c1-glow"></div><div class="c1-band"></div>'
+        : '<div class="c1-glow steady"></div><div class="c1-band steady"></div>';
+    }
+  },
+  {
+    name: '斜光扫过', note: '斜向反光两次扫过 + 角部余晖常亮',
+    inner: function (s) {
+      return '<div class="c2-corner"></div>' +
+        (s === 'big' ? '<div class="c2-sweep"></div>' : '') +
+        '<div class="c2-edge"></div><div class="c2-gleam"></div>';
+    }
+  },
+  {
+    name: '涟漪脉冲', note: '圆角矩形涟漪从左上角扩散，沉降为一枚呼吸光点',
+    inner: function (s) {
+      return '<div class="c3-core"></div><div class="c3-ping"></div>' +
+        (s === 'big' ? '<i class="c3-b d0"></i><i class="c3-b d1"></i><i class="c3-b d2"></i>' : '');
+    }
+  },
+  {
+    name: '霓虹击穿', note: '灯管接触不良式不规则击穿闪，之后灯管常亮偶尔抽一下',
+    inner: function (s) {
+      if (s === 'big') {
+        return '<div class="c4-halo"></div><div class="c4-tube"></div><div class="c4-hot"></div>';
+      }
+      return '<div class="c4-halo steady"></div><div class="c4-tube steady"></div><div class="c4-hot steady"></div>';
+    }
+  },
+  {
+    name: '折角角标', note: '左上折角翻开 + 未读数角标弹出，之后角标常驻并呼吸',
+    cls: 'has-badge',
+    inner: function (s) {
+      return '<div class="c5-fold"></div><div class="c5-flash"></div>' +
+        '<div class="c5-badge' + (s === 'big' ? '' : ' static') + '">3</div><div class="c5-ping"></div>';
+    }
+  },
+  {
+    name: '双描边外晕', note: '卡内细描边 + 卡外光晕与外扩描边环',
+    outer: function (s) {
+      return s === 'big'
+        ? '<div class="c6-halo"></div><i class="c6-ring r1"></i><i class="c6-ring r2"></i>'
+        : '<div class="c6-halo steady"></div><i class="c6-ring pingring"></i>';
+    },
+    inner: function (s) {
+      return '<div class="c6-stroke' + (s === 'big' ? '' : ' steady') + '"></div>';
+    }
+  }
+];
+
+/* ------------------------------------------------------------------
+   渲染
+   ------------------------------------------------------------------ */
+function cardHTML(c, size) {
+  var big = size === 'big';
+  var outer = c.outer ? '<div class="outer">' + c.outer(size) + '</div>' : '';
+  return '<div class="cw ' + size + '">' + outer +
+    '<div class="card ' + size + (c.cls ? ' ' + c.cls : '') + '">' +
+      '<div class="fx">' + c.inner(size) + '</div>' +
+      '<div class="cont">' + (big ? CONTENT.big : CONTENT.mini) + '</div>' +
+    '</div></div>';
+}
+
+function candHTML(c, i) {
+  var idx = '①②③④⑤⑥'[i];
+  return '<section class="cand">' +
+    '<div class="cand-h"><span class="idx">' + idx + '</span>' + c.name + '<em>' + c.note + '</em></div>' +
+    '<div class="cards">' +
+      '<figure>' + cardHTML(c, 'mini') +
+        '<figcaption><i class="chip sta"></i>未读常驻 · 常亮</figcaption></figure>' +
+      '<figure>' + cardHTML(c, 'big') +
+        '<figcaption><i class="chip cyc"></i>到达闪烁 → 沉降常驻 · 6.5s 循环</figcaption></figure>' +
+    '</div>' +
+  '</section>';
+}
+
+document.getElementById('grid').innerHTML = CANDS.map(candHTML).join('');
+
+/* ------------------------------------------------------------------
+   冻结帧：?t=毫秒&freeze=1
+   把所有动画 pause() 并把 currentTime 设为 t（Web Animations API）
+   ------------------------------------------------------------------ */
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get('freeze') !== '1') return;
+  var t = Math.max(0, Math.round(Number(q.get('t')) || 0));
+  document.documentElement.setAttribute('data-frozen', '1');
+  var box = document.getElementById('mode');
+  if (box) box.innerHTML = '<i></i><span>冻结帧 · t = ' + t + ' ms</span>';
+
+  function apply() {
+    if (!document.getAnimations) return;
+    document.getAnimations().forEach(function (a) {
+      try {
+        a.pause();
+        a.currentTime = t;
+      } catch (e) { /* 忽略无法冻结的动画 */ }
+    });
+  }
+  apply();
+  requestAnimationFrame(function () { apply(); requestAnimationFrame(apply); });
+  window.addEventListener('load', apply);
+  setTimeout(apply, 120);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>iOS Live Activity 布局稿 · 上班工具箱</title>
+<style>
+/* ============================================================
+   iOS Live Activity 布局稿 · 上班工具箱
+   画板内 1 CSS px = 1 pt；iPhone 15/16 逻辑宽 393pt
+   锁屏活动卡：371pt（HIG 2026-10：屏宽 393 − 22，左右各 11pt）× 154pt，r24，内边距 14
+   灵动岛：126 × 37（收起）/ 371 × 160（展开，与锁屏卡同宽）
+   皮肤：无垠 quiet（src/Skins.cs）——近黑底 / 1px 细线 / 等宽数字 / 细进度条 / 不发光
+   出图：Chrome headless --force-device-scale-factor=2（单文件、无外链、无构建）
+   ============================================================ */
+
+:root{
+  /* ---- quiet 皮肤令牌（Skins.cs / MakeTheme("skin-quiet", ...)） ---- */
+  --q-bg-top:#12151A;
+  --q-bg-bottom:#171B21;
+  --q-accent:#96A9FF;
+  --q-accent2:#CFD6E4;
+  --q-success:#46D39A;
+  --q-text:#E9ECF1;
+  --q-muted:#929AA7;
+  --q-dim:#666E7B;
+  --q-number:#F1F3F7;
+  --q-accent-ink:#0A0C12;
+  --q-edge:rgba(255,255,255,.075);
+  --q-track:rgba(255,255,255,.10);
+  --q-last-a:#46D39A;
+  --q-last-b:#F5C400;
+  --ios-red:#FF3B30;
+
+  /* ---- 文档自身 ---- */
+  --page-bg:#07090C;
+  --ab-bg-1:#0C1117;
+  --ab-bg-2:#0A0E13;
+  --ab-line:rgba(255,255,255,.075);
+  --ann:#8FA2C8;
+  --mono:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,"SF Pro Text","PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--page-bg);color:#DDE3EE;font-family:var(--sans);-webkit-font-smoothing:antialiased}
+body{padding:0}
+
+.wrap{width:1372px;margin:0 auto;padding:0 28px 44px;box-sizing:border-box}
+
+/* ================= 页头 ================= */
+.pagehead{padding:38px 0 20px}
+.kicker{font:600 10px/1 var(--mono);letter-spacing:.24em;color:#6E7B92;text-transform:uppercase}
+h1{margin:13px 0 0;font-size:27px;line-height:1.22;letter-spacing:-.012em;color:#F3F6FB;font-weight:700}
+.lede{margin:11px 0 0;max-width:1010px;font-size:12px;line-height:1.9;color:#9AA7BD}
+.lede b{color:#E7ECF5;font-weight:600}
+.lede code{font-family:var(--mono);font-size:11px;color:#C4D1E8;background:rgba(255,255,255,.05);padding:1px 5px;border-radius:4px}
+.meta{margin:12px 0 0;font:11px/1.7 var(--mono);color:#7C89A0}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:14px 0 0;padding:12px 14px;border:1px solid var(--ab-line);border-radius:10px;background:rgba(255,255,255,.017)}
+.legend .sw{display:inline-flex;align-items:center;gap:6px;font:10px/1 var(--mono);color:#93A0B8;white-space:nowrap}
+.legend .sw i{display:block;width:10px;height:10px;border-radius:3px;border:1px solid rgba(255,255,255,.2)}
+.legend .sw b{color:#CFD9EA;font-weight:500}
+.tip{margin:10px 0 0;font-size:10px;line-height:1.8;color:#7E8BA1}
+
+/* ================= 画板网格 ================= */
+.sheet{display:grid;grid-template-columns:repeat(3,424px);gap:22px;align-items:start;margin-top:6px}
+.ab{background:linear-gradient(180deg,var(--ab-bg-1),var(--ab-bg-2));border:1px solid var(--ab-line);border-radius:14px;padding:14px 14px 14px;position:relative}
+.ab.span2{grid-column:span 2}
+
+.ab-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;min-height:22px}
+.ab-idx{font:700 11px/1 var(--mono);color:var(--q-accent);border:1px solid rgba(150,169,255,.38);border-radius:5px;padding:4px 6px;letter-spacing:.04em;flex:none}
+.ab-t{font-size:15px;font-weight:600;color:#EDF1F8;margin:0;line-height:1.3}
+.ab-sub{margin-left:auto;font:10px/1 var(--mono);color:#6E7B92;letter-spacing:.06em;text-align:right}
+
+/* ---- 手机视口（压缩示意：顶部状态栏 + 底部锁屏区，中间壁纸省略） ---- */
+.stage{position:relative;width:393px;height:316px;margin:0 auto;border-radius:14px;overflow:hidden;background:#0B1118;isolation:isolate;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}
+.stage.isl{height:112px}
+.stage.isl2{height:100px}
+.stage.isl-f{height:220px}
+.stage.on-light{box-shadow:inset 0 0 0 1px rgba(0,0,0,.14)}
+
+.wall{position:absolute;inset:0;pointer-events:none}
+.wall.dark{background:
+  radial-gradient(120% 78% at 72% 6%,rgba(64,92,138,.55),transparent 62%),
+  radial-gradient(88% 62% at 12% 82%,rgba(38,66,96,.55),transparent 66%),
+  radial-gradient(70% 50% at 92% 90%,rgba(96,74,120,.32),transparent 72%),
+  linear-gradient(168deg,#0A1018 0%,#0D1520 42%,#080B11 100%)}
+.wall.light{background:
+  radial-gradient(110% 70% at 78% 8%,rgba(255,248,236,.92),transparent 60%),
+  radial-gradient(92% 62% at 10% 84%,rgba(233,214,186,.88),transparent 66%),
+  linear-gradient(165deg,#F7F0E3 0%,#EADFCC 46%,#DACBB2 100%)}
+
+/* 状态栏 */
+.sb{position:absolute;left:26px;right:24px;top:11px;height:20px;display:flex;align-items:center;color:#fff;z-index:3}
+.sb-t{font-size:15px;line-height:20px;font-weight:600;letter-spacing:.01em;font-variant-numeric:tabular-nums}
+.sb-r{margin-left:auto;display:flex;align-items:center;gap:5px;color:#fff}
+.sb svg{display:block}
+.stage.on-light .sb,.stage.on-light .sb-r{color:#1E1C19}
+
+/* 锁屏底部：手电筒 / 相机 + Home 条 */
+.lockbtns{position:absolute;left:32px;right:32px;bottom:20px;display:flex;justify-content:space-between;z-index:2}
+.lockbtn{width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.12);display:grid;place-items:center;color:rgba(255,255,255,.85);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.stage.on-light .lockbtn{background:rgba(0,0,0,.13);border-color:rgba(0,0,0,.08);color:rgba(0,0,0,.7)}
+.home{position:absolute;left:50%;bottom:7px;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:rgba(255,255,255,.62);z-index:2}
+.stage.on-light .home{background:rgba(0,0,0,.4)}
+
+/* 系统容器边界（虚线 + 尺寸标签）：卡 371×154，向外偏移 5pt 画，不占内容 */
+.measure{position:absolute;left:6px;right:6px;bottom:79px;height:164px;border:1px dashed rgba(150,169,255,.45);border-radius:26px;pointer-events:none;z-index:6}
+.measure .mlabel{position:absolute;right:0;top:-16px;font:10px/1 var(--mono);color:#B3C2E4;background:rgba(7,9,12,.8);padding:3px 6px;border-radius:4px;border:1px solid rgba(150,169,255,.28);white-space:nowrap}
+.measure.isl{left:6px;right:6px;top:3px;height:170px;border-radius:48px}
+.measure.isl .mlabel{top:auto;bottom:-18px}
+.dimchip{position:absolute;left:50%;transform:translateX(-50%);font:10px/1 var(--mono);color:#B3C2E4;background:rgba(7,9,12,.8);border:1px solid rgba(150,169,255,.28);border-radius:4px;padding:3px 6px;white-space:nowrap;z-index:7}
+
+/* ================= 锁屏活动卡（371 × 154 pt，5 行矩阵） ================= */
+.la-wrap{position:absolute;left:11px;bottom:84px;width:371px;z-index:4}
+.la{position:relative;width:371px;height:154px;border-radius:24px;padding:14px;
+  display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;
+  background:linear-gradient(180deg,rgba(18,21,26,.90),rgba(24,28,34,.94));
+  border:1px solid var(--q-edge);
+  color:var(--q-text);
+  -webkit-backdrop-filter:blur(22px) saturate(140%);backdrop-filter:blur(22px) saturate(140%)}
+
+/* ① 状态行：左「● 工作中 · 距离下班」（17pt + 13pt），右「下班 20:04」 */
+.la .r1{display:flex;align-items:baseline;min-width:0}
+.la .r1 .lt{display:flex;align-items:baseline;min-width:0}
+.la .r1 .dot{width:6px;height:6px;border-radius:50%;background:var(--q-accent);flex:none;display:block;align-self:center;margin-right:6px}
+.la .r1 .dot.s{width:5px;height:5px}
+.la .r1 .st{font-size:17px;line-height:22px;font-weight:600;letter-spacing:.005em;color:var(--q-text);white-space:nowrap}
+.la .r1 .sep{font-size:13px;line-height:18px;color:var(--q-muted);margin:0 5px}
+.la .r1 .sub{font-size:13px;line-height:18px;color:var(--q-muted);white-space:nowrap}
+.la .r1 .rt{margin-left:auto;font-size:13px;line-height:18px;color:var(--q-muted);font-variant-numeric:tabular-nums;white-space:nowrap;align-self:baseline}
+
+/* ② 计时器 */
+.la .r2{font-family:var(--mono);font-size:34px;line-height:42px;font-weight:600;color:var(--q-number);letter-spacing:.005em;font-variant-numeric:tabular-nums}
+.la .r2.acc{color:var(--q-accent)}
+
+/* ③ 进度条 */
+.la .r3{height:3px;border-radius:2px;background:var(--q-track);position:relative}
+.la .r3>i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:linear-gradient(90deg,rgba(150,169,255,.45),var(--q-accent));display:block}
+.la .r3.last>i{background:linear-gradient(90deg,var(--q-last-a),var(--q-last-b))}
+.la .r3.hold>i{width:35%;background:linear-gradient(90deg,rgba(146,154,167,.30),rgba(146,154,167,.72))}
+.la .r3.hold .ptick{position:absolute;top:-2px;width:1.5px;height:7px;border-radius:1px;background:var(--q-accent);display:block}
+
+/* ④ 次级行：左「● 距晚休 3h27m」，右「上班 09:00」 */
+.la .r4{display:flex;align-items:center;height:18px;font-size:13px;line-height:18px;color:var(--q-muted)}
+.la .r4 .l{display:flex;align-items:center;gap:5px;color:var(--q-text);font-weight:600;white-space:nowrap}
+.la .r4 .l.ok{color:var(--q-success)}
+.la .r4 .r{margin-left:auto;font-size:13px;color:var(--q-muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ⑤ 底行：10pt 灰，右端给未读点（仅 D） */
+.la .r5{display:flex;align-items:center;height:16px;font-size:10px;line-height:14px;color:var(--q-muted)}
+.la .r5 .l{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.la .r5 .r{margin-left:auto;display:flex;align-items:center;gap:4px;flex:none}
+.la .unread{display:inline-flex;align-items:center;gap:4px;font-size:10px;line-height:16px;color:var(--q-text);font-weight:600}
+.la .unread i{width:6px;height:6px;border-radius:50%;background:var(--ios-red);display:block}
+
+/* 午休：暂停符 + 强化数值 */
+.pauseglyph{display:flex;align-items:center;gap:2px;height:9px;flex:none;align-self:center;margin-right:6px}
+.pauseglyph i{display:block;width:2px;height:9px;border-radius:1px;background:var(--q-accent)}
+
+/* AOD：同一张卡，去秒 / 不画进度条 / 文字统一 textMain */
+.la.aod .r1 .sub,.la.aod .r1 .sep,.la.aod .r1 .rt{color:var(--q-text)}
+.la.aod .r4 .r{color:var(--q-text)}
+.la.aod .r5{color:var(--q-text)}
+.la.aod .r3{display:none}
+.stage.aod::after{content:"";position:absolute;inset:0;background:rgba(0,0,0,.45);z-index:5;pointer-events:none}
+.stage.aod .wall{filter:saturate(.55) brightness(.92)}
+
+/* ================= 灵动岛 ================= */
+.isl-compact{position:absolute;left:50%;top:11px;transform:translateX(-50%);width:126px;height:37px;border-radius:18.5px;
+  background:#000;display:flex;align-items:center;padding:0 12px;color:#fff;z-index:3;overflow:hidden}
+.isl-compact .dot{width:6px;height:6px;border-radius:50%;background:var(--q-accent);flex:none;display:block}
+.isl-compact .l{display:flex;align-items:center;gap:5px;font-size:13px;line-height:16px;font-weight:600;white-space:nowrap}
+.isl-compact .r{margin-left:auto;font-family:var(--mono);font-size:13px;line-height:16px;font-weight:600;color:var(--q-number);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.isl-minimal{position:absolute;left:50%;top:11px;transform:translateX(-50%);width:37px;height:37px;border-radius:50%;
+  background:#000;display:grid;place-items:center;z-index:3}
+.isl-minimal .dot{width:9px;height:9px;border-radius:50%;background:var(--q-accent);display:block}
+
+/* 展开态 371 × 160：与锁屏卡同宽，顶距 8 */
+.isl-exp{position:absolute;left:11px;right:11px;top:8px;height:160px;border-radius:44px;background:#000;overflow:hidden;color:#fff;z-index:3}
+.isl-exp .x-cam{position:absolute;left:50%;top:0;transform:translateX(-50%);width:126px;height:37px;border:1px dashed rgba(150,169,255,.5);border-radius:19px}
+.isl-exp .x-lead{position:absolute;left:20px;top:10px;height:20px;display:flex;align-items:center;gap:6px;font-size:13px;line-height:20px;font-weight:600}
+.isl-exp .x-lead .dot{width:6px;height:6px;border-radius:50%;background:var(--q-accent);flex:none;display:block}
+.isl-exp .x-trail{position:absolute;right:20px;top:11px;height:18px;font-size:13px;line-height:18px;color:var(--q-muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.isl-exp .x-timer{position:absolute;left:0;right:0;top:40px;height:40px;text-align:center;font-family:var(--mono);font-size:34px;line-height:40px;font-weight:600;color:var(--q-number);letter-spacing:.005em;font-variant-numeric:tabular-nums}
+.isl-exp .x-bar{position:absolute;left:20px;right:20px;top:88px;height:3px;border-radius:2px;background:rgba(255,255,255,.14)}
+.isl-exp .x-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:linear-gradient(90deg,rgba(150,169,255,.45),var(--q-accent));display:block}
+.isl-exp .x-foot{position:absolute;left:20px;top:104px;height:24px;display:flex;align-items:center;font-size:13px;line-height:16px;font-weight:600;color:var(--q-text);white-space:nowrap}
+.isl-exp .x-mid{position:absolute;left:50%;transform:translateX(-50%);top:107px;font-size:10px;line-height:18px;color:var(--q-muted);white-space:nowrap}
+.isl-exp .x-btn{position:absolute;right:20px;top:100px;height:32px;min-width:76px;padding:0 16px;border-radius:16px;
+  background:rgba(150,169,255,.16);border:1px solid rgba(150,169,255,.42);color:var(--q-accent);
+  font-family:var(--sans);font-size:13px;line-height:16px;font-weight:600;display:grid;place-items:center;white-space:nowrap}
+
+/* 子标签 */
+.sub-label{display:flex;align-items:center;gap:6px;width:393px;margin:0 auto 6px;font:10px/1.4 var(--mono);color:#8391AA;letter-spacing:.03em}
+.sub-label b{color:#C2CEE4;font-weight:500}
+
+/* ================= 规格表 ================= */
+.spec{margin-top:10px;border-top:1px solid rgba(255,255,255,.08);padding-top:7px}
+.spec-h,.spec-r{display:grid;grid-template-columns:84px 108px 52px 1fr;gap:0 8px;align-items:start}
+.spec-h>*,.spec-r>*{min-width:0}
+.spec-h{font:10px/1.5 var(--mono);color:#66738A;letter-spacing:.03em;padding-bottom:4px}
+.spec-r{font-size:10px;line-height:1.5;color:#AEB9CD;padding:3px 0;border-top:1px dashed rgba(255,255,255,.055)}
+.spec-r .c{overflow-wrap:anywhere}
+.spec-r .c b,.spec-r .c .tok{white-space:nowrap}
+.spec-r .k{color:#DFE6F2;font-weight:600}
+.spec-r .num{font-family:var(--mono);color:#9FB2E0;font-variant-numeric:tabular-nums}
+.spec-r .c{color:#93A0B8}
+.spec-r .c b{font-family:var(--mono);font-weight:500;color:#C6D2E6}
+
+/* ================= 双列对照（G / H） ================= */
+.duo{display:flex;gap:24px;justify-content:center;align-items:flex-start}
+.duo-col{width:393px;flex:none}
+.duo-label{display:flex;align-items:center;gap:6px;font:10px/1.4 var(--mono);color:#8391AA;letter-spacing:.03em;margin-bottom:6px}
+.duo-label b{color:#C2CEE4;font-weight:500}
+
+/* 附注卡（只在全览里出现） */
+.note-card{background:linear-gradient(180deg,#0C1117,#0A0E13);border:1px solid var(--ab-line);border-radius:14px;padding:14px}
+.note-card .ab-t{font-size:13px}
+.notes{list-style:none;margin:8px 0 0;padding:0}
+.notes li{position:relative;padding-left:11px;margin:0 0 7px;font-size:10px;line-height:1.75;color:#9AA7BD}
+.notes li::before{content:"";position:absolute;left:0;top:6px;width:4px;height:4px;border-radius:50%;background:rgba(150,169,255,.75)}
+.notes b{color:#DCE5F3;font-weight:600}
+.notes .num{font-family:var(--mono);color:#B9C8E6}
+
+.pagefoot{margin-top:26px;padding-top:12px;border-top:1px solid rgba(255,255,255,.07);font-size:10px;line-height:1.8;color:#6F7C93}
+
+/* ================= 出图模式（?shot=lock|island） ================= */
+body.shot .lede,body.shot .legend,body.shot .tip,body.shot .pagefoot,body.shot .note-card{display:none}
+body.shot .pagehead{padding:26px 0 16px}
+body.shot .meta{margin-top:8px}
+body.shot-lock .ab:not([data-show~="lock"]){display:none}
+body.shot-island .ab:not([data-show~="island"]){display:none}
+body.shot-lock .wrap,body.shot-island .wrap{width:926px}
+body.shot-lock .sheet,body.shot-island .sheet{grid-template-columns:repeat(2,424px)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="pagehead">
+    <div class="kicker">IOS · LIVE ACTIVITY · LAYOUT SPEC 02</div>
+    <h1>iOS Live Activity 布局稿 · 上班工具箱</h1>
+    <p class="lede">锁屏实时活动卡 + 灵动岛的 <b>可评审布局稿</b>：8 张画板覆盖「工作中 / 最后一小时 / 午休 / 未读纸条 / 灵动岛收起与展开 / Always-On / 浅色壁纸可读性」。卡宽按 <b>HIG 2026-10：屏宽 393 − 22 = 371 pt</b>（左右各 11 pt），内边距 14 pt；尺寸全部以 <b>pt</b> 标注（画板内 1px = 1pt）。皮肤为 <b>无垠 quiet</b>，色值取自 <code>src/Skins.cs</code>（<code>skin-quiet</code>）。</p>
+    <div class="meta">iPhone 15 / 16 · 393 × 852 pt（逻辑） · 锁屏卡 371 × 154 pt · 灵动岛 126 × 37（收起） / 371 × 160（展开，与锁屏卡同宽） · 字号 10 / 11 / 12 / 13 / 15 / 17 pt + 计时器 28–34 pt</div>
+    <div class="legend">
+      <span class="sw"><i style="background:#12151A"></i><b>--q-bg-top</b> #12151A</span>
+      <span class="sw"><i style="background:#171B21"></i><b>--q-bg-bottom</b> #171B21</span>
+      <span class="sw"><i style="background:#96A9FF"></i><b>--q-accent</b> #96A9FF</span>
+      <span class="sw"><i style="background:#CFD6E4"></i><b>--q-accent2</b> #CFD6E4</span>
+      <span class="sw"><i style="background:#E9ECF1"></i><b>--q-text</b> #E9ECF1</span>
+      <span class="sw"><i style="background:#929AA7"></i><b>--q-muted</b> #929AA7</span>
+      <span class="sw"><i style="background:#666E7B"></i><b>--q-dim</b> #666E7B</span>
+      <span class="sw"><i style="background:#F1F3F7"></i><b>--q-number</b> #F1F3F7</span>
+      <span class="sw"><i style="background:#46D39A"></i><b>--q-success</b> #46D39A</span>
+      <span class="sw"><i style="background:#F5C400"></i><b>--q-last-b</b> #F5C400（新增）</span>
+      <span class="sw"><i style="background:#FF3B30"></i><b>--ios-red</b> #FF3B30（未读点）</span>
+      <span class="sw"><i style="background:rgba(255,255,255,.10)"></i><b>--q-track</b> 白 10%</span>
+      <span class="sw"><i style="background:rgba(255,255,255,.075)"></i><b>--q-edge</b> 白 7.5% / 1pt</span>
+    </div>
+    <p class="tip">标注约定：蓝色虚线框 = iOS 系统给出的实时活动容器边界（本稿向外偏移 5 pt 画，不占内容）；虚线圆角矩形 = 相机 / 传感器保留区；①–⑤ = 卡片 5 行矩阵（见每个画板下方规格表）。画板里的手机视口是「顶部状态栏 + 底部锁屏区」的压缩示意，中间壁纸省略；全页共 8 张画板（A–H）。</p>
+  </header>
+
+  <main class="sheet">
+
+    <!-- ============================================================ A ============================================================ -->
+    <section class="ab" data-show="lock">
+      <div class="ab-head">
+        <span class="ab-idx">A</span>
+        <h2 class="ab-t">锁屏 · 工作中</h2>
+        <span class="ab-sub">LOCK / WORKING</span>
+      </div>
+
+      <div class="stage">
+        <div class="wall dark"></div>
+        <div class="sb">
+          <span class="sb-t">9:41</span>
+          <span class="sb-r">
+            <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+            <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+            <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+        <div class="la-wrap">
+          <div class="la">
+            <div class="r1"><div class="lt"><i class="dot"></i><span class="st">工作中</span><span class="sep">·</span><span class="sub">距离下班</span></div><span class="rt">下班 20:04</span></div>
+            <div class="r2">05:30:56</div>
+            <div class="r3"><i style="width:62%"></i></div>
+            <div class="r4"><span class="l"><i class="dot s"></i>距晚休 3h27m</span><span class="r">上班 09:00</span></div>
+            <div class="r5"><span class="l">已工作 5h33m · 应勤 8h30m</span></div>
+          </div>
+        </div>
+        <div class="lockbtns">
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+        </div>
+        <div class="home"></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+        <div class="spec-r"><span class="k">锁屏卡</span><span class="num">371 × 154 · r24</span><span class="num">—</span><span class="c">底 rgba(18,21,26,.90→.94) · 边 <b>--q-edge</b> 1pt</span></div>
+        <div class="spec-r"><span class="k">① 状态行</span><span class="num">h22 · 点 6</span><span class="num">17/13</span><span class="c">「工作中」<b>--q-text</b> · 点 <b>--q-accent</b> · 「距离下班」<b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">状态行右</span><span class="num">右对齐</span><span class="num">13</span><span class="c"><b>--q-muted</b>（下班 20:04）</span></div>
+        <div class="spec-r"><span class="k">② 计时器</span><span class="num">h42</span><span class="num">34 mono</span><span class="c"><b>--q-number</b> · tabular</span></div>
+        <div class="spec-r"><span class="k">③ 进度条</span><span class="num">h3 · r2 · 62%</span><span class="num">—</span><span class="c">轨道 <b>--q-track</b> · 实段 <b>--q-accent</b></span></div>
+        <div class="spec-r"><span class="k">④ 次级行</span><span class="num">h18 · 点 5</span><span class="num">13</span><span class="c">「距晚休」<b>--q-text</b> · 「上班 09:00」<b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">⑤ 底行</span><span class="num">h16</span><span class="num">10</span><span class="c">已工作 / 应勤 <b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">内边距</span><span class="num">14</span><span class="num">—</span><span class="c">四边 14pt（HIG 2026-10）</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ B ============================================================ -->
+    <section class="ab" data-show="lock">
+      <div class="ab-head">
+        <span class="ab-idx">B</span>
+        <h2 class="ab-t">锁屏 · 最后一小时</h2>
+        <span class="ab-sub">LOCK / LAST HOUR</span>
+      </div>
+
+      <div class="stage">
+        <div class="wall dark"></div>
+        <div class="sb">
+          <span class="sb-t">9:41</span>
+          <span class="sb-r">
+            <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+            <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+            <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+        <div class="la-wrap">
+          <div class="la">
+            <div class="r1"><div class="lt"><i class="dot" style="background:var(--q-success)"></i><span class="st">工作中</span><span class="sep">·</span><span class="sub">距离下班</span></div><span class="rt">下班 20:04</span></div>
+            <div class="r2">00:42:18</div>
+            <div class="r3 last"><i style="width:88%"></i></div>
+            <div class="r4"><span class="l ok"><i class="dot s" style="background:var(--q-success)"></i>马上下班</span><span class="r">上班 09:00</span></div>
+            <div class="r5"><span class="l">已工作 10h21m · 应勤 8h30m</span></div>
+          </div>
+        </div>
+        <div class="lockbtns">
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+        </div>
+        <div class="home"></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+        <div class="spec-r"><span class="k">锁屏卡</span><span class="num">371 × 154 · r24</span><span class="num">—</span><span class="c">几何同 A · tone = soon</span></div>
+        <div class="spec-r"><span class="k">① 状态行</span><span class="num">h22 · 点 6</span><span class="num">17/13</span><span class="c">「工作中」<b>--q-text</b> · 点 <b>--q-success</b></span></div>
+        <div class="spec-r"><span class="k">状态行右</span><span class="num">右对齐</span><span class="num">13</span><span class="c"><b>--q-muted</b>（下班 20:04）</span></div>
+        <div class="spec-r"><span class="k">② 计时器</span><span class="num">h42</span><span class="num">34 mono</span><span class="c"><b>--q-number</b>（00:42:18）</span></div>
+        <div class="spec-r"><span class="k">③ 进度条</span><span class="num">h3 · 88%</span><span class="num">—</span><span class="c">渐变 <b>--q-last-a</b> → <b>--q-last-b</b>（暖色）</span></div>
+        <div class="spec-r"><span class="k">④ 次级行</span><span class="num">h18 · 点 5</span><span class="num">13</span><span class="c">「马上下班」<b>--q-success</b> · 「上班 09:00」<b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">⑤ 底行</span><span class="num">h16</span><span class="num">10</span><span class="c">已工作 10h21m / 应勤 <b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">新增令牌</span><span class="num">—</span><span class="num">—</span><span class="c"><b>--q-last-a / -b</b> 仅 soon tone 使用</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ C ============================================================ -->
+    <section class="ab" data-show="lock">
+      <div class="ab-head">
+        <span class="ab-idx">C</span>
+        <h2 class="ab-t">锁屏 · 午休中</h2>
+        <span class="ab-sub">LOCK / LUNCH BREAK</span>
+      </div>
+
+      <div class="stage">
+        <div class="wall dark"></div>
+        <div class="sb">
+          <span class="sb-t">9:41</span>
+          <span class="sb-r">
+            <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+            <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+            <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+        <div class="la-wrap">
+          <div class="la">
+            <div class="r1"><div class="lt"><span class="pauseglyph"><i></i><i></i></span><span class="st">午休中</span><span class="sep">·</span><span class="sub">还剩 1h05m</span></div><span class="rt">13:30 结束</span></div>
+            <div class="r2 acc">1h05m</div>
+            <div class="r3 hold"><i></i><b class="ptick" style="left:calc(35% - 4.5px)"></b><b class="ptick" style="left:calc(35% - 0.5px)"></b></div>
+            <div class="r4"><span class="l">已暂停 · 已休 35m</span><span class="r">11:50–13:30</span></div>
+            <div class="r5"><span class="l">已工作 3h25m · 应勤 8h30m</span></div>
+          </div>
+        </div>
+        <div class="lockbtns">
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+        </div>
+        <div class="home"></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+        <div class="spec-r"><span class="k">锁屏卡</span><span class="num">371 × 154 · r24</span><span class="num">—</span><span class="c">几何同 A · 静态（不流动）</span></div>
+        <div class="spec-r"><span class="k">① 状态行</span><span class="num">暂停符 2×2×9</span><span class="num">17/13</span><span class="c">「午休中」<b>--q-text</b> · 符 <b>--q-accent</b> · 还剩 <b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">状态行右</span><span class="num">右对齐</span><span class="num">13</span><span class="c"><b>--q-muted</b>（13:30 结束）</span></div>
+        <div class="spec-r"><span class="k">② 计时器</span><span class="num">h42</span><span class="num">34 mono</span><span class="c"><b>--q-accent</b>（1h05m，不显示秒）</span></div>
+        <div class="spec-r"><span class="k">③ 进度暂停</span><span class="num">h3 · 填充 35%</span><span class="num">—</span><span class="c">填充 白 30%→72% · 末端 <b>--q-accent</b> 双竖线</span></div>
+        <div class="spec-r"><span class="k">④ 次级行</span><span class="num">h18</span><span class="num">13</span><span class="c">「已暂停 · 已休 35m」<b>--q-text</b> · 时段 <b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">⑤ 底行</span><span class="num">h16</span><span class="num">10</span><span class="c">已工作 3h25m / 应勤 <b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">动效</span><span class="num">—</span><span class="num">—</span><span class="c">无流动光带，填充静止（暂停态）</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ D ============================================================ -->
+    <section class="ab" data-show="lock">
+      <div class="ab-head">
+        <span class="ab-idx">D</span>
+        <h2 class="ab-t">锁屏 · 未读纸条</h2>
+        <span class="ab-sub">LOCK / UNREAD NOTE</span>
+      </div>
+
+      <div class="stage">
+        <div class="wall dark"></div>
+        <div class="sb">
+          <span class="sb-t">9:41</span>
+          <span class="sb-r">
+            <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+            <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+            <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+        <div class="la-wrap">
+          <div class="la">
+            <div class="r1"><div class="lt"><i class="dot"></i><span class="st">工作中</span><span class="sep">·</span><span class="sub">距离下班</span></div><span class="rt">下班 20:04</span></div>
+            <div class="r2">05:30:56</div>
+            <div class="r3"><i style="width:62%"></i></div>
+            <div class="r4"><span class="l"><i class="dot s"></i>距晚休 3h27m</span><span class="r">上班 09:00</span></div>
+            <div class="r5"><span class="l">已工作 5h33m · 应勤 8h30m</span><span class="r"><span class="unread"><i></i>2</span></span></div>
+          </div>
+        </div>
+        <div class="lockbtns">
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+          <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+        </div>
+        <div class="home"></div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+        <div class="spec-r"><span class="k">锁屏卡</span><span class="num">371 × 154 · r24</span><span class="num">—</span><span class="c">几何同 A · 右端多一颗未读点</span></div>
+        <div class="spec-r"><span class="k">① 状态行</span><span class="num">h22 · 点 6</span><span class="num">17/13</span><span class="c">「工作中」<b>--q-text</b> · 点 <b>--q-accent</b></span></div>
+        <div class="spec-r"><span class="k">状态行右</span><span class="num">右对齐</span><span class="num">13</span><span class="c"><b>--q-muted</b>（下班 20:04）</span></div>
+        <div class="spec-r"><span class="k">② 计时器</span><span class="num">h42</span><span class="num">34 mono</span><span class="c"><b>--q-number</b></span></div>
+        <div class="spec-r"><span class="k">③ 进度条</span><span class="num">h3 · 62%</span><span class="num">—</span><span class="c">轨道 <b>--q-track</b> · 实段 <b>--q-accent</b></span></div>
+        <div class="spec-r"><span class="k">④ 次级行</span><span class="num">h18 · 点 5</span><span class="num">13</span><span class="c">「距晚休」<b>--q-text</b> · 「上班」<b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">⑤ 底行</span><span class="num">h16</span><span class="num">10</span><span class="c">已工作 / 应勤 <b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">未读点</span><span class="num">点 6 + 计数 10</span><span class="num">10</span><span class="c">点 <b>--ios-red</b> #FF3B30 · 计数 <b>--q-text</b>（行 5 右端）</span></div>
+        <div class="spec-r"><span class="k">交互</span><span class="num">—</span><span class="num">—</span><span class="c">点卡打开小纸条；读完未读点消失</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ E ============================================================ -->
+    <section class="ab" data-show="island">
+      <div class="ab-head">
+        <span class="ab-idx">E</span>
+        <h2 class="ab-t">灵动岛 · 收起态</h2>
+        <span class="ab-sub">COMPACT + MINIMAL</span>
+      </div>
+
+      <div class="sub-label"><b>① compact</b> · 126 × 37 pt（leading / trailing 分居相机两侧）</div>
+      <div class="stage isl">
+        <div class="wall dark"></div>
+        <div class="sb">
+          <span class="sb-t">9:41</span>
+          <span class="sb-r">
+            <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+            <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+            <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div class="isl-compact">
+          <span class="l"><i class="dot"></i>下班</span>
+          <span class="r">05:30</span>
+        </div>
+        <div class="dimchip" style="top:58px">126 × 37 pt · r 18.5</div>
+      </div>
+
+      <div class="sub-label" style="margin-top:12px"><b>② minimal</b> · 37 × 37 pt（只剩一颗状态点）</div>
+      <div class="stage isl2">
+        <div class="wall dark"></div>
+        <div class="sb">
+          <span class="sb-t">9:41</span>
+          <span class="sb-r">
+            <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+            <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+            <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+          </span>
+        </div>
+        <div class="isl-minimal"><span class="dot"></span></div>
+        <div class="dimchip" style="top:58px">37 × 37 pt · 单点</div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+        <div class="spec-r"><span class="k">岛 · 收起</span><span class="num">126 × 37 · r18.5</span><span class="num">—</span><span class="c">#000 实底 · 无描边 / 无投影（系统画）</span></div>
+        <div class="spec-r"><span class="k">leading</span><span class="num">左内距 12 · 点 6</span><span class="num">13/600</span><span class="c">点 <b>--q-accent</b> ·「下班」#FFF</span></div>
+        <div class="spec-r"><span class="k">中缝 · 相机</span><span class="num">约 34 宽</span><span class="num">—</span><span class="c">传感器黑区，不排内容</span></div>
+        <div class="spec-r"><span class="k">trailing</span><span class="num">右内距 12</span><span class="num">13 mono</span><span class="c"><b>--q-number</b>（05:30，不写冒秒）</span></div>
+        <div class="spec-r"><span class="k">岛 · minimal</span><span class="num">37 × 37 圆</span><span class="num">—</span><span class="c">#000 底 · 状态点 9pt <b>--q-accent</b></span></div>
+        <div class="spec-r"><span class="k">位置</span><span class="num">顶距 11 · 居中</span><span class="num">—</span><span class="c">状态栏 9:41 位于左侧 26 / 15pt</span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ F ============================================================ -->
+    <section class="ab" data-show="island">
+      <div class="ab-head">
+        <span class="ab-idx">F</span>
+        <h2 class="ab-t">灵动岛 · 展开态</h2>
+        <span class="ab-sub">EXPANDED</span>
+      </div>
+
+      <div class="sub-label"><b>expanded</b> · 371 × 160 pt · r 44（与锁屏卡同宽；展开时临时盖住状态栏）</div>
+      <div class="stage isl-f">
+        <div class="wall dark"></div>
+        <div class="measure isl"><span class="mlabel">371 × 160 pt · r 44</span></div>
+        <div class="isl-exp">
+          <div class="x-cam"></div>
+          <div class="x-lead"><i class="dot"></i><span>距下班</span></div>
+          <div class="x-trail">预计下班 20:04</div>
+          <div class="x-timer">05:30:56</div>
+          <div class="x-bar"><i style="width:62%"></i></div>
+          <div class="x-foot">距晚休 3h27m</div>
+          <div class="x-mid">已工作 5h33m</div>
+          <button class="x-btn" type="button">打卡</button>
+        </div>
+      </div>
+
+      <div class="spec">
+        <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+        <div class="spec-r"><span class="k">岛 · 展开</span><span class="num">371 × 160 · r44</span><span class="num">—</span><span class="c">#000 · 顶距 8 · 与锁屏卡同宽 371</span></div>
+        <div class="spec-r"><span class="k">相机保留区</span><span class="num">126 × 37 · 居中</span><span class="num">—</span><span class="c">不排内容（展开时状态栏被盖）</span></div>
+        <div class="spec-r"><span class="k">leading</span><span class="num">左 20 · 顶 10</span><span class="num">13/600</span><span class="c">点 <b>--q-accent</b> · 距下班 <b>--q-text</b></span></div>
+        <div class="spec-r"><span class="k">trailing</span><span class="num">右 20 · 顶 11</span><span class="num">13</span><span class="c"><b>--q-muted</b> · 预计下班 20:04</span></div>
+        <div class="spec-r"><span class="k">计时器</span><span class="num">h40 · 居中</span><span class="num">34 mono</span><span class="c"><b>--q-number</b>（05:30:56，与 A 一致）</span></div>
+        <div class="spec-r"><span class="k">进度条</span><span class="num">331 × 3 · 62%</span><span class="num">—</span><span class="c">轨道 白 14% · 实段 <b>--q-accent</b></span></div>
+        <div class="spec-r"><span class="k">底行</span><span class="num">左 20 · 顶 104</span><span class="num">13/10</span><span class="c">距晚休 <b>--q-text</b> · 已工作 <b>--q-muted</b></span></div>
+        <div class="spec-r"><span class="k">打卡按钮</span><span class="num">76 × 32 · r16</span><span class="num">13/600</span><span class="c">底 accent 16% · 边 42% · 字 <b>--q-accent</b></span></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ G ============================================================ -->
+    <section class="ab span2" data-show="lock">
+      <div class="ab-head">
+        <span class="ab-idx">G</span>
+        <h2 class="ab-t">Always-On · 暗化对照</h2>
+        <span class="ab-sub">AOD / DIMMED</span>
+      </div>
+
+      <div class="duo">
+        <div class="duo-col">
+          <div class="duo-label"><b>① 亮屏基准</b> · 同画板 A</div>
+          <div class="stage">
+            <div class="wall dark"></div>
+            <div class="sb">
+              <span class="sb-t">9:41</span>
+              <span class="sb-r">
+                <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+                <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+              </span>
+            </div>
+            <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+            <div class="la-wrap">
+              <div class="la">
+                <div class="r1"><div class="lt"><i class="dot"></i><span class="st">工作中</span><span class="sep">·</span><span class="sub">距离下班</span></div><span class="rt">下班 20:04</span></div>
+                <div class="r2">05:30:56</div>
+                <div class="r3"><i style="width:62%"></i></div>
+                <div class="r4"><span class="l"><i class="dot s"></i>距晚休 3h27m</span><span class="r">上班 09:00</span></div>
+                <div class="r5"><span class="l">已工作 5h33m · 应勤 8h30m</span></div>
+              </div>
+            </div>
+            <div class="lockbtns">
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+            </div>
+            <div class="home"></div>
+          </div>
+          <div class="spec">
+            <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+            <div class="spec-r"><span class="k">容器</span><span class="num">371 × 154 · r24</span><span class="num">—</span><span class="c">同 A · 壁纸透出 10%</span></div>
+            <div class="spec-r"><span class="k">计时器</span><span class="num">h42</span><span class="num">34 mono</span><span class="c"><b>--q-number</b> · 含秒 05:30:56</span></div>
+            <div class="spec-r"><span class="k">进度条</span><span class="num">h3 · 62%</span><span class="num">—</span><span class="c"><b>--q-accent</b> 实段</span></div>
+            <div class="spec-r"><span class="k">底行</span><span class="num">h16</span><span class="num">10</span><span class="c">已工作 / 应勤 <b>--q-muted</b></span></div>
+          </div>
+        </div>
+
+        <div class="duo-col">
+          <div class="duo-label"><b>② Always-On</b> · 同一张卡 · 黑 45% 降亮</div>
+          <div class="stage aod">
+            <div class="wall dark"></div>
+            <div class="sb">
+              <span class="sb-t">9:41</span>
+              <span class="sb-r">
+                <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+                <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+              </span>
+            </div>
+            <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+            <div class="la-wrap">
+              <div class="la aod">
+                <div class="r1"><div class="lt"><i class="dot"></i><span class="st">工作中</span><span class="sep">·</span><span class="sub">距离下班</span></div><span class="rt">下班 20:04</span></div>
+                <div class="r2">5h30</div>
+                <div class="r3"></div>
+                <div class="r4"><span class="l"><i class="dot s"></i>距晚休 3h27m</span><span class="r">上班 09:00</span></div>
+                <div class="r5"><span class="l">已工作 5h33m · 应勤 8h30m</span></div>
+              </div>
+            </div>
+            <div class="lockbtns">
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+            </div>
+            <div class="home"></div>
+          </div>
+          <div class="spec">
+            <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+            <div class="spec-r"><span class="k">容器</span><span class="num">371 × 154 · r24</span><span class="num">—</span><span class="c">几何不变 · 黑 45% 叠加</span></div>
+            <div class="spec-r"><span class="k">计时器</span><span class="num">h42</span><span class="num">34 mono</span><span class="c"><b>--q-number</b> · <b>去秒：5h30</b></span></div>
+            <div class="spec-r"><span class="k">进度条</span><span class="num">—</span><span class="num">—</span><span class="c"><b>AOD 不画</b>（r3 隐藏）</span></div>
+            <div class="spec-r"><span class="k">AOD 文字</span><span class="num">—</span><span class="num">17/13/10</span><span class="c">统一 <b>--q-text</b>（暗化后 5.1:1）</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="ab note-card">
+      <div class="ab-head">
+        <span class="ab-idx" style="color:#C2CEE4;border-color:rgba(255,255,255,.22)">G</span>
+        <h2 class="ab-t">AOD 附注</h2>
+      </div>
+      <ul class="notes">
+        <li>Always-On 是系统能力：iOS 把整屏降亮约 <span class="num">45%</span>，并把实时活动刷新降得很低，秒数会闪灭 → <b>AOD 去秒</b>，计时器改 <span class="num">H:MM</span>（5h30）。</li>
+        <li>AOD <b>不画进度条</b>：常亮下系统不刷新进度，画一条静止的条只会误导；第五行文字仍保留，供一眼确认工时。</li>
+        <li>暗化后 <b>--q-muted</b> 只剩 <span class="num">2.6:1</span>、<b>--q-dim</b> <span class="num">1.9:1</span>，不能承载信息；AOD 卡内文字统一 <b>--q-text</b>（<span class="num">5.1:1</span>）。</li>
+        <li>强调色只留在状态点（<span class="num">3.1:1</span>，刚过图形 3:1 底线）；几何与亮屏版完全一致，只做「去秒 / 不画进度 / 提亮文字」三处内容差异。</li>
+      </ul>
+    </aside>
+
+    <!-- ============================================================ H ============================================================ -->
+    <section class="ab span2" data-show="lock">
+      <div class="ab-head">
+        <span class="ab-idx">H</span>
+        <h2 class="ab-t">浅色壁纸 · 可读性对照</h2>
+        <span class="ab-sub">READABILITY / LIGHT + DARK</span>
+      </div>
+
+      <div class="duo">
+        <div class="duo-col">
+          <div class="duo-label"><b>① 浅色壁纸</b> · 卡底 .90→.94</div>
+          <div class="stage on-light">
+            <div class="wall light"></div>
+            <div class="sb">
+              <span class="sb-t">9:41</span>
+              <span class="sb-r">
+                <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+                <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+              </span>
+            </div>
+            <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+            <div class="la-wrap">
+              <div class="la">
+                <div class="r1"><div class="lt"><i class="dot"></i><span class="st">工作中</span><span class="sep">·</span><span class="sub">距离下班</span></div><span class="rt">下班 20:04</span></div>
+                <div class="r2">05:30:56</div>
+                <div class="r3"><i style="width:62%"></i></div>
+                <div class="r4"><span class="l"><i class="dot s"></i>距晚休 3h27m</span><span class="r">上班 09:00</span></div>
+                <div class="r5"><span class="l">已工作 5h33m · 应勤 8h30m</span></div>
+              </div>
+            </div>
+            <div class="lockbtns">
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+            </div>
+            <div class="home"></div>
+          </div>
+          <div class="spec">
+            <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+            <div class="spec-r"><span class="k">壁纸</span><span class="num">393 × 316</span><span class="num">—</span><span class="c">#F7F0E3 → #DACBB2（示意）</span></div>
+            <div class="spec-r"><span class="k">卡底</span><span class="num">371 × 154 · r24</span><span class="num">—</span><span class="c">rgba(18,21,26,.90→.94)</span></div>
+            <div class="spec-r"><span class="k">对比度</span><span class="num">—</span><span class="num">34/13/10</span><span class="c">实测 <b>12.3</b> / <b>5.1</b> / <b>6.5</b> : 1</span></div>
+            <div class="spec-r"><span class="k">禁用</span><span class="num">—</span><span class="num">—</span><span class="c"><b>--q-dim</b> 仅分隔线（2.8:1）</span></div>
+          </div>
+        </div>
+
+        <div class="duo-col">
+          <div class="duo-label"><b>② 深色壁纸</b> · 同一张卡</div>
+          <div class="stage">
+            <div class="wall dark"></div>
+            <div class="sb">
+              <span class="sb-t">9:41</span>
+              <span class="sb-r">
+                <svg width="17" height="11" viewBox="0 0 17 11" aria-hidden="true"><rect x="0" y="7" width="3" height="4" rx="1" fill="currentColor"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="currentColor"/><rect x="9" y="3" width="3" height="8" rx="1" fill="currentColor"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="currentColor"/></svg>
+                <svg width="15" height="11" viewBox="0 0 15 11" aria-hidden="true"><path d="M7.5 1.2c2.6 0 5 .95 6.9 2.55l-1.35 1.6A8.4 8.4 0 0 0 7.5 3.2c-2.1 0-4 .8-5.55 2.15L.6 3.75A10.3 10.3 0 0 1 7.5 1.2Zm0 3.4c1.6 0 3.05.55 4.2 1.5L10.35 7.7A4.9 4.9 0 0 0 7.5 6.6c-1.1 0-2.1.4-2.85 1.1L3.3 6.1a6.4 6.4 0 0 1 4.2-1.5Zm0 3.4c.6 0 1.15.2 1.6.55L7.5 10.5 5.9 8.55c.45-.35 1-.55 1.6-.55Z" fill="currentColor"/></svg>
+                <svg width="25" height="12" viewBox="0 0 25 12" aria-hidden="true"><rect x=".5" y=".5" width="21" height="11" rx="3" fill="none" stroke="currentColor" opacity=".45"/><rect x="2" y="2" width="17" height="8" rx="1.6" fill="currentColor"/><path d="M23 4.2v3.6c.9-.3 1.4-.9 1.4-1.8s-.5-1.5-1.4-1.8Z" fill="currentColor" opacity=".5"/></svg>
+              </span>
+            </div>
+            <div class="measure"><span class="mlabel">371 × 154 pt · r 24</span></div>
+            <div class="la-wrap">
+              <div class="la">
+                <div class="r1"><div class="lt"><i class="dot"></i><span class="st">工作中</span><span class="sep">·</span><span class="sub">距离下班</span></div><span class="rt">下班 20:04</span></div>
+                <div class="r2">05:30:56</div>
+                <div class="r3"><i style="width:62%"></i></div>
+                <div class="r4"><span class="l"><i class="dot s"></i>距晚休 3h27m</span><span class="r">上班 09:00</span></div>
+                <div class="r5"><span class="l">已工作 5h33m · 应勤 8h30m</span></div>
+              </div>
+            </div>
+            <div class="lockbtns">
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 2.4h5.2l.9 3.4H5.5l.9-3.4Z"/><path d="M5.5 5.8h7v2.5a3.5 3.5 0 0 1-7 0V5.8Z"/><path d="M9 11.8v3.6"/></svg></span>
+              <span class="lockbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.3" y="5.4" width="13.4" height="9.4" rx="2.2"/><circle cx="9" cy="10" r="2.6"/><path d="M6.6 5.4l.8-1.8h3.2l.8 1.8"/></svg></span>
+            </div>
+            <div class="home"></div>
+          </div>
+          <div class="spec">
+            <div class="spec-h"><span>区域</span><span>尺寸</span><span>字号</span><span>颜色 / 令牌</span></div>
+            <div class="spec-r"><span class="k">壁纸</span><span class="num">393 × 316</span><span class="num">—</span><span class="c">#0A1018 → #080B11（示意）</span></div>
+            <div class="spec-r"><span class="k">卡底</span><span class="num">同左</span><span class="num">—</span><span class="c">唯一环境相关参数</span></div>
+            <div class="spec-r"><span class="k">对比度</span><span class="num">—</span><span class="num">34/13/10</span><span class="c">实测 <b>15.5</b> / <b>6.5</b> / <b>8.2</b> : 1</span></div>
+            <div class="spec-r"><span class="k">结论</span><span class="num">—</span><span class="num">—</span><span class="c">两种壁纸均 ≥ 4.5:1</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="ab note-card">
+      <div class="ab-head">
+        <span class="ab-idx" style="color:#C2CEE4;border-color:rgba(255,255,255,.22)">H</span>
+        <h2 class="ab-t">可读性附注</h2>
+      </div>
+      <ul class="notes">
+        <li>卡底不透明度是本稿唯一的「环境相关」参数：<b>rgba(18,21,26,.90) → rgba(24,28,34,.94)</b>；壁纸越亮，越要靠不透明度兜住对比度。</li>
+        <li>浅色壁纸叠加后卡底 ≈ <span class="num">#27292C</span>：正文 <b>12.3:1</b>、次要 <b>5.1:1</b>、强调 <b>6.5:1</b>，全部 ≥ 4.5。</li>
+        <li>深色壁纸叠加后 ≈ <span class="num">#12151A</span>：正文 <b>15.5:1</b>、次要 <b>6.5:1</b>、强调 <b>8.2:1</b>。</li>
+        <li><b>--q-dim</b> #666E7B 在两种壁纸下只有 <span class="num">2.8 / 3.6:1</span>，只做分隔线与轨道，不写信息文字。</li>
+        <li>若壁纸接近纯白，把卡底提到 .94；进度条轨道用「<b>白 10%</b>」混色而不是固定灰，才能在任何壁纸上都看得见。</li>
+      </ul>
+    </aside>
+
+  </main>
+
+  <footer class="pagefoot">
+    占位说明：画板里的时钟 / 进度 / 剩余量为评审占位值，按「上班 09:00 / 下班 20:04」这一组基准互算；B 的 88% 与 00:42:18 按需求给定，不参与互算。<br>
+    出图：Chrome headless · --force-device-scale-factor=2 · 隐藏滚动条；本文件单文件、无外链、无构建。画板内 1 CSS px = 1 pt；锁屏卡宽度 = 393 − 22 = 371 pt（HIG 2026-10）。
+  </footer>
+</div>
+
+<script>
+(function(){
+  var shot = new URLSearchParams(location.search).get('shot');
+  if (shot === 'lock' || shot === 'island') {
+    document.body.classList.add('shot', 'shot-' + shot);
+  }
+})();
+</script>
+</body>
+</html>

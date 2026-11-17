@@ -11,7 +11,7 @@ namespace WorkCountdown
     /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
     public static class AppInfo
     {
-        public const string Version = "4.1.0";
+        public const string Version = "5.0.0";
     }
 
     public class HolidayEntry
@@ -736,8 +736,7 @@ namespace WorkCountdown
         public string edge { get; set; }        // right | left | free
         public int opacity { get; set; }        // 40..100
         public string accent { get; set; }      // #RRGGBB（旧字段，保留兼容）
-        public string theme { get; set; }       // 主题 id（仅默认皮肤用：39 套内置 + 自建）
-        public string skin { get; set; }        // 整体界面主题（皮肤）id：default / quiet / mica / paper / instrument / neon
+        public string theme { get; set; }       // 主题 id：39 套内置 + 用户主题文件（Themes.All）
         public bool alwaysOnTop { get; set; }
         public int autoCollapseSeconds { get; set; }
         public bool showLunch { get; set; }     // 是否显示午休倒计时
@@ -769,7 +768,6 @@ namespace WorkCountdown
             opacity = 94;
             accent = "#4C8DFF";
             theme = "midnight";
-            skin = Skins.DefaultId;
             alwaysOnTop = true;
             autoCollapseSeconds = 20;
             showLunch = true;
@@ -1125,7 +1123,10 @@ namespace WorkCountdown
         public List<HolidayEntry> exceptions { get; set; }
         /// <summary>固定日程（午休/晚休/下班 + 自己加的）。</summary>
         public List<FixedSchedule> schedules { get; set; }
-        /// <summary>自己建的主题。</summary>
+        /// <summary>
+        /// 自己建的主题：v5.0 起只在「旧配置一次性迁移」时读它，迁移后写成 themes\*.theme.json，
+        /// 运行时唯一真源是主题文件（Themes 注册表），这里不再是持久化来源。新配置里这个列表恒为空。
+        /// </summary>
         public List<CustomTheme> customThemes { get; set; }
 
         public LarkSettings lark { get; set; }
@@ -1477,9 +1478,13 @@ namespace WorkCountdown
             if (string.IsNullOrWhiteSpace(s.ui.theme)) s.ui.theme = "midnight";
             bool known = false;
             foreach (var t in Themes.All) { if (t.id == s.ui.theme) { known = true; break; } }
+            // 迁移失败时旧列表还会留在内存里：选中项先别丢，等下次加载把文件补写成功。
+            if (!known && s.customThemes != null)
+            {
+                foreach (var t in s.customThemes)
+                    if (t != null && t.id == s.ui.theme) { known = true; break; }
+            }
             if (!known) s.ui.theme = "midnight";
-            // 整体界面主题（皮肤）：老配置没有这一项 / 空 / 坏值 / 大小写错 → 归到合法 id（默认 default）
-            s.ui.skin = Skins.Get(s.ui.skin).id;
             if (s.ui.edge != "right" && s.ui.edge != "left" && s.ui.edge != "free") s.ui.edge = "right";
             if (s.ui.autoCollapseSeconds < 0) s.ui.autoCollapseSeconds = 0;
             if (s.ui.reminderEffect != "none" && s.ui.reminderEffect != "glow"
@@ -1661,7 +1666,10 @@ namespace WorkCountdown
             return null;
         }
 
-        /// <summary>下班时间（按班次算出来的那个），给固定日程列表显示用。</summary>
+        /// <summary>
+        /// 旧配置里 settings.customThemes 的兼容清理：只做字段补全 / id 去重，供「一次性迁移成
+        /// themes\*.theme.json」时使用，不再把列表装进 Themes 注册表（v5.0 起主题文件是唯一真源）。
+        /// </summary>
         public static void NormalizeCustomThemes(this Settings s)
         {
             if (s.customThemes == null) s.customThemes = new List<CustomTheme>();
@@ -1681,7 +1689,6 @@ namespace WorkCountdown
                 if (!IsHexColor(t.accent)) t.accent = t.bar;
                 if (!IsHexColor(t.bg)) t.bg = null;   // 老主题没有 bg，继续按 accent 推导
             }
-            Themes.SetCustom(s.customThemes);
         }
 
         private static bool IsHexColor(string text)
@@ -1857,11 +1864,20 @@ namespace WorkCountdown
         }
     }
 
-    /// <summary>一套完整的配色。</summary>
+    /// <summary>
+    /// 一套完整的配色。内置 39 套只有颜色；用户主题（themes\*.theme.json）额外带作者 / 说明 /
+    /// 创建时间与文件路径，用来在设置页里区分「内置 / 我的」并支持导出、删除。
+    /// </summary>
     public class ThemeDef
     {
         public string id;
         public string name;
+        public string author;           // 作者（导入的主题可能来自别人；内置为空）
+        public string description;      // 一句说明（设置页 / 导出文件里展示）
+        public string created;          // 创建时间 yyyy-MM-dd HH:mm:ss（用户主题；内置为空）
+        public string filePath;         // 用户主题文件路径；内置主题为 null
+        public bool isUser;             // 是否来自主题文件（等价于 filePath 非空，读取时一起设置）
+
         public Color accent;
         public Color success;
         public Color bgTop;
@@ -1871,49 +1887,86 @@ namespace WorkCountdown
         public Color textMuted;
         public Color textDim;
         public Color edge;
+
+        public ThemeDef Clone()
+        {
+            var t = (ThemeDef)MemberwiseClone();
+            return t;
+        }
     }
 
+    /// <summary>
+    /// 主题注册表：39 套内置 + 用户主题文件（themes\*.theme.json）。
+    /// 用户主题只从文件读（Themes.Reload / 启动时自动），settings.json 不再是主题的真源；
+    /// 旧配置的 customThemes 由 SettingsStore 一次性迁移成文件。
+    /// </summary>
     public static class Themes
     {
         /// <summary>内置的 39 套。</summary>
         public static readonly ThemeDef[] BuiltIn = BuildAll();
 
-        private static readonly List<ThemeDef> custom = new List<ThemeDef>();
+        /// <summary>未知主题 id 时的回退（内置第一套）。</summary>
+        public const string FallbackId = "midnight";
 
-        /// <summary>内置 + 用户自建（自建的排在最后）。</summary>
+        private static readonly List<ThemeDef> user = new List<ThemeDef>();
+
+        /// <summary>内置 + 用户主题（用户主题排在最后，按文件名排序）。</summary>
         public static ThemeDef[] All
         {
             get
             {
-                if (custom.Count == 0) return BuiltIn;
+                if (user.Count == 0) return BuiltIn;
                 var list = new List<ThemeDef>(BuiltIn);
-                list.AddRange(custom);
+                list.AddRange(user);
                 return list.ToArray();
             }
         }
 
-        /// <summary>把用户自建的主题装进来（设置变化后调用）。</summary>
-        public static void SetCustom(List<CustomTheme> list)
+        /// <summary>当前用户主题（文件里的；不含内置）。</summary>
+        public static ThemeDef[] UserThemes
         {
-            custom.Clear();
-            if (list == null) return;
-            foreach (var t in list)
-            {
-                if (t == null || string.IsNullOrWhiteSpace(t.id)) continue;
-                if (!string.IsNullOrWhiteSpace(t.bg))
-                    custom.Add(FromColors(t.id, t.name, t.bg, string.IsNullOrWhiteSpace(t.bar) ? t.accent : t.bar));
-                else
-                    custom.Add(FromAccent(t.id, t.name, string.IsNullOrWhiteSpace(t.bar) ? t.accent : t.bar));
-            }
+            get { return user.ToArray(); }
         }
 
-        public static bool IsCustom(string id)
+        /// <summary>重新扫描主题目录；坏文件跳过，不影响内置主题。</summary>
+        public static void Reload()
         {
-            foreach (var t in custom) if (t.id == id) return true;
+            user.Clear();
+            user.AddRange(ThemeFiles.LoadAll());
+        }
+
+        public static bool IsUser(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return false;
+            foreach (var t in user) if (t.id == id) return true;
             return false;
         }
 
-        /// <summary>从一个主色推导整套配色（自建主题和内置的是同一套算法，保证观感一致）。</summary>
+        /// <summary>设置里当前选中的主题（未知 / null 回退 midnight）。</summary>
+        public static ThemeDef Current(UiSettings ui)
+        {
+            return Get(ui == null ? null : ui.theme);
+        }
+
+        /// <summary>是否需要按磨砂玻璃画：只有「背景风格 = glass」一种来源（v5.0 删皮肤后）。</summary>
+        public static bool UsesGlass(UiSettings ui)
+        {
+            return ui != null && ui.bgStyle == "glass";
+        }
+
+        /// <summary>卡片描边色：主题的 edge（保留给 UI 层，语义和 v4 默认皮肤一致）。</summary>
+        public static Color CardBorderColor(ThemeDef theme)
+        {
+            return theme == null ? Color.Magenta : theme.edge;
+        }
+
+        /// <summary>卡片外光颜色：主题的 accent（保留给 UI 层，语义和 v4 默认皮肤一致）。</summary>
+        public static Color GlowColor(ThemeDef theme)
+        {
+            return theme == null ? Color.Magenta : theme.accent;
+        }
+
+        /// <summary>从主色推导整套配色（旧自建主题迁移用）。</summary>
         public static ThemeDef FromAccent(string id, string name, string hex)
         {
             var one = new List<ThemeDef>();
@@ -2085,14 +2138,27 @@ namespace WorkCountdown
                 (int)Math.Round(hue(hk - 1.0 / 3) * 255));
         }
 
-        private static Color Mix(Color a, Color b, double t)
+        /// <summary>
+        /// 两个颜色按 t（0..1）逐通道插值，含 alpha。数学和 v4 的同名工具函数完全一致，
+        /// 皮肤删除后 Widget / SettingsForm 改用它，默认外观的像素结果不变。
+        /// </summary>
+        public static Color Mix(Color a, Color b, double t)
         {
             if (t < 0) t = 0;
             if (t > 1) t = 1;
             return Color.FromArgb(
+                (int)Math.Round(a.A + (b.A - a.A) * t),
                 (int)Math.Round(a.R + (b.R - a.R) * t),
                 (int)Math.Round(a.G + (b.G - a.G) * t),
                 (int)Math.Round(a.B + (b.B - a.B) * t));
+        }
+
+        /// <summary>保留 RGB、把 alpha 设成 0..1 的比例（等价于 v4 的同名工具函数）。</summary>
+        public static Color Alpha(Color c, double a)
+        {
+            if (a < 0) a = 0;
+            if (a > 1) a = 1;
+            return Color.FromArgb((int)Math.Round(255 * a), c.R, c.G, c.B);
         }
 
         private static ThemeDef Make(string id, string name, string accent, string success, string bgTop, string bgBottom,
@@ -2135,13 +2201,6 @@ namespace WorkCountdown
                     if (t.id == id) return t;
             }
             return All[0];
-        }
-
-        public static string[] Names()
-        {
-            var names = new string[All.Length];
-            for (int i = 0; i < All.Length; i++) names[i] = All[i].name;
-            return names;
         }
     }
 
