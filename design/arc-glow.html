@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型 · 弧光 / Aurora Arc — 卡片</title>
+<!--
+  PROTOTYPE — 弧光 / Aurora Arc（一次性设计原型，勿并入主分支）
+  Chosen: 光路 A「玻内极光」；B/C/D 图层仅作档案，本版不呈现。
+  Scope: 外观=默认；纯色 / 磨砂玻璃两种背景风格都允许开启「弧光」。其它皮肤不叠加。
+  Color rule: 以当前主题的 accent 作 seed；弧光四色的色相 = seed −100° / −45° / 0° / +42°，
+    饱和度下限 68%，亮度压到玻璃可读的 55/64/72/64%；hot / deep 也由 seed 派生。
+    卡片底色、文字、进度条取该主题自己的 ThemeDef，不再另选色板。
+  Demo themes: midnight / aurora / sunset / sakura / forest / ivory（39 套共用同一函数）。
+  URL: ?theme=midnight|aurora|sunset|sakura|forest|ivory & arc=0 & bg=solid & freeze=1
+  Run: 直接用 Chrome 打开本文件；← → 可切主题。
+-->
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:#03060b;color:#e9f1ff;font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;
+    overflow:hidden;-webkit-font-smoothing:antialiased}
+  :root{
+    --arc1:#22e3c8;--arc2:#4d8dff;--arc3:#a8ff8e;--arc4:#8b7cff;--arc-hot:#eafffb;--arc-deep:#1b5cff;
+    --ct:#12161F;--cb:#1B2130;--tx:#E8EDF7;--mu:#8B95A8;--dm:#6C768A;--ac:#4C8DFF;
+    --track:rgba(255,255,255,.14);--edge:rgba(190,215,255,.20);
+    --ct-rgb:18,22,31;--cb-rgb:27,33,48;--glass-top:.76;--glass-bottom:.86;
+    --win:#f2f5f9;--win2:#fff;--ink:#1d2634;--ink2:#5b687b;--line:#e3e8f0;--blue:#2f6fe4;
+  }
+
+  /* ================= 桌面壁纸：Vista 式极光 + 暗角 ================= */
+  .wall{position:fixed;inset:0;overflow:hidden;background:#03060b;z-index:0}
+  .wall .base{position:absolute;inset:0;background:
+    radial-gradient(120% 95% at 70% -12%,rgba(128,142,164,.26),transparent 58%),
+    radial-gradient(85% 80% at 88% 66%,rgba(24,104,166,.20),transparent 62%),
+    radial-gradient(55% 55% at 42% 112%,rgba(9,58,52,.16),transparent 70%),
+    linear-gradient(158deg,#04070d 0%,#07101a 44%,#03060b 100%)}
+  .wall .shaft{position:absolute;filter:blur(38px);mix-blend-mode:screen;opacity:.30;transform-origin:50% 0}
+  .wall .s1{width:23vw;height:135vh;left:41%;top:-42%;transform:rotate(8deg);
+    background:linear-gradient(90deg,transparent,rgba(160,178,200,.42) 38%,rgba(190,205,225,.22) 60%,transparent)}
+  .wall .s2{width:13vw;height:120vh;left:59%;top:-32%;transform:rotate(12deg);opacity:.20;
+    background:linear-gradient(90deg,transparent,rgba(200,214,230,.55),transparent)}
+  .wall .s3{width:30vw;height:110vh;left:72%;top:-24%;transform:rotate(18deg);opacity:.17;
+    background:linear-gradient(90deg,transparent,rgba(110,150,185,.45),transparent)}
+  .wall .s4{width:18vw;height:90vh;left:18%;top:-16%;transform:rotate(-9deg);opacity:.13;
+    background:linear-gradient(90deg,transparent,rgba(140,160,190,.5),transparent)}
+  .wall-lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+  .wall-lines .ribbon{filter:drop-shadow(0 0 6px currentColor);opacity:.55}
+  .wall-lines .haze{opacity:.16;filter:blur(9px)}
+  .wall-lines .breathe{animation:wallBreath 30s ease-in-out infinite alternate}
+  @keyframes wallBreath{from{opacity:.35}to{opacity:.68}}
+  .wall .grain{position:absolute;inset:0;opacity:.055;mix-blend-mode:overlay;pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E")}
+  .wall .vignette{position:absolute;inset:0;pointer-events:none;background:
+    radial-gradient(115% 95% at 50% 42%,transparent 38%,rgba(0,0,0,.38) 78%,rgba(0,0,0,.72) 100%)}
+
+  /* ================= 顶部：标题 / 光色实验 ================= */
+  .frame{position:relative;min-height:820px;height:100vh;z-index:2}
+  .topbar{position:absolute;top:32px;left:48px;right:48px;display:flex;align-items:flex-start;justify-content:space-between;gap:24px;z-index:6}
+  .kicker{font-family:"Bahnschrift","Consolas",sans-serif;font-size:11px;letter-spacing:.30em;color:#7f8ca3;font-weight:600}
+  .title-row{display:flex;align-items:baseline;gap:14px;margin-top:9px}
+  h1{margin:0;font-size:46px;line-height:1;letter-spacing:.02em;font-weight:700;
+    background:linear-gradient(100deg,#f0f6ff 15%,color-mix(in srgb,var(--arc1) 62%,#fff) 55%,color-mix(in srgb,var(--arc2) 82%,#fff) 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .title-row .en{font-family:"Bahnschrift",sans-serif;font-size:11px;letter-spacing:.22em;color:#68758a;text-transform:uppercase}
+  .sub{margin:11px 0 0;font-size:13px;line-height:1.7;color:#93a1b8}
+  .sub b{color:#dbe5f3;font-weight:600}
+
+  .themebar{display:flex;align-items:center;gap:5px;padding:6px 8px;border-radius:999px;
+    background:rgba(9,15,25,.58);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(14px);
+    transition:opacity .35s}
+  .themebar .plabel{font-size:10.5px;letter-spacing:.14em;color:#7d8ba0;padding:0 7px 0 4px;font-family:"Bahnschrift",sans-serif;white-space:nowrap}
+  .tchip{height:28px;padding:0 9px 0 7px;border-radius:999px;border:1px solid rgba(255,255,255,.12);
+    background:rgba(255,255,255,.04);color:#c7d2e2;font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;
+    transition:border-color .2s,background .2s,transform .2s;white-space:nowrap}
+  .tchip .seed{width:12px;height:12px;border-radius:50%;display:block;background:var(--seed);
+    box-shadow:0 0 7px color-mix(in srgb,var(--seed) 62%,transparent)}
+  .tchip:hover{background:rgba(255,255,255,.08);transform:translateY(-1px)}
+  .tchip.on{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.34);color:#eff5ff;box-shadow:0 0 0 2px rgba(255,255,255,.06) inset}
+  body[data-arc="off"] .themebar{opacity:.42}
+
+  /* ================= 布局 ================= */
+  .layout{position:absolute;top:150px;left:48px;right:48px;bottom:84px;display:flex;align-items:center;gap:56px;z-index:5}
+  .stage{flex:1;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;min-width:0}
+  .stage::before{content:"";position:absolute;inset:-6% -4%;background:radial-gradient(58% 56% at 50% 48%,rgba(2,5,11,.50),transparent 72%);pointer-events:none;z-index:0}
+
+  /* ================= 设置面板：WinForms 外观页的 HTML 还原 ================= */
+  .settings{width:430px;flex:0 0 430px;background:var(--win);color:var(--ink);border-radius:10px;overflow:hidden;
+    box-shadow:0 42px 100px rgba(0,0,0,.58),0 0 0 1px rgba(255,255,255,.55),
+      0 0 0 8px rgba(8,14,24,.10);
+    font-size:13px;line-height:1.5;user-select:none}
+  .settings .titlebar{height:40px;display:flex;align-items:center;padding:0 12px;background:#fbfcfe;border-bottom:1px solid #e6eaf1;color:#687487}
+  .settings .titlebar .app{font-weight:600;color:#3d485a}
+  .settings .titlebar .ver{font-size:11px;color:#98a2b2;margin-left:6px}
+  .settings .titlebar .x{margin-left:auto;color:#8c96a6;font-size:15px;line-height:1}
+  .settings .shell{display:flex;height:580px}
+  .rail{width:110px;flex:0 0 110px;background:#f7f9fc;border-right:1px solid #e8edf4;padding:14px 9px;display:flex;flex-direction:column;gap:4px}
+  .rail .ritem{height:34px;border-radius:8px;display:flex;align-items:center;gap:6px;padding:0 9px;color:#667287;font-size:12.5px;white-space:nowrap}
+  .rail .ritem .ic{width:15px;text-align:center;font-size:12.5px;color:#95a0b1}
+  .rail .ritem.on{background:#eaf1fc;color:#235ac2;font-weight:600}
+  .rail .ritem.on .ic{color:#2f6fe4}
+  .rail .grow{flex:1}
+  .rail .cfg{font-size:9.5px;line-height:1.55;color:#a5afbd;padding:0 6px 6px;word-break:break-all}
+  .pane{flex:1;min-width:0;padding:14px 16px 0;display:flex;flex-direction:column;background:#f2f5f9}
+  .pane > *{flex-shrink:0}
+  .pane h2{margin:0;font-size:21px;line-height:1.1;color:#1f2938;letter-spacing:.01em}
+  .pane .ph{margin:5px 0 12px;font-size:11.5px;color:#8b97a8}
+  .cardbox{background:#fff;border:1px solid #e2e8f1;border-radius:8px;padding:11px 12px;margin-bottom:9px;box-shadow:0 1px 2px rgba(20,40,80,.03)}
+  .cardbox:last-child{margin-bottom:0}
+  .boxhead{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:9px}
+  .boxhead b{font-size:13px;color:#303b4c;font-weight:600}
+  .boxhead span{font-size:10.5px;color:#98a3b3}
+  .skins{display:flex;gap:6px}
+  .skin{flex:1;height:42px;border-radius:6px;border:1px solid #dfe5ee;background:#f9fbfd;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:1px;color:#58657a;font-size:11px;position:relative}
+  .skin.on{border-color:#2f6fe4;box-shadow:0 0 0 2px rgba(47,111,228,.15);color:#235ac2;background:#fff}
+  .skin.on::after{content:"";position:absolute;left:8px;right:8px;bottom:3px;height:2px;border-radius:2px;background:linear-gradient(90deg,#2f6fe4,#71a8ff)}
+  .skin.off{opacity:.5}
+  .skin .dot{width:8px;height:8px;border-radius:50%;margin-bottom:2px}
+  .swatches{display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin:1px 0 9px}
+  .sw{aspect-ratio:1.55/1;border-radius:4px;border:1px solid rgba(20,30,50,.13);position:relative;cursor:pointer;overflow:hidden}
+  .sw::after{content:"";position:absolute;left:0;right:0;bottom:0;height:37%;background:var(--sw2)}
+  .sw.on{box-shadow:0 0 0 2px #fff,0 0 0 3px #2f6fe4}
+  .themerow{display:flex;align-items:center;gap:6px;font-size:11px;color:#7f8a9b;white-space:nowrap}
+  .themerow b{color:#4c586b;font-weight:600}
+  .themerow .spacer{flex:1}
+  .ghostbtn{height:24px;padding:0 8px;border-radius:5px;border:1px solid #cfd8e5;background:#fff;color:#4d5a6d;font-size:10.5px}
+  .ghostbtn.blue{border-color:#9fbeef;color:#235ac2}
+  .bgrow{display:flex;align-items:center;gap:6px;margin-top:2px}
+  .bgopt{display:flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:6px;border:1px solid transparent;color:#5d697c;font-size:11.5px;cursor:pointer}
+  .bgopt .radio{width:12px;height:12px;border-radius:50%;border:1.5px solid #9aa6b7;display:inline-block;position:relative;flex:none}
+  .bgopt.on{background:#f0f5ff;border-color:#bcd2f5;color:#235ac2}
+  .bgopt.on .radio{border-color:#2f6fe4}
+  .bgopt.on .radio::after{content:"";position:absolute;inset:2px;border-radius:50%;background:#2f6fe4}
+  .bghint{font-size:10px;color:#a0aaba;line-height:1.55;margin-top:7px}
+  .arcbox{margin-top:1px;background:
+      radial-gradient(110% 160% at 100% 0%,rgba(77,141,255,.13),transparent 60%),
+      radial-gradient(90% 120% at 0% 100%,rgba(34,227,200,.10),transparent 58%),
+      #fff;
+    border:1px solid #cfdef3;border-radius:9px;padding:13px 14px 12px;position:relative;overflow:hidden;
+    box-shadow:0 6px 20px -12px rgba(47,111,228,.35)}
+  .arcbox .inline-new{font-family:"Bahnschrift",sans-serif;font-size:8px;letter-spacing:.16em;vertical-align:2px;
+    color:#fff;background:linear-gradient(90deg,#2f6fe4,#12bfae);padding:2px 5px;border-radius:3px;opacity:.9}
+  .minirows{display:flex;flex-direction:column;gap:6px;margin-top:1px}
+  .minirow{display:flex;align-items:center;gap:7px;font-size:11px;color:#5f6b7e}
+  .minirow .num{height:22px;min-width:44px;padding:0 7px;border:1px solid #d6dde8;border-radius:4px;background:#fff;display:inline-flex;align-items:center;justify-content:flex-end;font-size:11px;color:#4d5a6d}
+  .minirow .check{width:12px;height:12px;border:1px solid #c6d0de;border-radius:3px;background:#fff;display:inline-block;flex:none}
+  .minirow .note{margin-left:auto;font-size:10px;color:#9aa5b5}
+  .minirow .grow{flex:1}
+  .dsrow{display:flex;align-items:center;gap:5px;margin-top:2px}
+  .dsrow .seeddot{width:21px;height:21px;border-radius:50%;display:block;box-shadow:0 0 0 2px #fff,0 0 0 3px #dde6f2}
+  .dsrow .arr{font-size:10px;color:#9aa6b6;margin:0 2px}
+  .dsrow .dsw{width:21px;height:21px;border-radius:50%;display:block;border:1px solid rgba(20,30,50,.14);box-shadow:0 0 0 1px rgba(255,255,255,.6)}
+  .dsrow .dhue{margin-left:auto;font-size:8.5px;line-height:1.4;text-align:right;color:#98a3b3;font-family:"Bahnschrift",sans-serif;letter-spacing:.02em}
+  .archead{display:flex;align-items:center;gap:11px}
+  .arcglyph{width:38px;height:38px;flex:none;border-radius:10px;position:relative;display:grid;place-items:center;
+    background:linear-gradient(145deg,#101a2b,#0a111d);border:1px solid rgba(90,150,255,.28);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.08);overflow:hidden;transition:box-shadow .35s,border-color .35s}
+  .arcglyph svg{width:30px;height:24px;overflow:visible}
+  .arcglyph .g1{stroke:var(--arc1);filter:drop-shadow(0 0 4px color-mix(in srgb,var(--arc1) 70%,transparent))}
+  .arcglyph .g2{stroke:var(--arc2);filter:drop-shadow(0 0 4px color-mix(in srgb,var(--arc2) 70%,transparent))}
+  body[data-arc="on"] .arcglyph{border-color:rgba(110,190,255,.62);box-shadow:0 0 0 3px rgba(76,141,255,.10),0 0 18px rgba(50,160,255,.36),inset 0 1px 0 rgba(255,255,255,.1)}
+  body[data-arc="off"] .arcglyph{filter:saturate(.2) brightness(.9);opacity:.6}
+  .arcglyph::after{content:"";position:absolute;inset:-30%;background:linear-gradient(115deg,transparent 35%,rgba(120,220,255,.18) 50%,transparent 62%);transform:translateX(-30%)}
+  .arcopy{min-width:0;flex:1}
+  .arcopy .at{font-size:14.5px;font-weight:700;color:#202b3c;display:flex;align-items:center;gap:7px;letter-spacing:.02em}
+  .arcopy .ad{font-size:10.5px;color:#818da0;margin-top:2px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .switch{width:50px;height:28px;flex:none;border-radius:99px;background:#dce3ed;border:1px solid #ccd5e1;position:relative;cursor:pointer;padding:0;
+    transition:background .3s,border-color .3s,box-shadow .3s;overflow:hidden}
+  .switch .knob{position:absolute;left:2px;top:2px;width:22px;height:22px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 3px rgba(15,30,50,.3);transition:transform .3s cubic-bezier(.2,.9,.3,1.1);z-index:2}
+  .switch[aria-checked="true"]{background:linear-gradient(90deg,var(--arc1),var(--arc2) 55%,var(--arc4));border-color:color-mix(in srgb,var(--arc2) 55%,transparent);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--arc2) 14%,transparent),0 4px 12px color-mix(in srgb,var(--arc2) 32%,transparent)}
+  .switch[aria-checked="true"] .knob{transform:translateX(22px)}
+  .switch[aria-checked="true"]::after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,transparent 20%,rgba(255,255,255,.24) 42%,transparent 62%);
+    animation:switchSheen 3.4s ease-in-out infinite}
+  @keyframes switchSheen{0%,55%{transform:translateX(-65%)}85%,100%{transform:translateX(75%)}}
+  .switch:disabled{opacity:.42;cursor:not-allowed}
+  .switch:focus-visible{outline:2px solid #2f6fe4;outline-offset:2px}
+  .arcstate{display:flex;align-items:center;gap:6px;margin-top:7px;padding-top:6px;border-top:1px dashed #e2e9f4;font-size:10.5px;color:#8a95a5}
+  .arcstate .bead{width:5px;height:5px;border-radius:50%;background:#12bfae;box-shadow:0 0 7px rgba(18,191,174,.6)}
+  body[data-arc="off"] .arcstate .bead{background:#b9c3d0;box-shadow:none}
+  .arcstate b{color:#4f5d70;font-weight:600}
+  .arcstate .lock{margin-left:auto;color:#9aa6b6}
+  .foot{height:46px;margin-top:auto;display:flex;align-items:center;gap:8px;padding:0 15px;border-top:1px solid #e4e9f1;background:#fbfcfe;color:#9aa5b5;font-size:10.5px}
+  .foot .path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .btn{height:28px;padding:0 18px;border-radius:5px;border:1px solid #c8d1de;background:#fff;color:#48566a;font-size:11.5px}
+  .btn.primary{background:#2f6fe4;border-color:#2f6fe4;color:#fff;box-shadow:0 2px 6px rgba(47,111,228,.28)}
+
+  /* ================= 卡片舞台 ================= */
+  .widget-area{display:flex;flex-direction:column;align-items:center;gap:22px;position:relative;z-index:1}
+  .widget{position:relative;isolation:isolate}
+  .big-widget{width:460px;height:310px}
+  .mini-widget{width:360px;height:110px;margin-right:100px}
+  .card{position:relative;width:100%;height:100%;border-radius:30px;border:1px solid var(--edge);
+    background:
+      radial-gradient(120% 130% at 78% 108%,color-mix(in srgb,var(--ac) 13%,transparent),transparent 58%),
+      linear-gradient(180deg,rgba(var(--ct-rgb),var(--glass-top)),rgba(var(--cb-rgb),var(--glass-bottom)));
+    box-shadow:0 32px 64px -20px rgba(0,0,0,.72),0 2px 0 rgba(255,255,255,.03) inset,inset 0 1px 0 rgba(255,255,255,.14);
+    backdrop-filter:blur(20px) saturate(140%);-webkit-backdrop-filter:blur(20px) saturate(140%);
+    overflow:hidden;z-index:1;transition:background .5s,border-color .4s,box-shadow .5s}
+  .mini-widget .card{border-radius:24px}
+  body[data-bg="solid"] .card{background:linear-gradient(180deg,rgba(var(--ct-rgb),.96),rgba(var(--cb-rgb),.98));backdrop-filter:none;-webkit-backdrop-filter:none;
+    border-color:var(--edge);box-shadow:0 32px 64px -20px rgba(0,0,0,.72),inset 0 1px 0 rgba(255,255,255,.10)}
+  .fx-in{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;border-radius:inherit;opacity:0;transition:opacity .55s}
+  .sheen{position:absolute;inset:0;z-index:3;pointer-events:none;border-radius:inherit;
+    background:
+      linear-gradient(118deg,transparent 28%,rgba(255,255,255,.055) 37%,rgba(255,255,255,.015) 45%,transparent 55%),
+      linear-gradient(180deg,rgba(255,255,255,.16),transparent 12%,transparent 82%,rgba(0,0,0,.24));}
+  .grain{position:absolute;inset:0;z-index:3;pointer-events:none;border-radius:inherit;opacity:.06;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='150' height='150' filter='url(%23n)' opacity='0.62'/%3E%3C/svg%3E")}
+  .content{position:absolute;inset:0;z-index:4;padding:24px 28px 20px;display:flex;flex-direction:column;color:var(--tx)}
+  .mini-widget .content{padding:13px 19px 11px}
+
+  .row-top{display:flex;align-items:center;gap:8px;font-size:15px;color:color-mix(in srgb,var(--tx) 84%,transparent)}
+  .live{width:7px;height:7px;border-radius:50%;background:var(--ac);box-shadow:0 0 10px color-mix(in srgb,var(--ac) 85%,transparent)}
+  .tools{margin-left:auto;display:flex;align-items:center;gap:18px;color:color-mix(in srgb,var(--dm) 75%,transparent)}
+  .tools svg{width:17px;height:17px;display:block}
+  .mini-widget .row-top{font-size:11.5px;color:color-mix(in srgb,var(--tx) 78%,transparent)}
+  .mini-widget .live{width:5px;height:5px}
+  .cap{margin-top:16px;font-size:15px;color:var(--mu)}
+  .mini-widget .cap{margin:0;font-size:11px}
+  .time{margin-top:2px;font-family:Consolas,"Cascadia Mono","SFMono-Regular",monospace;font-weight:700;
+    font-size:61px;line-height:1.02;letter-spacing:.4px;color:var(--tx);text-shadow:0 2px 22px rgba(4,10,22,.45)}
+  .mini-widget .time{font-size:29px;line-height:1.1;margin-top:1px;letter-spacing:.2px}
+  .bar{position:relative;height:10px;border-radius:6px;background:var(--track);margin-top:14px;overflow:hidden;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,.35)}
+  .bar .fill{position:absolute;inset:0 auto 0 0;width:82%;border-radius:6px;
+    background:linear-gradient(90deg,color-mix(in srgb,var(--ac) 55%,#02040a),var(--ac));box-shadow:0 0 16px color-mix(in srgb,var(--ac) 50%,transparent);overflow:hidden}
+  .bar .fill::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent 20%,rgba(255,255,255,.38) 48%,transparent 72%);
+    background-size:55% 100%;animation:flow 4.6s linear infinite}
+  @keyframes flow{from{transform:translateX(-100%)}to{transform:translateX(240%)}}
+  .mini-widget .bar{height:4px;margin-top:7px;border-radius:3px}
+  .mini-widget .bar .fill::after{animation-duration:5.4s}
+  .meta{margin-top:11px;font-size:15px;color:var(--mu);display:flex;align-items:center;gap:7px;white-space:nowrap}
+  .meta b{color:var(--tx);font-weight:500}
+  .meta .sep{color:var(--dm)}
+  .next{margin-top:7px;font-size:15px;color:var(--mu);display:flex;align-items:center;gap:8px}
+  .next b{color:var(--tx);font-weight:600}
+  .footnote{margin-top:auto;font-size:13px;color:var(--dm);letter-spacing:.01em}
+  .mini-widget .footnote{display:none}
+  .mini-right{margin-left:auto;font-size:11px;color:var(--mu)}
+  .mini-numrow{display:flex;align-items:baseline}
+
+  /* ================= A · 玻璃内的极光 ================= */
+  .veil{position:absolute;mix-blend-mode:screen;filter:blur(19px);border-radius:40%;pointer-events:none}
+  .v-a{width:126%;height:70%;left:-38%;top:-10%;transform:rotate(-16deg);
+    background:linear-gradient(93deg,transparent 6%,color-mix(in srgb,var(--arc2) 46%,transparent) 32%,
+      color-mix(in srgb,var(--arc1) 62%,transparent) 52%,color-mix(in srgb,var(--arc3) 34%,transparent) 69%,transparent 88%);
+    opacity:.52;animation:aDrift 22s ease-in-out infinite alternate}
+  .v-b{width:110%;height:38%;left:-14%;top:47%;transform:rotate(-20deg);
+    background:linear-gradient(90deg,transparent 12%,color-mix(in srgb,var(--arc3) 30%,transparent) 38%,
+      color-mix(in srgb,var(--arc1) 40%,transparent) 60%,transparent 86%);
+    opacity:.36;animation:aDrift2 28s ease-in-out infinite alternate}
+  .v-c{width:70%;height:80%;right:-14%;top:-22%;transform:rotate(12deg);
+    background:radial-gradient(ellipse at 50% 50%,color-mix(in srgb,var(--arc4) 44%,transparent),transparent 68%);
+    opacity:.30;filter:blur(26px);animation:aDrift3 19s ease-in-out infinite alternate}
+  @keyframes aDrift{from{transform:rotate(-16deg) translate3d(-14px,6px,0) scale(1.02)}to{transform:rotate(-12deg) translate3d(16px,-8px,0) scale(1.06)}}
+  @keyframes aDrift2{from{transform:rotate(-20deg) translate3d(10px,8px,0)}to{transform:rotate(-16deg) translate3d(-18px,-5px,0)}}
+  @keyframes aDrift3{from{transform:rotate(12deg) translate3d(0,-4px,0);opacity:.22}to{transform:rotate(8deg) translate3d(-8px,8px,0);opacity:.34}}
+  .vein{position:absolute;height:1.5px;mix-blend-mode:screen;transform-origin:0 50%;
+    background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--arc-hot) 75%,transparent) 38%,color-mix(in srgb,var(--arc1) 88%,transparent) 64%,transparent);
+    filter:drop-shadow(0 0 7px color-mix(in srgb,var(--arc1) 70%,transparent));opacity:.8}
+  .n1{left:18%;top:31%;width:58%;transform:rotate(-17deg)}
+  .n2{left:8%;top:49%;width:78%;transform:rotate(-20deg);opacity:.55;height:1px}
+  .n3{left:36%;top:23%;width:44%;transform:rotate(-15deg);opacity:.5}
+  .n4{left:46%;top:66%;width:52%;transform:rotate(-22deg);opacity:.42;height:2px}
+  .in-arcs{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .in-arcs path{fill:none;mix-blend-mode:screen;stroke-linecap:round}
+  .in-arcs .sharp{filter:drop-shadow(0 0 8px color-mix(in srgb,var(--arc1) 60%,transparent))}
+  .in-arcs .soft path{filter:blur(9px)}
+  .in-arcs .soft-path{filter:blur(6px)}
+  .fx-in::after{content:"";position:absolute;right:-16%;bottom:-34%;width:72%;height:98%;pointer-events:none;
+    mix-blend-mode:screen;filter:blur(20px);opacity:.52;
+    background:radial-gradient(ellipse at 58% 60%,color-mix(in srgb,var(--arc1) 38%,transparent),transparent 66%)}
+  [data-variant="A"] .fx-in{opacity:1}
+  [data-variant="A"] .ambient{opacity:.5}
+  body[data-theme="ivory"] .fx-in{opacity:.82}
+  body[data-theme="ivory"] .ambient{opacity:.18}
+  body[data-theme="ivory"] .sheen{opacity:.66}
+  body[data-theme="ivory"] .time{text-shadow:none}
+  body[data-theme="ivory"] .veil,
+  body[data-theme="ivory"] .fx-in::after{mix-blend-mode:multiply}
+  body[data-theme="ivory"] .in-arcs path{mix-blend-mode:normal}
+  body[data-theme="ivory"] .fx-in::after{opacity:.32}
+
+  /* ================= 环境柔光（四种都有一点） ================= */
+  .ambient{position:absolute;inset:-72px;border-radius:66px;pointer-events:none;z-index:0;opacity:0;filter:blur(30px);
+    background:
+      radial-gradient(38% 44% at 82% 78%,color-mix(in srgb,var(--arc1) 38%,transparent),transparent 72%),
+      radial-gradient(44% 52% at 86% 30%,color-mix(in srgb,var(--arc2) 28%,transparent),transparent 70%),
+      radial-gradient(40% 40% at 18% 42%,color-mix(in srgb,var(--arc-deep) 24%,transparent),transparent 72%);
+    transition:opacity .7s}
+  [data-variant="B"] .ambient{opacity:.34}
+  [data-variant="C"] .ambient{opacity:.28}
+  [data-variant="D"] .ambient{opacity:.46}
+  .bbox{position:absolute;left:0;right:0;bottom:0;height:16%;border-radius:0 0 30px 30px;
+    background:linear-gradient(0deg,color-mix(in srgb,var(--arc1) 12%,transparent),transparent);opacity:.5}
+
+  /* ================= B · 贴边弧光 ================= */
+  .rim{position:absolute;inset:-1px;z-index:5;pointer-events:none;border-radius:inherit;opacity:0;transition:opacity .55s}
+  .rim::before,.rim::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:2.2px;
+    background:conic-gradient(from 86deg at 50% 50%,
+      transparent 0deg,color-mix(in srgb,var(--arc2) 24%,transparent) 16deg,
+      var(--arc1) 34deg,var(--arc-hot) 42deg,var(--arc2) 54deg,transparent 82deg,
+      transparent 196deg,color-mix(in srgb,var(--arc3) 30%,transparent) 224deg,
+      color-mix(in srgb,var(--arc2) 55%,transparent) 244deg,transparent 284deg);
+    -webkit-mask-image:linear-gradient(#000 0 0),linear-gradient(#000 0 0);
+    -webkit-mask-size:100% 100%;-webkit-mask-clip:content-box,border-box;-webkit-mask-composite:xor;
+    mask-image:linear-gradient(#000 0 0),linear-gradient(#000 0 0);
+    mask-size:100% 100%;mask-clip:content-box,border-box;mask-composite:exclude}
+  .rim::before{opacity:.95}
+  .rim::after{opacity:.8;filter:blur(10px)}
+  .rim .spill{position:absolute;right:-26px;bottom:-30px;width:226px;height:164px;
+    background:radial-gradient(ellipse at 62% 68%,color-mix(in srgb,var(--arc1) 42%,transparent),transparent 68%);
+    filter:blur(16px)}
+  .rim .spill2{position:absolute;left:-22px;top:-28px;width:150px;height:116px;
+    background:radial-gradient(ellipse at 42% 44%,color-mix(in srgb,var(--arc2) 30%,transparent),transparent 70%);
+    filter:blur(14px);opacity:.7}
+  .rim .hot{position:absolute;right:32px;bottom:-8px;width:210px;height:100px;transform:rotate(-8deg);
+    background:radial-gradient(ellipse at 62% 100%,color-mix(in srgb,var(--arc-hot) 80%,transparent),
+      color-mix(in srgb,var(--arc1) 48%,transparent) 36%,transparent 72%);
+    filter:blur(11px);opacity:.8}
+  .mini-widget .rim .hot{width:150px;height:70px;right:18px}
+  .rim-arcs{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+  .rim-hot{filter:drop-shadow(0 0 7px color-mix(in srgb,var(--arc-hot) 48%,transparent))}
+  .refl{position:absolute;inset:0;z-index:2;pointer-events:none;border-radius:inherit;overflow:hidden;opacity:0;transition:opacity .5s;
+    background:
+      linear-gradient(116deg,transparent 36%,color-mix(in srgb,var(--arc1) 10%,transparent) 50%,transparent 64%),
+      linear-gradient(116deg,transparent 62%,color-mix(in srgb,var(--arc2) 8%,transparent) 70%,transparent 80%);
+    filter:blur(2px);mix-blend-mode:screen}
+  [data-variant="D"] .refl{opacity:.9}
+  [data-variant="B"] .rim{opacity:1;animation:rimBreathe 7s ease-in-out infinite alternate}
+  @keyframes rimBreathe{from{filter:brightness(.92)}to{filter:brightness(1.12)}}
+  .mini-widget .rim .spill{width:120px;height:80px}
+
+  /* ================= C · 掠过 ================= */
+  .beam-out,.beam-in{position:absolute;inset:-160px;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .5s}
+  .beam-out{z-index:0}
+  .beam-in{z-index:2;inset:0;border-radius:inherit;display:none}
+  [data-variant="C"] .beam-out{opacity:1}
+  [data-variant="C"] .beam-in{display:block;opacity:1}
+  .streaks{position:absolute;left:50%;top:50%;width:760px;height:200px;transform:translate(-50%,-50%) rotate(-22deg);
+    animation:sweep 12.5s cubic-bezier(.3,.55,.25,1) infinite}
+  .mini-widget .streaks{width:560px;height:150px}
+  .streaks i{position:absolute;display:block;height:2px;border-radius:2px;
+    background:linear-gradient(90deg,transparent 2%,color-mix(in srgb,var(--arc2) 45%,transparent) 22%,
+      var(--arc1) 43%,var(--arc-hot) 56%,var(--arc1) 70%,color-mix(in srgb,var(--arc2) 55%,transparent) 88%,transparent 98%);
+    filter:blur(1px) drop-shadow(0 0 10px color-mix(in srgb,var(--arc1) 60%,transparent));opacity:.95}
+  .streaks i:nth-child(1){top:32%;width:100%;height:7px;filter:blur(9px);opacity:.55}
+  .streaks i:nth-child(2){top:42%;width:96%;left:2%}
+  .streaks i:nth-child(3){top:50%;width:88%;left:7%;height:3.5px;opacity:.8}
+  .streaks i:nth-child(4){top:58%;width:72%;left:16%;height:1px;opacity:.55}
+  .streaks i:nth-child(5){top:36%;width:58%;left:30%;height:9px;filter:blur(14px);opacity:.35}
+  @keyframes sweep{
+    0%,52%{transform:translate(-168%,-50%) rotate(-22deg);opacity:0}
+    57%{opacity:.9}
+    68%{transform:translate(-42%,-50%) rotate(-22deg);opacity:1}
+    79%{transform:translate(72%,-50%) rotate(-22deg);opacity:.92}
+    84%,100%{transform:translate(82%,-50%) rotate(-22deg);opacity:0}}
+  .beam-core{position:absolute;left:38%;top:42%;width:60%;height:40%;
+    background:radial-gradient(ellipse at 30% 40%,color-mix(in srgb,var(--arc1) 26%,transparent),transparent 66%);
+    filter:blur(18px);animation:beamHalo 12.5s ease-in-out infinite}
+  @keyframes beamHalo{0%,52%{opacity:0}62%{opacity:.6}78%{opacity:.8}86%,100%{opacity:0}}
+
+  /* ================= D · 外侧光带 ================= */
+  .orbit{position:absolute;left:50%;top:50%;width:780px;height:600px;transform:translate(-50%,-50%);z-index:0;
+    pointer-events:none;opacity:0;transition:opacity .6s;overflow:visible}
+  [data-variant="D"] .orbit{opacity:1}
+  .mini-widget .orbit{display:none}
+  .orbit .og{animation:orbSway 26s ease-in-out infinite alternate}
+  @keyframes orbSway{from{transform:translate3d(-7px,4px,0) rotate(-.7deg)}to{transform:translate3d(9px,-5px,0) rotate(.9deg)}}
+  .orbit path{fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .orbit .haze{filter:blur(13px);opacity:.32}
+  .orbit .fine{opacity:.95;filter:drop-shadow(0 0 9px color-mix(in srgb,var(--arc1) 60%,transparent))}
+  .orbit .sparkle{opacity:.9;animation:orbSpark 9s ease-in-out infinite alternate}
+  @keyframes orbSpark{from{opacity:.45}to{opacity:.95}}
+
+  /* ================= 开关关闭 / 纯色 ================= */
+  body[data-arc="off"] .fx-in,
+  body[data-arc="off"] .rim,
+  body[data-arc="off"] .orbit,
+  body[data-arc="off"] .beam-out,
+  body[data-arc="off"] .beam-in,
+  body[data-arc="off"] .refl,
+  body[data-arc="off"] .ambient{opacity:0!important}
+
+  /* ================= 说明 / 变体切换 ================= */
+  .caption{width:550px;max-width:100%;margin-top:20px;padding:13px 16px 12px;border-radius:12px;
+    background:rgba(8,14,24,.62);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(16px);
+    box-shadow:0 16px 40px rgba(0,0,0,.28);color:#93a1b8;position:relative;z-index:3}
+  .caption .cline{display:flex;align-items:baseline;gap:9px}
+  .caption .key{font-family:"Bahnschrift",sans-serif;font-size:10.5px;letter-spacing:.18em;color:#6f7d93}
+  .caption .cname{font-size:15px;font-weight:600;color:#e5edf9;letter-spacing:.01em}
+  .caption p{margin:7px 0 0;font-size:11.5px;line-height:1.7;color:#93a2b8}
+  .caption .cmeta{margin-top:8px;display:flex;align-items:center;gap:6px;font-size:10px;color:#75839a;letter-spacing:.02em;flex-wrap:wrap}
+  .caption .cmeta b{color:#bcc9dc;font-weight:500}
+  .caption .cmeta .d{width:3px;height:3px;border-radius:50%;background:#536076}
+  .derive{display:flex;align-items:center;gap:9px;margin-top:9px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.10);font-size:9.5px;color:#75839a;white-space:nowrap}
+  .derive .dlab{letter-spacing:.12em;color:#8492a8;font-family:"Bahnschrift",sans-serif}
+  .derive .stop{display:inline-flex;align-items:center;gap:5px;color:#9ba9bd}
+  .derive .stop i{width:8px;height:8px;border-radius:50%;display:block;box-shadow:0 0 6px currentColor}
+  .derive .stop b{font-family:"Bahnschrift",sans-serif;font-weight:500;font-size:9px;color:#aebbd0}
+  .derive .rule{margin-left:auto;color:#68768c;font-size:9px}
+  .caption .state{display:inline-flex;align-items:center;gap:5px;margin-left:auto}
+  .caption .state i{width:5px;height:5px;border-radius:50%;background:var(--arc1);box-shadow:0 0 7px var(--arc1)}
+  body[data-arc="off"] .caption .state i{background:#66748a;box-shadow:none}
+
+  .switcher{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:30;
+    display:flex;align-items:center;gap:2px;padding:5px;border-radius:999px;
+    background:rgba(11,17,28,.86);border:1px solid rgba(255,255,255,.13);
+    box-shadow:0 16px 40px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.08);backdrop-filter:blur(18px);
+    color:#dbe5f3;user-select:none}
+  .switcher button{width:34px;height:34px;border-radius:50%;border:0;background:transparent;color:#8fa0b8;font-size:16px;cursor:pointer;display:grid;place-items:center;transition:background .2s,color .2s}
+  .switcher button:hover{background:rgba(255,255,255,.09);color:#fff}
+  .switcher .smid{min-width:318px;text-align:center;padding:0 8px}
+  .switcher .sname{font-size:12.5px;font-weight:600;letter-spacing:.01em;display:flex;align-items:center;justify-content:center;gap:7px}
+  .switcher .sname .sseed{width:9px;height:9px;border-radius:50%;background:var(--seed, #4C8DFF);box-shadow:0 0 8px color-mix(in srgb,var(--seed, #4C8DFF) 60%,transparent)}
+  .switcher .sname .sk{font-family:"Bahnschrift",sans-serif;font-size:10px;color:#7f90a8;border:1px solid rgba(255,255,255,.15);border-radius:4px;padding:1px 4px;letter-spacing:.1em}
+  .switcher .ssub{font-size:9px;color:#728198;margin-top:2px;letter-spacing:.03em;white-space:nowrap}
+  .switcher .stitle{font-family:"Bahnschrift",sans-serif;font-size:9px;letter-spacing:.22em;color:#5f6d83;padding:0 6px 0 10px}
+  .hintkeys{position:fixed;bottom:34px;right:34px;z-index:20;font-size:10px;color:#5d6b80;letter-spacing:.04em}
+  .hintkeys b{color:#8494aa;font-weight:500}
+
+  /* 冻结动画，便于截图 / 比对 */
+  body.freeze *{animation-play-state:paused!important}
+  body.freeze .streaks{animation-delay:-8.4s}
+  body.freeze .veil{animation-delay:-6s}
+  body.freeze .orbit .og{animation-delay:-10s}
+
+  @media (max-width:1280px){
+    .layout{gap:36px;left:32px;right:32px}
+    .settings{width:390px;flex-basis:390px}
+    .big-widget{transform:scale(.92)}
+    .mini-widget{transform:scale(.92);margin-right:70px}
+  }
+</style>
+</head>
+<body data-variant="A" data-theme="midnight" data-arc="on" data-bg="glass">
+
+<!-- ===== 桌面壁纸 ===== -->
+<div class="wall" aria-hidden="true">
+  <div class="base"></div>
+  <div class="shaft s1"></div><div class="shaft s2"></div><div class="shaft s3"></div><div class="shaft s4"></div>
+  <svg class="wall-lines" viewBox="0 0 1512 900" preserveAspectRatio="xMidYMid slice">
+    <defs>
+      <linearGradient id="wg1" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#22e3c8" stop-opacity="0"/>
+        <stop offset=".30" stop-color="#35e6b6" stop-opacity=".46"/>
+        <stop offset=".62" stop-color="#4d8dff" stop-opacity=".72"/>
+        <stop offset=".86" stop-color="#a8ff8e" stop-opacity=".28"/>
+        <stop offset="1" stop-color="#a8ff8e" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="wg2" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#4d8dff" stop-opacity="0"/>
+        <stop offset=".4" stop-color="#6ab4ff" stop-opacity=".34"/>
+        <stop offset=".78" stop-color="#22e3c8" stop-opacity=".5"/>
+        <stop offset="1" stop-color="#22e3c8" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="wg3" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#7de3ff" stop-opacity="0"/>
+        <stop offset=".5" stop-color="#9af4ff" stop-opacity=".55"/>
+        <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <g class="haze">
+      <path d="M 560 1010 C 800 790 980 640 1200 560 S 1460 470 1600 360" stroke="url(#wg1)" stroke-width="26"/>
+      <path d="M 700 1030 C 920 820 1090 690 1300 610 S 1500 520 1620 430" stroke="url(#wg2)" stroke-width="18"/>
+    </g>
+    <g class="breathe">
+      <path d="M 620 970 C 810 800 950 705 1130 630 C 1270 572 1400 505 1560 400" stroke="url(#wg1)" stroke-width="1.6" class="ribbon"/>
+      <path d="M 690 1000 C 870 840 1000 750 1180 675 C 1330 610 1460 540 1600 440" stroke="url(#wg2)" stroke-width="1.1" class="ribbon"/>
+      <path d="M 780 1010 C 940 870 1060 790 1230 720 C 1380 658 1480 594 1620 500" stroke="url(#wg3)" stroke-width="2.1" class="ribbon"/>
+      <path d="M 900 1020 C 1040 900 1150 830 1300 770 C 1430 716 1520 650 1640 560" stroke="url(#wg1)" stroke-width=".9" class="ribbon" opacity=".6"/>
+      <path d="M 520 1015 C 760 850 920 760 1100 700 C 1250 650 1370 590 1520 500" stroke="url(#wg2)" stroke-width=".7" class="ribbon" opacity=".45"/>
+    </g>
+  </svg>
+  <div class="grain"></div>
+  <div class="vignette"></div>
+</div>
+
+<div class="frame">
+  <header class="topbar">
+    <div>
+      <div class="kicker">PROTOTYPE · ARC LIGHT · DERIVED COLOR</div>
+      <div class="title-row"><h1>弧光</h1><span class="en">AURORA ARC / 05</span></div>
+      <p class="sub">默认 · 纯色 / 磨砂玻璃 → 「弧光」取当前主题的<b>强调色</b>作种子，沿相邻色域派生，而不是另选一套色。</p>
+    </div>
+    <div class="themebar" id="themeChips" aria-label="主题种子">
+      <span class="plabel">主题种子</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- ===== 设置面板 ===== -->
+    <aside class="settings" aria-label="设置面板原型">
+      <div class="titlebar">
+        <span class="app">上班工具箱</span><span class="ver">3.7.0</span><span style="margin-left:8px">· 设置</span>
+        <span class="x">✕</span>
+      </div>
+      <div class="shell">
+        <nav class="rail">
+          <div class="ritem"><span class="ic">◷</span>考勤</div>
+          <div class="ritem"><span class="ic">▤</span>固定日程</div>
+          <div class="ritem"><span class="ic">◔</span>提醒</div>
+          <div class="ritem on"><span class="ic">◎</span>外观</div>
+          <div class="ritem"><span class="ic">▦</span>日程</div>
+          <div class="ritem"><span class="ic">¥</span>工资</div>
+          <div class="ritem"><span class="ic">✈</span>纸条</div>
+          <div class="grow"></div>
+          <div class="cfg">配置<br>C:\Users\xlean\…<br>09:00 – 18:00</div>
+        </nav>
+        <section class="pane">
+          <h2>外观</h2>
+          <div class="ph">主题、字体、提醒动画与配置备份</div>
+
+          <div class="cardbox">
+            <div class="boxhead"><b>界面风格</b><span>6 套 · 仅《默认》支持弧光</span></div>
+            <div class="skins">
+              <button class="skin on"><span class="dot" style="background:linear-gradient(90deg,#4c8dff,#9fd0ff)"></span>默认</button>
+              <button class="skin off" title="该风格自带配色"><span class="dot" style="background:linear-gradient(90deg,#1a2230,#3b4658)"></span>无垠</button>
+              <button class="skin off" title="该风格自带磨砂玻璃"><span class="dot" style="background:linear-gradient(90deg,#7aa7d8,#d9e6f5)"></span>云母</button>
+            </div>
+          </div>
+
+          <div class="cardbox">
+            <div class="boxhead"><b>主题配色</b><span>39 套</span></div>
+            <div class="swatches" id="swatches"></div>
+            <div class="themerow">
+              <span>当前：<b id="curThemeName">经典 · 午夜蓝</b></span><span class="spacer"></span>
+              <button class="ghostbtn">编辑</button><button class="ghostbtn blue">＋ 新建</button>
+            </div>
+            <div style="height:1px;background:#edf1f6;margin:10px 0 8px"></div>
+            <div class="bgrow">
+              <span style="font-size:10.5px;color:#7f8a9b;margin-right:3px">背景风格</span>
+              <button class="bgopt" data-bgbtn="solid"><span class="radio"></span>纯色</button>
+              <button class="bgopt on" data-bgbtn="glass"><span class="radio"></span>磨砂玻璃</button>
+            </div>
+            <div class="bghint">磨砂玻璃：半透明 + 磨砂颗粒 + 柔光雾气，桌面从卡片后透出来。</div>
+          </div>
+
+          <div class="arcbox">
+            <div class="archead">
+              <div class="arcglyph">
+                <svg viewBox="0 0 34 24" aria-hidden="true">
+                  <path class="g1" d="M2 20 C 8 13 14 8 26 4" stroke-width="1.5"/>
+                  <path class="g2" d="M4 23 C 12 17 19 13 31 7" stroke-width="1.1" opacity=".85"/>
+                  <path class="g1" d="M9 23 C 16 18 22 16 31 13" stroke-width=".7" opacity=".5"/>
+                </svg>
+              </div>
+              <div class="arcopy">
+                <div class="at">弧光 <span style="font-size:8.5px;font-weight:500;color:#8190a5;letter-spacing:.12em">AURORA</span><span class="inline-new">NEW</span></div>
+                <div class="ad" id="arcDesc">取强调色为种子，沿相邻色域派生</div>
+              </div>
+              <button class="switch" id="arcSwitch" role="switch" aria-checked="true" aria-label="弧光"><span class="knob"></span></button>
+            </div>
+            <div class="arcstate">
+              <span class="bead"></span>
+              <span id="arcState"><b>已开启</b> · 叠加在磨砂玻璃上</span>
+              <span class="lock" id="arcLock">默认 · 磨砂玻璃</span>
+            </div>
+          </div>
+
+          <div class="cardbox">
+            <div class="boxhead"><b>弧光配色</b><span>强调色派生</span></div>
+            <div class="dsrow">
+              <i class="seeddot" id="dsSeed"></i><span class="arr">→</span>
+              <i class="dsw" id="ds1"></i><i class="dsw" id="ds2"></i><i class="dsw" id="ds3"></i><i class="dsw" id="ds4"></i>
+              <span class="dhue">−100° · −45° · 0° · +42°</span>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="foot">
+        <span class="path">配置存在 C:\Users\xlean\AppData\Roaming\Wor…</span>
+        <button class="btn">取消</button><button class="btn primary">保存</button>
+      </div>
+    </aside>
+
+    <!-- ===== 卡片舞台 ===== -->
+    <main class="stage">
+      <div class="widget-area">
+        <!-- 展开态 -->
+        <div class="widget big-widget" id="bigWidget">
+          <div class="ambient"></div>
+          <div class="orbit" aria-hidden="true">
+            <svg viewBox="0 0 780 600" width="100%" height="100%">
+              <defs>
+                <linearGradient id="og1" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0" stop-color="var(--arc2)" stop-opacity="0"/>
+                  <stop offset=".30" stop-color="var(--arc1)" stop-opacity=".72"/>
+                  <stop offset=".56" stop-color="var(--arc-hot)" stop-opacity=".92"/>
+                  <stop offset=".78" stop-color="var(--arc2)" stop-opacity=".8"/>
+                  <stop offset="1" stop-color="var(--arc3)" stop-opacity="0"/>
+                </linearGradient>
+                <linearGradient id="og2" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0" stop-color="var(--arc3)" stop-opacity="0"/>
+                  <stop offset=".38" stop-color="var(--arc3)" stop-opacity=".45"/>
+                  <stop offset=".66" stop-color="var(--arc1)" stop-opacity=".8"/>
+                  <stop offset=".9" stop-color="var(--arc-hot)" stop-opacity=".5"/>
+                  <stop offset="1" stop-color="var(--arc-hot)" stop-opacity="0"/>
+                </linearGradient>
+                <linearGradient id="og3" x1="0" y1="1" x2="1" y2="0">
+                  <stop offset="0" stop-color="var(--arc-deep)" stop-opacity="0"/>
+                  <stop offset=".4" stop-color="var(--arc2)" stop-opacity=".6"/>
+                  <stop offset=".72" stop-color="var(--arc1)" stop-opacity=".85"/>
+                  <stop offset="1" stop-color="var(--arc1)" stop-opacity="0"/>
+                </linearGradient>
+              </defs>
+              <g class="og">
+                <path class="haze" d="M -120 570 C 70 505 165 430 300 368 C 440 305 570 262 710 175 C 770 136 830 95 890 50" stroke="url(#og1)" stroke-width="22"/>
+                <path class="haze" d="M -85 625 C 110 560 210 488 345 424 C 485 360 620 318 760 230 C 810 198 860 162 905 125" stroke="url(#og2)" stroke-width="15"/>
+                <path class="fine" d="M -120 570 C 70 505 165 430 300 368 C 440 305 570 262 710 175 C 770 136 830 95 890 50" stroke="url(#og1)" stroke-width="2.2"/>
+                <path class="fine" d="M -85 625 C 110 560 210 488 345 424 C 485 360 620 318 760 230 C 810 198 860 162 905 125" stroke="url(#og2)" stroke-width="1.25" opacity=".9"/>
+                <path class="fine sparkle" d="M -150 520 C 30 455 130 380 265 318 C 405 255 540 212 680 125 C 740 86 790 50 840 10" stroke="url(#og3)" stroke-width=".9"/>
+                <path class="fine" d="M 640 355 C 692 308 725 258 770 202 C 792 172 818 146 850 116" stroke="url(#og3)" stroke-width="1.5" opacity=".7"/>
+              </g>
+            </svg>
+          </div>
+          <div class="beam-out"><div class="beam-core"></div><div class="streaks"><i></i><i></i><i></i><i></i><i></i></div></div>
+          <section class="card big">
+            <div class="fx-in">
+              <div class="veil v-a"></div><div class="veil v-b"></div><div class="veil v-c"></div>
+              <svg class="in-arcs" viewBox="0 0 460 310" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="ia1" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0" stop-color="var(--arc2)" stop-opacity="0"/>
+                    <stop offset=".34" stop-color="var(--arc1)" stop-opacity=".55"/>
+                    <stop offset=".58" stop-color="var(--arc-hot)" stop-opacity=".88"/>
+                    <stop offset=".8" stop-color="var(--arc3)" stop-opacity=".55"/>
+                    <stop offset="1" stop-color="var(--arc3)" stop-opacity="0"/>
+                  </linearGradient>
+                  <linearGradient id="ia2" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0" stop-color="var(--arc2)" stop-opacity="0"/>
+                    <stop offset=".5" stop-color="var(--arc2)" stop-opacity=".6"/>
+                    <stop offset=".8" stop-color="var(--arc1)" stop-opacity=".75"/>
+                    <stop offset="1" stop-color="var(--arc1)" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <g class="soft">
+                  <path d="M 90 355 C 185 310 270 262 350 208 C 410 170 452 130 500 70" stroke="var(--arc1)" stroke-width="18" opacity=".20"/>
+                  <path d="M 150 380 C 235 335 315 290 390 245 C 440 214 480 178 520 125" stroke="var(--arc2)" stroke-width="14" opacity=".16"/>
+                </g>
+                <g class="sharp">
+                  <path d="M 90 355 C 185 310 270 262 350 208 C 410 170 452 130 500 70" stroke="url(#ia1)" stroke-width="2.1" opacity=".95"/>
+                  <path d="M 150 380 C 235 335 315 290 390 245 C 440 214 480 178 520 125" stroke="url(#ia2)" stroke-width="1.2" opacity=".8"/>
+                  <path d="M 230 360 C 305 322 370 284 430 240 C 460 220 485 198 515 165" stroke="url(#ia1)" stroke-width=".85" opacity=".55"/>
+                  <path d="M 120 300 C 205 270 280 232 355 185" stroke="var(--arc3)" stroke-width=".6" opacity=".45"/>
+                  <path d="M 330 280 C 390 240 440 205 500 150" stroke="var(--arc4)" stroke-width=".9" opacity=".42" class="sharp"/>
+                </g>
+              </svg>
+            </div>
+            <div class="beam-in"><div class="streaks"><i></i><i></i><i></i><i></i><i></i></div></div>
+            <div class="refl"></div>
+            <div class="sheen"></div><div class="grain"></div>
+            <div class="content">
+              <div class="row-top">
+                <span class="live"></span><span>工作中</span>
+                <span class="tools">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.4v2.8M12 18.8v2.8M2.4 12h2.8M18.8 12h2.8M5.2 5.2l2 2M16.8 16.8l2 2M18.8 5.2l-2 2M7.2 16.8l-2 2"/></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 11a8 8 0 1 0-2.2 6.3"/><path d="M20 4.5v6.5h-6.5"/></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+                </span>
+              </div>
+              <div class="cap">距离下班</div>
+              <div class="time">03:07:33</div>
+              <div class="bar"><div class="fill"></div></div>
+              <div class="meta">上班 <b>09:00</b><span class="sep">·</span>预计下班 <b>18:00</b></div>
+              <div class="next"><span>距晚休</span><b>3h07m</b></div>
+              <div class="footnote">已工作 5h52m · 应勤 9h00m</div>
+            </div>
+            <div class="rim"><span class="spill"></span><span class="spill2"></span><span class="hot"></span>
+              <svg class="rim-arcs" viewBox="0 0 460 310" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="rg1" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0" stop-color="var(--arc2)" stop-opacity="0"/>
+                    <stop offset=".5" stop-color="var(--arc1)" stop-opacity=".45"/>
+                    <stop offset=".84" stop-color="var(--arc-hot)" stop-opacity=".9"/>
+                    <stop offset="1" stop-color="var(--arc-hot)" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path d="M 250 309 C 350 309 410 294 438 252 C 452 230 457 205 458 182" stroke="var(--arc1)" stroke-width="11" opacity=".28"/>
+                <path class="rim-hot" d="M 250 309 C 350 309 410 294 438 252 C 452 230 457 205 458 182" stroke="url(#rg1)" stroke-width="2.4"/>
+              </svg>
+            </div>
+          </section>
+        </div>
+
+        <!-- 收起态 -->
+        <div class="widget mini-widget" id="miniWidget">
+          <div class="ambient"></div>
+          <div class="beam-out"><div class="beam-core"></div><div class="streaks"><i></i><i></i><i></i><i></i><i></i></div></div>
+          <section class="card mini">
+            <div class="fx-in">
+              <div class="veil v-a" style="left:-30%;width:140%;height:120%;top:-20%"></div>
+              <svg class="in-arcs" viewBox="0 0 360 110" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="ia3" x1="0" y1="1" x2="1" y2="0">
+                    <stop offset="0" stop-color="var(--arc2)" stop-opacity="0"/>
+                    <stop offset=".42" stop-color="var(--arc1)" stop-opacity=".55"/>
+                    <stop offset=".7" stop-color="var(--arc-hot)" stop-opacity=".8"/>
+                    <stop offset="1" stop-color="var(--arc3)" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+                <path d="M 70 125 C 145 105 215 82 285 55 C 320 40 350 22 390 0" stroke="var(--arc1)" stroke-width="9" opacity=".2" class="soft-path"/>
+                <path d="M 70 125 C 145 105 215 82 285 55 C 320 40 350 22 390 0" stroke="url(#ia3)" stroke-width="1.4" opacity=".85"/>
+                <path d="M 130 128 C 200 108 265 88 330 60" stroke="var(--arc2)" stroke-width=".7" opacity=".55"/>
+              </svg>
+            </div>
+            <div class="beam-in"><div class="streaks"><i></i><i></i><i></i><i></i><i></i></div></div>
+            <div class="refl"></div>
+            <div class="sheen"></div><div class="grain"></div>
+            <div class="content">
+              <div class="row-top">
+                <span class="live"></span><span>距离下班</span>
+                <span class="mini-right">晚 3h07m</span>
+              </div>
+              <div class="mini-numrow"><div class="time">03:07:32</div></div>
+              <div class="bar"><div class="fill"></div></div>
+            </div>
+            <div class="rim"><span class="spill"></span><span class="spill2"></span><span class="hot"></span></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="caption">
+        <div class="cline"><span class="key">光路 A</span><span class="cname">玻内极光</span></div>
+        <p>整片极光帘在卡片内侧流动，光从卡内漫出来，字仍然清楚。</p>
+        <div class="cmeta">
+          <span>作用层 <b>玻璃内侧</b></span><span class="d"></span>
+          <span>动态 <b>缓流 22s</b></span><span class="d"></span>
+          <span>种子 <b id="capSeed">#4C8DFF</b></span>
+          <span class="state"><i></i><span id="capState">弧光 开</span></span>
+        </div>
+        <div class="derive">
+          <span class="dlab">派生</span>
+          <span class="stop"><i id="capDot1"></i><b>−100°</b></span>
+          <span class="stop"><i id="capDot2"></i><b>−45°</b></span>
+          <span class="stop"><i id="capDot3"></i><b>0°</b></span>
+          <span class="stop"><i id="capDot4"></i><b>+42°</b></span>
+          <span class="rule">色相窗口 −100° ~ +42°</span>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="hintkeys">← → 切换主题 · 弧光由强调色派生</div>
+</div>
+
+<div class="switcher" aria-label="主题切换">
+  <button id="prev" aria-label="上一个主题">←</button>
+  <span class="stitle">主题</span>
+  <div class="smid">
+    <div class="sname"><i class="sseed" id="swSeed"></i><span id="swName">经典 · 午夜蓝</span></div>
+    <div class="ssub" id="swSub">种子 #4C8DFF · −45° / 0° / −100° / +42°</div>
+  </div>
+  <button id="next" aria-label="下一个主题">→</button>
+</div>
+
+<script>
+  // 取真实内置主题的强调色 / 底色；光色不手选，全部由 seed 派生。
+  var THEMES = [
+    {id:"midnight", full:"经典 · 午夜蓝", short:"午夜蓝", seed:"#4C8DFF", swIndex:0,
+     ct:"#12161F", cb:"#1B2130", ctRgb:"18,22,31", cbRgb:"27,33,48",
+     tx:"#E8EDF7", mu:"#8B95A8", dm:"#6C768A", track:"rgba(255,255,255,.14)",
+     edge:"rgba(190,215,255,.20)", glassTop:".76", glassBottom:".86"},
+    {id:"aurora", full:"经典 · 极光青", short:"极光青", seed:"#2FD4C4", swIndex:12,
+     ct:"#0E1A1C", cb:"#15292A", ctRgb:"14,26,28", cbRgb:"21,41,42",
+     tx:"#E6F4F3", mu:"#86A3A0", dm:"#66817E", track:"rgba(255,255,255,.14)",
+     edge:"rgba(190,230,225,.20)", glassTop:".76", glassBottom:".86"},
+    {id:"sunset", full:"经典 · 落日橙", short:"落日橙", seed:"#FF9A5A", swIndex:2,
+     ct:"#211610", cb:"#2E2019", ctRgb:"33,22,16", cbRgb:"46,32,25",
+     tx:"#FBEEDF", mu:"#B49A83", dm:"#8E7763", track:"rgba(255,255,255,.13)",
+     edge:"rgba(255,210,180,.18)", glassTop:".76", glassBottom:".86"},
+    {id:"sakura", full:"经典 · 樱花粉", short:"樱花粉", seed:"#FF7FA8", swIndex:19,
+     ct:"#20141A", cb:"#2E1E27", ctRgb:"32,20,26", cbRgb:"46,30,39",
+     tx:"#FCEAF2", mu:"#B893A3", dm:"#8F7080", track:"rgba(255,255,255,.13)",
+     edge:"rgba(255,200,215,.18)", glassTop:".76", glassBottom:".86"},
+    {id:"forest", full:"经典 · 松林绿", short:"松林绿", seed:"#5FD08A", swIndex:10,
+     ct:"#101C15", cb:"#18291F", ctRgb:"16,28,21", cbRgb:"24,41,31",
+     tx:"#E9F5EC", mu:"#8FAF9B", dm:"#6D8A79", track:"rgba(255,255,255,.13)",
+     edge:"rgba(190,230,205,.18)", glassTop:".76", glassBottom:".86"},
+    {id:"ivory", full:"经典 · 象牙白", short:"象牙白", seed:"#3D6BFF", swIndex:24,
+     ct:"#FCFDFF", cb:"#EEF1F7", ctRgb:"252,253,255", cbRgb:"238,241,247",
+     tx:"#1B2230", mu:"#5C6779", dm:"#8A93A5", track:"rgba(24,32,48,.14)",
+     edge:"rgba(24,32,48,.16)", glassTop:".80", glassBottom:".84"}
+  ];
+  var q = new URLSearchParams(location.search);
+  var state = {
+    theme: "midnight",
+    glass: q.get("bg") !== "solid",
+    arc: q.get("arc") !== "0"
+  };
+  var asked = q.get("theme");
+  if (asked && THEMES.some(function(t){ return t.id === asked; })) state.theme = asked;
+  if (q.get("freeze") === "1") document.body.classList.add("freeze");
+
+  var $ = function(s){ return document.querySelector(s); };
+
+  function normHue(h){ h = h % 360; return h < 0 ? h + 360 : h; }
+  function hexToHsl(hex){
+    var c = hex.replace("#","");
+    if(c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
+    var r=parseInt(c.slice(0,2),16)/255, g=parseInt(c.slice(2,4),16)/255, b=parseInt(c.slice(4,6),16)/255;
+    var max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+    var h=0, s=0, l=(max+min)/2;
+    if(d){
+      s = d/(1-Math.abs(2*l-1));
+      if(max===r) h=((g-b)/d)%6;
+      else if(max===g) h=(b-r)/d+2;
+      else h=(r-g)/d+4;
+      h *= 60;
+    }
+    return [normHue(h), s, l];
+  }
+  function hsl(h,s,l){
+    return "hsl(" + Math.round(normHue(h)) + "deg " + Math.round(Math.max(0,Math.min(1,s))*100) + "% " + Math.round(Math.max(0,Math.min(1,l))*100) + "%)";
+  }
+  // 种子 + 两侧邻色 + 远邻色；↓ 45° / 0° / −100° / ↑ 42°
+  function deriveArcs(seedHex){
+    var x = hexToHsl(seedHex);
+    var h = x[0], s0 = x[1];
+    var S = Math.max(s0, .68);
+    return {
+      h: h,
+      arc1: hsl(h-45, S*.78, .55),
+      arc2: hsl(h, S, .64),
+      arc3: hsl(h-100, S*.92, .72),
+      arc4: hsl(h+42, S*.82, .64),
+      hot: hsl(h+6, .28, .93),
+      deep: hsl(h+12, S, .42)
+    };
+  }
+
+  function applyArcUI(){
+    document.body.dataset.arc = state.arc ? "on" : "off";
+    document.body.dataset.bg = state.glass ? "glass" : "solid";
+    var sw = $("#arcSwitch");
+    sw.setAttribute("aria-checked", state.arc ? "true" : "false");
+    sw.disabled = false;
+    var where = state.glass ? "磨砂玻璃" : "纯色卡片";
+    $("#arcState").innerHTML = state.arc ? "<b>已开启</b> · 叠加在" + where + "上"
+      : "<b>已关闭</b> · 回到普通" + where;
+    $("#arcLock").textContent = "默认 · " + (state.glass ? "磨砂玻璃" : "纯色");
+    $("#capState").textContent = state.arc ? "弧光 开" : "弧光 关";
+    document.querySelectorAll("[data-bgbtn]").forEach(function(b){
+      b.classList.toggle("on", (b.dataset.bgbtn === "glass") === state.glass);
+    });
+    try {
+      history.replaceState(null, "", location.pathname + "?theme=" + state.theme
+        + (state.arc ? "" : "&arc=0") + (state.glass ? "" : "&bg=solid"));
+    } catch(e) {}
+  }
+
+  function paintDot(id, col, withGlow){
+    var el = $("#" + id);
+    if(!el) return;
+    el.style.background = col;
+    if(withGlow) el.style.color = col;
+  }
+
+  function applyTheme(id){
+    var t = THEMES.filter(function(x){ return x.id === id; })[0];
+    if(!t) return;
+    state.theme = id;
+    var d = deriveArcs(t.seed);
+    document.body.dataset.theme = id;
+    var s = document.body.style;
+    s.setProperty("--seed", t.seed);
+    s.setProperty("--ct", t.ct); s.setProperty("--cb", t.cb);
+    s.setProperty("--ct-rgb", t.ctRgb); s.setProperty("--cb-rgb", t.cbRgb);
+    s.setProperty("--tx", t.tx); s.setProperty("--mu", t.mu); s.setProperty("--dm", t.dm);
+    s.setProperty("--ac", t.seed);
+    s.setProperty("--track", t.track); s.setProperty("--edge", t.edge);
+    s.setProperty("--glass-top", t.glassTop); s.setProperty("--glass-bottom", t.glassBottom);
+    s.setProperty("--arc1", d.arc1); s.setProperty("--arc2", d.arc2); s.setProperty("--arc3", d.arc3);
+    s.setProperty("--arc4", d.arc4); s.setProperty("--arc-hot", d.hot); s.setProperty("--arc-deep", d.deep);
+
+    document.querySelectorAll(".tchip").forEach(function(b){ b.classList.toggle("on", b.dataset.theme === id); });
+    $("#swName").textContent = t.full;
+    $("#swSeed").style.background = t.seed;
+    $("#swSub").textContent = "种子 " + t.seed + " · −100° / −45° / 0° / +42°";
+    $("#capSeed").textContent = t.seed;
+    $("#curThemeName").textContent = t.full;
+    $("#arcDesc").textContent = "由 " + t.seed + " 派生";
+
+    paintDot("dsSeed", t.seed, false);
+    paintDot("ds1", d.arc3, false); paintDot("ds2", d.arc1, false);
+    paintDot("ds3", d.arc2, false); paintDot("ds4", d.arc4, false);
+    paintDot("capDot1", d.arc3, true); paintDot("capDot2", d.arc1, true);
+    paintDot("capDot3", d.arc2, true); paintDot("capDot4", d.arc4, true);
+
+    document.querySelectorAll("#swatches .sw").forEach(function(w, i){
+      w.classList.toggle("on", i === t.swIndex);
+    });
+    applyArcUI();
+  }
+
+  function go(step){
+    var i = THEMES.map(function(t){ return t.id; }).indexOf(state.theme);
+    applyTheme(THEMES[(i + step + THEMES.length) % THEMES.length].id);
+  }
+  function onArc(){
+    state.arc = !state.arc;
+    applyArcUI();
+  }
+  function setBg(g){
+    state.glass = g === "glass";
+    applyArcUI();
+  }
+
+  // 六套主题种子：点击即换卡片底色 + 派生弧光
+  var chipBar = $("#themeChips");
+  THEMES.forEach(function(t){
+    var b = document.createElement("button");
+    b.className = "tchip";
+    b.dataset.theme = t.id;
+    b.style.setProperty("--seed", t.seed);
+    b.title = t.full + " · 种子 " + t.seed;
+    b.innerHTML = '<i class="seed"></i>' + t.short;
+    b.onclick = function(){ applyTheme(t.id); };
+    chipBar.appendChild(b);
+  });
+
+  $("#prev").onclick = function(){ go(-1); };
+  $("#next").onclick = function(){ go(1); };
+  $("#arcSwitch").onclick = onArc;
+  document.querySelectorAll("[data-bgbtn]").forEach(function(b){ b.onclick = function(){ setBg(b.dataset.bgbtn); }; });
+  document.addEventListener("keydown", function(e){
+    var t = e.target;
+    if(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if(e.key === "ArrowLeft"){ e.preventDefault(); go(-1); }
+    if(e.key === "ArrowRight"){ e.preventDefault(); go(1); }
+  });
+
+  // 39 套主题的示意色卡（原型只取 30 张，够看出密度）
+  var SWATCH = [
+    ["#12161f","#4c8dff"],["#102622","#0fa35c"],["#2b1b16","#ff9a5a"],["#251426","#e879d8"],["#0f2126","#22c1d6"],
+    ["#1b1a2b","#8b7cff"],["#f5f1e6","#d9a441"],["#20242c","#7f8ba3"],["#2c1820","#ff6b9d"],["#101a30","#5a7dff"],
+    ["#1d2a1f","#56bb7c"],["#2a2014","#f0b45c"],["#0c1a1d","#22e3c8"],["#211629","#b06bff"],["#2b1520","#ff5f7e"],
+    ["#0d1626","#3d8cff"],["#162a24","#7ce3c3"],["#2c2418","#ffd27a"],["#1c1b24","#9aa7ff"],["#2a1020","#ff7bd5"],
+    ["#0b1f2a","#4fd8ff"],["#1f2a12","#a8ff8e"],["#2a1a10","#ffab6b"],["#181428","#a58cff"],["#f6f2e9","#c08d5a"],
+    ["#f0ede8","#8a6b52"],["#22262d","#c9d3e1"],["#0a2a2a","#22e3c8"],["#2b1326","#ff9ad5"],["#101418","#f3c969"]
+  ];
+  var wrap = $("#swatches");
+  SWATCH.forEach(function(s, i){
+    var d = document.createElement("div");
+    d.className = "sw";
+    d.style.background = "linear-gradient(180deg," + s[0] + " 0 63%," + s[0] + " 63%)";
+    d.style.setProperty("--sw2", s[1]);
+    d.title = "主题色卡 " + (i+1);
+    wrap.appendChild(d);
+  });
+
+  applyTheme(state.theme);
+</script>
+</body>
+</html>
