@@ -748,6 +748,7 @@ namespace WorkCountdown
         public string reminderSpreadStyle { get; set; } // circle | bar | tape：提醒扩散样式（tape=全屏警戒带）
         public string cardGlow { get; set; }            // classic | corner | bar | all：卡片背景光效
         public string bgStyle { get; set; }             // solid | glass：主题背景风格（glass = 磨砂玻璃）
+        public bool arcGlow { get; set; }               // 弧光：卡片内的极光叠加（只有《默认》皮肤支持，默认关）
         public string lunchReminderStyle { get; set; }   // 午休提醒配色（ReminderStyles 的 id）
         public string eveningReminderStyle { get; set; } // 晚休提醒配色
         public string offReminderStyle { get; set; }     // 下班提醒配色
@@ -780,6 +781,7 @@ namespace WorkCountdown
             reminderSpreadStyle = "circle";
             cardGlow = "classic";
             bgStyle = "solid";
+            arcGlow = false;
             lunchReminderStyle = "lan-yuming";
             eveningReminderStyle = "zi-jiegeng";
             offReminderStyle = "forest";
@@ -2049,7 +2051,7 @@ namespace WorkCountdown
             return FromHsl(h, s, targetL);
         }
 
-        private static void ToHsl(Color c, out double h, out double s, out double l)
+        internal static void ToHsl(Color c, out double h, out double s, out double l)
         {
             double r = c.R / 255.0, g = c.G / 255.0, b = c.B / 255.0;
             double max = Math.Max(r, Math.Max(g, b));
@@ -2064,7 +2066,7 @@ namespace WorkCountdown
             h *= 60.0;
         }
 
-        private static Color FromHsl(double h, double s, double l)
+        internal static Color FromHsl(double h, double s, double l)
         {
             if (s <= 0) return Color.FromArgb((int)Math.Round(l * 255), (int)Math.Round(l * 255), (int)Math.Round(l * 255));
             double q = l < 0.5 ? l * (1 + s) : l + s - l * s;
