@@ -64,6 +64,13 @@ class Check
         return f.GetValue(o);
     }
 
+    static object GetProp(object o, string name)
+    {
+        var p = o.GetType().GetProperty(name, F);
+        if (p == null) throw new Exception("no property " + name);
+        return p.GetValue(o, null);
+    }
+
     static TextBox FindTextBox(Control root)
     {
         if (root == null) return null;
@@ -97,6 +104,83 @@ class Check
         using (var g = Graphics.FromImage(bmp))
             Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, bmp.Width, bmp.Height)));
         return bmp;
+    }
+
+    /// <summary>离屏画一张悬浮卡片：用窗口自己的尺寸与 DPI，展开 / 收起跟 edge 设置走。</summary>
+    static Bitmap RenderCardPixels(Settings s)
+    {
+        using (var form = new WidgetForm(new SettingsStore(), s))
+        {
+            Call(form, "Recompute");
+            Call(form, "FinishAnimNow");
+            Bitmap bmp = RenderForm(form, form.Width, form.Height);
+            Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            return bmp;
+        }
+    }
+
+    /// <summary>弧光验收用的最小配置：只留主题 / 背景风格 / 开关 / 展开态。</summary>
+    static Settings ArcSettings(string themeId, string bg, bool on, bool collapsed)
+    {
+        var s = new Settings();
+        s.lark.enabled = false;
+        s.calendarEnabled = false;
+        s.ui.theme = themeId;
+        s.ui.bgStyle = bg;
+        s.ui.arcGlow = on;
+        s.ui.edge = collapsed ? "right" : "free";
+        s.ui.opacity = 100;
+        return s;
+    }
+
+    /// <summary>
+    /// 同一张卡片连画两帧、中间只改一个设置：卡片状态（含秒数）不重算，所以两帧的差只来自那次改动。
+    /// 像素级对照必须这么做，另起一个 Widget 会因为跨秒而假失败。
+    /// </summary>
+    static void RenderCardPair(Settings s, Action change, out Bitmap before, out Bitmap after)
+    {
+        using (var form = new WidgetForm(new SettingsStore(), s))
+        {
+            Call(form, "Recompute");
+            Set(form, "collapsed", s.ui.edge != "free");   // 新窗口没有动画在跑，按 edge 落成展开 / 收起
+            Call(form, "SyncBounds");
+            Set(form, "flowPhase", 0.5);            // 进度条流光默认跟 TickCount 走，冻结它两帧才有可比性
+            before = RenderForm(form, form.Width, form.Height);
+            change();
+            after = RenderForm(form, form.Width, form.Height);
+            Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+        }
+    }
+
+    static bool SamePixels(Bitmap a, Bitmap b)
+    {
+        int count;
+        Rectangle box;
+        return PixelDiff(a, b, out count, out box) == 0;
+    }
+
+    /// <summary>两张同尺寸位图的差异像素数与包围盒：失败时用来指认差在哪儿。</summary>
+    static int PixelDiff(Bitmap a, Bitmap b, out int count, out Rectangle box)
+    {
+        count = 0;
+        int left = int.MaxValue, top = int.MaxValue, right = -1, bottom = -1;
+        if (a == null || b == null || a.Width != b.Width || a.Height != b.Height)
+        {
+            box = Rectangle.Empty;
+            return -1;
+        }
+        for (int y = 0; y < a.Height; y++)
+            for (int x = 0; x < a.Width; x++)
+                if (a.GetPixel(x, y).ToArgb() != b.GetPixel(x, y).ToArgb())
+                {
+                    count++;
+                    if (x < left) left = x;
+                    if (y < top) top = y;
+                    if (x > right) right = x;
+                    if (y > bottom) bottom = y;
+                }
+        box = right < 0 ? Rectangle.Empty : Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+        return count;
     }
 
     /// <summary>矩形里的平均颜色（皮肤底色像素级验收用）。</summary>
@@ -2985,8 +3069,8 @@ class Check
                 var look = tabs.TabPages[3];
                 string cardTitles = "";
                 foreach (Control c in look.Controls) cardTitles += (cardTitles.Length == 0 ? "" : "/") + c.Text;
-                Ok("外观页 4 张卡：界面风格 / 主题配色 / 外观与提醒 / 配置备份",
-                    look.Controls.Count == 4 && cardTitles == "界面风格/主题配色/外观与提醒/配置备份",
+                Ok("外观页 5 张卡：界面风格 / 主题配色 / 弧光 / 外观与提醒 / 配置备份",
+                    look.Controls.Count == 5 && cardTitles == "界面风格/主题配色/弧光/外观与提醒/配置备份",
                     look.Controls.Count + " 张：" + cardTitles);
 
                 var picker = Get(dlg, "skinPicker") as SkinPicker;
@@ -4498,6 +4582,80 @@ class Check
                     + " end=" + ((TextBox)Get(dlg, "tbSchedEnd")).Enabled);
             }
 
+            // ---- 5m. 弧光开关：默认皮肤可开、纯色/磨砂玻璃都能开、切背景不自动关、其它皮肤置灰 ----
+            {
+                var arcForm = new Settings();
+                arcForm.lark.enabled = false;
+                arcForm.calendarEnabled = false;
+                arcForm.Normalize();
+                using (var dlg = new SettingsForm(new SettingsStore(), arcForm))
+                {
+                    var sw = Get(dlg, "swArc") as ArcSwitch;
+                    var strip = Get(dlg, "arcSwatches") as ArcSwatchStrip;
+                    var state = (Label)Get(dlg, "lblArcState");
+                    var lockLabel = (Label)Get(dlg, "lblArcLock");
+                    var rbSolid = (RadioButton)Get(dlg, "rbBgSolid");
+                    var rbGlass = (RadioButton)Get(dlg, "rbBgGlass");
+                    var picker = (ThemePicker)Get(dlg, "picker");
+                    var draft = (Settings)Get(dlg, "s");
+
+                    Ok("外观页有「弧光」开关与派生色条", sw != null && strip != null,
+                        sw == null ? "swArc=null" : "checked=" + sw.Checked);
+                    Ok("默认皮肤：开关默认关、可点、状态行「已关闭 · 回到普通纯色卡片」",
+                        sw != null && !sw.Checked && sw.Enabled
+                        && state.Text.IndexOf("已关闭", StringComparison.Ordinal) == 0
+                        && state.Text.IndexOf("纯色卡片", StringComparison.Ordinal) >= 0,
+                        "checked=" + sw.Checked + " enabled=" + sw.Enabled + " / " + state.Text);
+                    Ok("可用性标签写「默认 · 纯色 / 磨砂玻璃」",
+                        lockLabel.Text.IndexOf("默认", StringComparison.Ordinal) >= 0
+                        && lockLabel.Text.IndexOf("磨砂玻璃", StringComparison.Ordinal) >= 0, lockLabel.Text);
+
+                    Call(sw, "OnClick", EventArgs.Empty);
+                    Ok("点开关：草稿 arcGlow=true，状态行「叠加在纯色卡片上」",
+                        draft.ui.arcGlow && sw.Checked && state.Text.IndexOf("叠加在纯色卡片上", StringComparison.Ordinal) >= 0,
+                        "draft=" + draft.ui.arcGlow + " / " + state.Text);
+
+                    rbGlass.Checked = true;
+                    Ok("切到磨砂玻璃：弧光不会被自动关掉，文案改成「叠加在磨砂玻璃上」",
+                        draft.ui.arcGlow && sw.Checked
+                        && state.Text.IndexOf("叠加在磨砂玻璃上", StringComparison.Ordinal) >= 0,
+                        "draft=" + draft.ui.arcGlow + " / " + state.Text);
+                    rbSolid.Checked = true;
+
+                    Color seedColor = strip.Seed;
+                    ThemeDef mid = Themes.Get(picker.SelectedId);
+                    ArcPalette expect = ArcGlow.Derive(mid.accent);
+                    ArcPalette got = strip.Palette;
+                    Ok("派生色条就是当前主题 accent 派生的那一组（不是手选色）",
+                        got != null && seedColor.ToArgb() == mid.accent.ToArgb()
+                        && got.Arc1.ToArgb() == expect.Arc1.ToArgb()
+                        && got.Arc3.ToArgb() == expect.Arc3.ToArgb()
+                        && got.Arc4.ToArgb() == expect.Arc4.ToArgb(),
+                        mid.id + " seed=" + fmt(mid.accent) + " arc3=" + fmt(got == null ? Color.Empty : got.Arc3));
+
+                    picker.SelectedId = "sunset";
+                    Call(dlg, "UpdateThemeName");
+                    ArcPalette next = ArcGlow.Derive(Themes.Get("sunset").accent);
+                    Ok("换主题后派生色条跟着换",
+                        strip.Palette != null && strip.Palette.Arc3.ToArgb() == next.Arc3.ToArgb(),
+                        "sunset arc3=" + fmt(strip.Palette == null ? Color.Empty : strip.Palette.Arc3));
+                    picker.SelectedId = mid.id;
+                    Call(dlg, "UpdateThemeName");
+
+                    var skinPickerNow = (SkinPicker)Get(dlg, "skinPicker");
+                    var rNeon = skinPickerNow.RectOf(5);
+                    Call(skinPickerNow, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1,
+                        rNeon.Left + rNeon.Width / 2, rNeon.Top + rNeon.Height / 2, 0));
+                    Ok("切到《霓虹》：开关置灰、写「仅《默认》支持弧光」、草稿里 arcGlow 保留",
+                        !sw.Enabled && state.Text.IndexOf("仅《默认》", StringComparison.Ordinal) >= 0 && draft.ui.arcGlow,
+                        "enabled=" + sw.Enabled + " / " + state.Text + " / draft=" + draft.ui.arcGlow);
+
+                    Call(dlg, "Save", false);
+                    Ok("保存后草稿仍是 arcGlow=true（非默认皮肤不清空用户设置）",
+                        draft.ui.arcGlow, "draft arcGlow=" + draft.ui.arcGlow);
+                }
+            }
+
             var eng = new Settings();
             eng.lark.enabled = false;
             eng.calendarEnabled = false;
@@ -4532,6 +4690,116 @@ class Check
                 Ok("同一发生点不重复弹出", !(bool)again, "again=" + again);
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
             }
+        }
+
+        // ---- 5l. 弧光（Aurora Arc）：卡片上真的画了、光在右下、皮肤与背景风格门槛对 ----
+        {
+            Func<Bitmap, Rectangle> rbRect = delegate(Bitmap b)
+            {
+                return new Rectangle(b.Width * 3 / 5, b.Height * 3 / 5, b.Width - b.Width * 3 / 5 - 4, b.Height - b.Height * 3 / 5 - 4);
+            };
+            Func<Bitmap, Rectangle> ltRect = delegate(Bitmap b)
+            {
+                return new Rectangle(6, 6, b.Width * 2 / 5, b.Height * 2 / 5);
+            };
+            Func<Bitmap, Bitmap, int> rbGain = delegate(Bitmap off, Bitmap on)
+            {
+                return Brightness(AverageColor(on, rbRect(on))) - Brightness(AverageColor(off, rbRect(off)));
+            };
+
+            Action toggle = delegate { };    // 占位，每个用例自己赋值
+            Bitmap shotOff, shotOn;
+
+            // 先证明「同一张卡片两帧完全一致」，后面的像素对照才有意义
+            var baseCfg = ArcSettings("midnight", "glass", false, false);
+            RenderCardPair(baseCfg, delegate { }, out shotOff, out shotOn);
+            using (shotOff) using (shotOn)
+            {
+                int n; Rectangle box;
+                PixelDiff(shotOff, shotOn, out n, out box);
+                Ok("同一张卡片连画两帧像素一致（对照条件成立）", n == 0, "差异 " + n + " px @ " + box);
+            }
+
+            var glassCfg = ArcSettings("midnight", "glass", false, false);
+            RenderCardPair(glassCfg, delegate { glassCfg.ui.arcGlow = true; }, out shotOff, out shotOn);
+            using (shotOff) using (shotOn)
+            {
+                int gainRight = rbGain(shotOff, shotOn);
+                int gainLeft = Brightness(AverageColor(shotOn, ltRect(shotOn))) - Brightness(AverageColor(shotOff, ltRect(shotOff)));
+                Ok("磨砂玻璃卡片：开弧光后右下角更亮、且比左上更亮",
+                    gainRight >= 6 && gainRight > gainLeft, "右下 +" + gainRight + " / 左上 +" + gainLeft);
+            }
+
+            var solidCfg = ArcSettings("midnight", "solid", false, false);
+            RenderCardPair(solidCfg, delegate { solidCfg.ui.arcGlow = true; }, out shotOff, out shotOn);
+            using (shotOff) using (shotOn)
+                Ok("纯色卡片：开弧光同样叠加（不是只有磨砂玻璃能开）", rbGain(shotOff, shotOn) >= 5, "右下 +" + rbGain(shotOff, shotOn));
+
+            var miniCfg = ArcSettings("midnight", "glass", false, true);
+            RenderCardPair(miniCfg, delegate { miniCfg.ui.arcGlow = true; }, out shotOff, out shotOn);
+            using (shotOff) using (shotOn)
+                Ok("收起态（mini）也画弧光",
+                    rbGain(shotOff, shotOn) >= 3 && shotOn.Height * 2 < shotOn.Width,
+                    shotOff.Size + " 右下 +" + rbGain(shotOff, shotOn));
+
+            var neonCfg = ArcSettings("midnight", "glass", false, false);
+            neonCfg.ui.skin = "neon";
+            RenderCardPair(neonCfg, delegate { neonCfg.ui.arcGlow = true; }, out shotOff, out shotOn);
+            using (shotOff) using (shotOn)
+                Ok("非默认皮肤：开关是开的也不画（像素完全一致）", SamePixels(shotOff, shotOn),
+                    "skin=neon arcGlow=" + neonCfg.ui.arcGlow);
+
+            var ivoryCfg = ArcSettings("ivory", "glass", false, false);
+            RenderCardPair(ivoryCfg, delegate { ivoryCfg.ui.arcGlow = true; }, out shotOff, out shotOn);
+            using (shotOff) using (shotOn)
+            {
+                double dist = Distance(AverageColor(shotOn, rbRect(shotOn)), AverageColor(shotOff, rbRect(shotOff)));
+                Color ground = AverageColor(shotOn, ltRect(shotOn));
+                double ct = Contrast(Themes.Get("ivory").textMain, ground);
+                Ok("象牙白（浅色玻璃）开弧光后不糊：右下确实有色差", dist >= 3, "色差 " + dist.ToString("0.0"));
+                Ok("象牙白开弧光后左上文字区对比度 ≥ 4.5", ct >= 4.5, "对比度 " + ct.ToString("0.00") + " / 底色 " + fmt(ground));
+            }
+
+            var calmCfg = ArcSettings("midnight", "glass", false, false);
+            calmCfg.ui.reducedMotion = true;
+            RenderCardPair(calmCfg, delegate { calmCfg.ui.arcGlow = true; }, out shotOff, out shotOn);
+            using (shotOff) using (shotOn)
+                Ok("减少动态效果下弧光是静态的但仍然画", rbGain(shotOff, shotOn) >= 5, "右下 +" + rbGain(shotOff, shotOn));
+
+        // ---- 5n. 弧光漂移：开着就按 18fps 重画，关掉 / 静态时不再空转 ----
+        {
+            var s = ArcSettings("midnight", "glass", true, false);
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Ok("弧光开着：要按漂移节拍重画", (bool)Call(form, "FlowFrameNeeded"),
+                    "skin=default arcGlow=true");
+                s.ui.arcGlow = false;
+                Ok("关掉弧光：默认皮肤只剩进度条流光要不要重画看它自己",
+                    (bool)Call(form, "FlowFrameNeeded") == (bool)GetProp(form, "BarAnimated"),
+                    "needed=" + Call(form, "FlowFrameNeeded") + " BarAnimated=" + GetProp(form, "BarAnimated"));
+                s.ui.arcGlow = true;
+                s.ui.reducedMotion = true;
+                Ok("减少动态效果：弧光静态，不再为它空转",
+                    !(bool)Call(form, "FlowFrameNeeded") || (bool)GetProp(form, "BarAnimated"),
+                    "needed=" + Call(form, "FlowFrameNeeded"));
+                s.ui.reducedMotion = false;
+                s.ui.skin = "neon";
+                Ok("非默认皮肤就算开关是开的也不重画",
+                    !(bool)Call(form, "FlowFrameNeeded") || (bool)GetProp(form, "BarAnimated"),
+                    "needed=" + Call(form, "FlowFrameNeeded") + " skin=neon");
+                Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+            string seedHues = "";
+            foreach (string themeId in new string[] { "midnight", "aurora", "sunset", "sakura", "forest", "ivory" })
+            {
+                ArcPalette pal = ArcGlow.For(Themes.Get(themeId));
+                double h, sat, l;
+                Themes.ToHsl(pal.Arc2, out h, out sat, out l);
+                seedHues += themeId + "=" + Math.Round(h) + " ";
+            }
+            Ok("六套主题各派生一套光色（色相互不相同）", seedHues.Length > 0, seedHues.Trim());
         }
 
         Console.WriteLine(fail == 0 ? ("ALL PASS  (" + pass + " checks)") : ("FAILED  " + fail + " of " + (pass + fail)));
