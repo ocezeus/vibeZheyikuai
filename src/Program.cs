@@ -67,6 +67,7 @@ namespace WorkCountdown
                 }
 
                 var store = new SettingsStore();
+                InstallCrashLog(store.LogPath);
                 bool firstRun = !store.Exists;
                 var settings = store.Load().Settings;
 
@@ -95,6 +96,33 @@ namespace WorkCountdown
                     mutex.Dispose();
                 }
             }
+        }
+
+        /// <summary>
+        /// 未处理异常的兜底：完整堆栈写进 widget.log，不再弹「应用程序中发生了未经处理的异常」把窗口卡住。
+        /// UI 线程异常记完继续跑（下一个 1 秒 tick 还能恢复）；进程级异常只来得及记一行。
+        /// </summary>
+        private static void InstallCrashLog(string logPath)
+        {
+            Application.ThreadException += delegate(object sender, ThreadExceptionEventArgs e)
+            {
+                AppendCrash(logPath, "UI 线程", e == null ? null : e.Exception);
+            };
+            AppDomain.CurrentDomain.UnhandledException += delegate(object sender, UnhandledExceptionEventArgs e)
+            {
+                AppendCrash(logPath, "进程", e == null ? null : e.ExceptionObject as Exception);
+            };
+        }
+
+        private static void AppendCrash(string logPath, string kind, Exception ex)
+        {
+            try
+            {
+                string text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  未处理异常(" + kind + "): "
+                    + (ex == null ? "（无异常对象）" : ex.ToString());
+                System.IO.File.AppendAllText(logPath, text + "\r\n", new UTF8Encoding(false));
+            }
+            catch { }
         }
 
         /// <summary>已经有一个实例在跑：找到它的窗口，显示出来并激活。</summary>

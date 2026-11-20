@@ -9,6 +9,26 @@
 ## 当前版本：v5.0.0
 
 已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.0.0`（Release id 448605714，双资产齐全；装**机 FileVersion 5.0.0.0 / PID 37952（20:33:14）**；更新链路实测：当前 5.0.0 / 最新 5.0.0 / `IsNewer=false`。本轮只保留默认界面风格、主题文件化、设计规范文档；日常改动仍按下面的约定走）。
+> 2026-11-20 的「每天一次 NRE」修复已装机（未升版本号、未发 GitHub Release；发布与否等用户决定）。
+
+### 2026-11-20 15:40 · 修复每天一次「未将对象引用设置到对象的实例」+ 未处理异常落日志
+
+用户反馈（原话）：**每天都会报一次错，如图，修复下**（.NET Framework 未处理异常对话框，正文「未将对象引用设置到对象的实例。」，可点「继续 / 退出」）。
+
+**① 根因（`src/Widget.cs` 构造函数的参数捕获坑）**
+- `WidgetForm` 内部构造函数参数名 `sync` 与字段 `this.sync` 同名；构造函数里注册的 1 秒 `tick` 匿名回调写的是 `sync.ResetAttendance()`，C# 名字解析优先捕获**构造参数**，不是字段。
+- 生产路径 `new WidgetForm(store, settings)` → `this(store, settings, null)`，构造参数是 null；字段 `this.sync` 在 ctor 里被正常 new 出来，所以平时所有逻辑都正常，只有每天 00:00 跨天分支 `sync.ResetAttendance()` 对 null 调方法 → NRE → WinForms 弹「未处理异常」对话框（用户点「继续」后第二天再来一次；点「退出」时 Application.ExitInternal 会再抛 InvalidOperationException 把进程带走，所以事件日志里只看到那个二次异常）。
+- 测试 / 探针都显式传了 engine，所以 664+385 条断言一直没覆盖到这条生产构造路径。
+
+**② 修复**
+- `Widget.cs`：内部构造函数参数改名 `engineOverride`；跨天分支显式 `this.sync.ResetAttendance()`；加注释说明为什么不能叫 `sync`，防止以后改回去。
+- `src/Program.cs`：注册 `Application.ThreadException` + `AppDomain.UnhandledException` 兜底 —— 未处理异常把**完整堆栈**写进 `widget.log`（`未处理异常(UI 线程): …`），不再弹阻塞式异常对话框；UI 线程异常记完继续跑，下一个 tick 还能恢复。
+- `test/Check.cs`：新增回归用例「跨天 tick 不抛异常」（构造生产路径 WidgetForm → `lastDay` 拨回昨天 → 反射触发 `Timer.OnTick`）；同时修掉一条**测试隔离**问题：测试开始/主题文件用例结束都把主题目录指到空临时目录并 `Themes.Reload()`，不再读本机 `%APPDATA%\WorkCountdown\themes` 的 6 个自建主题（否则色卡/滚动/条数断言会从 39 变 45 而误红）。
+
+**③ 验证**
+- 复现：`test\visual\v50\_probe\DailyTickProbe4.cs`（gitignore 内的一次性探针）修复前必现 `NullReferenceException` @ `Widget.cs:258`，修复后打印 `NO EXCEPTION`。
+- `.\build.ps1` 通过（FileVersion 仍 5.0.0.0，未升版本）；`.\test\build-tests.ps1`：**Test 664 / Check 385 全绿**（Check 384 → +1 跨天回归；顺带修掉 2 条本机用户主题导致的隔离误红）；`.\test\build-probes.ps1` **69/69 OK**。
+- 装机：`.\tools\install-dev.ps1`（替换 `%LOCALAPPDATA%\Programs\WorkCountdown` 并重启），用户真实配置 / 6 个自建主题文件未被改动。
 
 ### 2026-11-17 20:30 · v5.0.0 外观与主题重构：只保留默认风格 + 主题文件化 + 设计规范文档
 

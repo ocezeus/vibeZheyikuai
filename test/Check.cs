@@ -64,6 +64,15 @@ class Check
         return f.GetValue(o);
     }
 
+    /// <summary>把主题目录指到新的空临时目录并重扫：注册表回到内置 39 套，测试不受本机用户主题影响。</summary>
+    static void IsolateThemes()
+    {
+        string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-themes-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(root);
+        ThemeFiles.Configure(root);
+        Themes.Reload();
+    }
+
     static TextBox FindTextBox(Control root)
     {
         if (root == null) return null;
@@ -191,6 +200,10 @@ class Check
     static int RunAll()
     {
         Application.EnableVisualStyles();
+
+        // 测试隔离：主题注册表从内置 39 套开始，绝不读用户 %APPDATA%\WorkCountdown\themes 里的自建主题。
+        // （v5.0.0 起用户主题是文件；跑验收的机器上如果已经有自建主题，色卡/滚动/条数断言会被污染）
+        IsolateThemes();
 
         // ---- 1. 主题色卡：底色为主，高亮色只占一条 ----
         {
@@ -1289,7 +1302,6 @@ class Check
         // ---- 10. 自建主题进列表 + 小卡片点开放大 ----
         {
             // 用户主题的唯一真源是主题文件：写进临时主题目录、Reload 后进色卡
-            string origThemeDir = ThemeFiles.Dir;
             string tmpThemeRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-list-theme-" + Guid.NewGuid().ToString("N"));
             System.IO.Directory.CreateDirectory(tmpThemeRoot);
             ThemeFiles.Configure(tmpThemeRoot);
@@ -1315,9 +1327,8 @@ class Check
             }
             finally
             {
-                ThemeFiles.Configure(origThemeDir.Length == 0 ? "" : System.IO.Path.GetDirectoryName(origThemeDir));
-                Themes.Reload();
                 try { System.IO.Directory.Delete(tmpThemeRoot, true); } catch { }
+                IsolateThemes();
             }
 
             var e1 = new ReminderEvent();
@@ -3066,7 +3077,6 @@ class Check
                     + " import=" + btnImport.Enabled + " export=" + btnExport.Enabled);
 
                 // 主题文件入口：新建 → 导出 → 导入 → 删除回退（临时主题目录，不碰真实配置）
-                string origThemeDir = ThemeFiles.Dir;
                 string tmpRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wc-check-theme-" + Guid.NewGuid().ToString("N"));
                 System.IO.Directory.CreateDirectory(tmpRoot);
                 ThemeFiles.Configure(tmpRoot);
@@ -3116,8 +3126,7 @@ class Check
                 finally
                 {
                     try { System.IO.Directory.Delete(tmpRoot, true); } catch { }
-                    ThemeFiles.Configure(origThemeDir.Length == 0 ? "" : System.IO.Path.GetDirectoryName(origThemeDir));
-                    Themes.Reload();
+                    IsolateThemes();
                 }
             }
 
@@ -4510,6 +4519,26 @@ class Check
                 object again = Call(form, "AdvanceReminders", at.AddSeconds(20));
                 Ok("同一发生点不重复弹出", !(bool)again, "again=" + again);
                 Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+            }
+        }
+
+        // v5.0.0 修复：两个参数的构造重载生产的窗口里，tick 回调曾把 ctor 的 sync 参数捕获成 null，
+        // 跨天分支对着 null 调 ResetAttendance → 每天 00:00 弹一次「未将对象引用设置到对象的实例」。
+        // 这里模拟跨天 tick（把 lastDay 拨回昨天），必须不抛异常。
+        {
+            var s = new Settings();
+            s.lark.enabled = false;
+            s.outlook.enabled = false;
+            using (var form = new WidgetForm(new SettingsStore(), s))
+            {
+                Set(form, "lastDay", DateTime.Today.AddDays(-1));
+                var tick = (Timer)Get(form, "tick");
+                Exception boom = null;
+                try { Call(tick, "OnTick", EventArgs.Empty); }
+                catch (TargetInvocationException tie) { boom = tie.InnerException == null ? (Exception)tie : tie.InnerException; }
+                catch (Exception ex) { boom = ex; }
+                Ok("跨天 tick 不抛异常（生产构造路径的 sync 注入不能是 null）",
+                    boom == null, boom == null ? "lastDay 从昨天跨到今天" : (boom.GetType().Name + ": " + boom.Message));
             }
         }
 

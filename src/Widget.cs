@@ -203,7 +203,7 @@ namespace WorkCountdown
         }
 
         /// <summary>测试 / 宿主可以注入同步模块；生产构造走上面那个重载，使用真实 adapter。</summary>
-        internal WidgetForm(SettingsStore store, Settings settings, SyncEngine sync)
+        internal WidgetForm(SettingsStore store, Settings settings, SyncEngine engineOverride)
         {
             this.store = store;
             this.settings = settings;
@@ -211,7 +211,9 @@ namespace WorkCountdown
             settings.NormalizeSchedules();      // 老配置 / 直接 new 出来的 Settings 也要有固定日程
             if (settings.note == null) settings.note = new NoteSettings();
             settings.note.Normalize();
-            this.sync = sync != null ? sync : new SyncEngine(
+            // 注意：参数不能叫 sync，否则 ctor 里的匿名 Timer 回调会优先捕获参数（每次新窗口传 null），
+            // 跨天分支就会对着 null 调 ResetAttendance —— v5.0.0 每天一次 NRE 的根因。
+            this.sync = engineOverride != null ? engineOverride : new SyncEngine(
                 new ThreadPoolSyncScheduler(), new ControlSyncDispatcher(this),
                 new LarkAttendanceReader(this.lark), new LiveCalendarSourceReader(this.lark),
                 delegate { return DateTime.Now; });
@@ -255,7 +257,7 @@ namespace WorkCountdown
                 if (lastDay != DateTime.Today)
                 {
                     lastDay = DateTime.Today;
-                    sync.ResetAttendance();
+                    this.sync.ResetAttendance();
                     snapshot = null;
                     RequestRefresh(false);
                     RequestCalendar(false);
