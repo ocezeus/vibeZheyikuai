@@ -2860,6 +2860,58 @@ namespace WorkCountdown
             return t * t * (3 - 2 * t);
         }
 
+        /// <summary>条身与外发光共用的水平渐变：hot = 绿→黄→橙→粉；普通 = accent 由深到亮。</summary>
+        private void BarGradient(bool hot, out Color[] stops, out float[] pos)
+        {
+            if (hot)
+            {
+                stops = new Color[] { Color.FromArgb(255, 212, 122), Color.FromArgb(255, 214, 61),
+                    Color.FromArgb(255, 138, 61), Color.FromArgb(255, 92, 122) };
+                pos = new float[] { 0f, 0.42f, 0.74f, 1f };
+            }
+            else
+            {
+                stops = new Color[] { MixColor(status.accent, theme.bgBottom, 0.22), status.accent };
+                pos = new float[] { 0f, 1f };
+            }
+        }
+
+        /// <summary>
+        /// 把条子的渐变按指定整体 alpha 做成水平渐变笔刷（外发光每层 alpha 不同）。
+        /// pad &gt; 0：把渐变矩形向左右各扩 pad，两端各复制一次端色（等效「边界颜色向外延伸」）。
+        /// 外发光的圆角描边比条子宽，会让笔刷超出渐变矩形；GDI+ 线性渐变在矩形外默认会平铺，
+        /// 左边就会突然冒出条子前缘的颜色（粉色），所以必须先扩矩形再把端色拍平。
+        /// </summary>
+        private static LinearGradientBrush BarGradientBrush(Rectangle rect, Color[] stops, float[] pos, int alpha, int pad)
+        {
+            int a = Math.Max(0, Math.Min(255, alpha));
+            if (pad < 0) pad = 0;
+            int w = Math.Max(1, rect.Width);
+            int total = w + pad * 2;
+            var brect = new Rectangle(rect.X - pad, rect.Y, total, Math.Max(1, rect.Height));
+            var br = new LinearGradientBrush(brect, Color.Black, Color.Black, 0f);
+            var colors = new List<Color>();
+            var positions = new List<float>();
+            colors.Add(Color.FromArgb(a, stops[0]));
+            positions.Add(0f);
+            for (int i = 0; i < stops.Length; i++)
+            {
+                float p = ((float)pad + pos[i] * w) / total;
+                if (p <= 0.0001f) { colors[0] = Color.FromArgb(a, stops[i]); positions[0] = 0f; continue; }
+                if (p >= 0.9999f) continue;
+                if (p <= positions[positions.Count - 1] + 0.0002f) continue;
+                colors.Add(Color.FromArgb(a, stops[i]));
+                positions.Add(p);
+            }
+            colors.Add(Color.FromArgb(a, stops[stops.Length - 1]));
+            positions.Add(1f);
+            var blend = new ColorBlend();
+            blend.Colors = colors.ToArray();
+            blend.Positions = positions.ToArray();
+            br.InterpolationColors = blend;
+            return br;
+        }
+
         /// <summary>进度条：走过的一段带发光，最后半小时整条变彩色。</summary>
         private void DrawProgress(Graphics g, int x, int y, int width, int height, bool glowOn)
         {
@@ -2873,97 +2925,55 @@ namespace WorkCountdown
             var bar = new Rectangle(x, y, filled, height);
             bool hot = HotBar(MinutesToOffWork());
 
-            // 外发光：两圈比条子大一点的同色圆角矩形，越靠外越淡，前缘像在发亮。
-            // 颜色必须跟着条子走：普通模式是 accent 的深浅渐变，最后半小时是同一套彩虹，
-            // 不能一律用 accent —— 那样条子变黄了外圈还是绿的。
+            // 外发光：条身外侧一层「由内向外平滑渐隐」的柔光 + 前缘一颗柔光灯珠。
+            // 旧做法是一块平铺 alpha 的胶囊 halo：边界是一条硬边、垂直方向没有衰减，
+            // 放大看像在卡片上贴了一层光膜。现在改成多层同色圆角描边（宽度递增、alpha 递减），
+            // 累积 alpha 由内向外连续衰减；颜色仍跟条子走（hot = 同一套彩虹）。
+            Color[] barStops;
+            float[] barPos;
+            BarGradient(hot, out barStops, out barPos);
             if (glowOn && filled > height * 2)
             {
-                Color[] glowStops;
-                float[] glowPos;
-                if (hot)
+                var glowRect = new Rectangle(x, y, Math.Max(2, filled), Math.Max(1, height));
+                float hf = Math.Max(1f, height);
+                double[] widths = { 4.6, 3.9, 3.2, 2.6, 2.1, 1.65, 1.25 };   // 以条高为单位（外 → 内）
+                int[] alphas = { 4, 6, 9, 13, 18, 25, 33 };                 // 累积约 37%，最外圈 ≈1.6% 看不出边
+                using (var gp = RoundPath(glowRect, height / 2))
                 {
-                    glowStops = new Color[]
+                    for (int i = 0; i < widths.Length; i++)
                     {
-                        Color.FromArgb(255, 212, 122), Color.FromArgb(255, 214, 61),
-                        Color.FromArgb(255, 138, 61), Color.FromArgb(255, 92, 122)
-                    };
-                    glowPos = new float[] { 0f, 0.42f, 0.74f, 1f };
+                        int a = (int)Math.Round(alphas[i] * barAlpha);
+                        if (a <= 0) continue;
+                        using (var br = BarGradientBrush(glowRect, barStops, barPos, a, Math.Max(1, (int)Math.Round(widths[i] * hf / 2))))
+                        using (var pen = new Pen(br, Math.Max(1f, (float)(widths[i] * hf))))
+                        {
+                            pen.LineJoin = LineJoin.Round;
+                            g.DrawPath(pen, gp);
+                        }
+                    }
                 }
-                else
+                // 前缘柔光：灯珠画在条子下面，只有外溢部分露出来，前缘不再是一条平头切线。
+                int cy = y + height / 2;
+                int tipR = Math.Max(S(8), (int)Math.Round(height * 3.2));
+                Color tip = hot ? barStops[barStops.Length - 1] : MixColor(status.accent, Color.White, 0.22);
+                using (var tgp = new GraphicsPath())
                 {
-                    glowStops = new Color[] { MixColor(MixColor(status.accent, theme.bgBottom, 0.22), Color.White, 0.15), MixColor(status.accent, Color.White, 0.15) };
-                    glowPos = new float[] { 0f, 1f };
-                }
-                int glowSpan = hot ? Math.Max(2, width) : Math.Max(2, filled);
-
-                for (int pass = 0; pass < 2; pass++)
-                {
-                    int grow = (int)Math.Round(height * (pass == 0 ? 1.8f : 0.9f));
-                    int feather = grow * 3;
-                    int alpha = pass == 0 ? (hot ? 32 : 16) : (hot ? 70 : 32);
-                    // 右边多留一截做羽毛状的尾巴，光才不会在前缘突然断掉
-                    var halo = new Rectangle(x - grow, y - grow, filled + grow * 2 + feather, height + grow * 2);
-                    using (var gp = RoundPath(halo, halo.Height / 2))
-                    using (var br = new LinearGradientBrush(halo, Color.Black, Color.Black, 0f))
+                    tgp.AddEllipse(x + filled - tipR, cy - tipR, tipR * 2, tipR * 2);
+                    using (var tg = new PathGradientBrush(tgp))
                     {
-                        float keep = Math.Min(1f, (float)(filled + grow) / Math.Max(1, halo.Width));
-                        var cols = new List<Color>();
-                        var pos = new List<float>();
-                        int a = (int)Math.Round(alpha * barAlpha);
-                        cols.Add(Color.FromArgb(a, glowStops[0]));
-                        pos.Add(0f);
-                        int lastIdx = 0;                       // 已经画到的最靠右的颜色
-                        for (int i = 1; i < glowStops.Length; i++)
-                        {
-                            float u = (float)((x + glowPos[i] * glowSpan - halo.X) / (double)halo.Width);
-                            if (u <= 0f) { cols[0] = Color.FromArgb(a, glowStops[i]); lastIdx = i; }
-                            else if (u >= keep) break;
-                            else { cols.Add(Color.FromArgb(a, glowStops[i])); pos.Add(u); lastIdx = i; }
-                        }
-                        // GDI+ 要求最后一个位置正好是 1.0：先到 keep 保持颜色，再从 keep 淡到透明。
-                        // 淡出用的是「条子前缘」的颜色，不能拿渐变的最后一个色（那样尾巴会忽然变粉）。
-                        float fadeAt = Math.Max(keep, pos[pos.Count - 1] + 0.0005f);
-                        if (fadeAt < 0.999f)
-                        {
-                            cols.Add(Color.FromArgb(a, glowStops[lastIdx]));
-                            pos.Add(fadeAt);
-                        }
-                        cols.Add(Color.FromArgb(0, glowStops[lastIdx]));
-                        pos.Add(1f);
-                        var fblend = new ColorBlend();
-                        fblend.Colors = cols.ToArray();
-                        fblend.Positions = pos.ToArray();
-                        br.InterpolationColors = fblend;
-                        g.FillPath(br, gp);
+                        tg.CenterPoint = new PointF(x + filled, cy);
+                        tg.CenterColor = Color.FromArgb((int)Math.Round((hot ? 60 : 40) * barAlpha), tip);
+                        tg.SurroundColors = new Color[] { Color.FromArgb(0, tip) };
+                        g.FillPath(tg, tgp);
                     }
                 }
             }
 
             using (var path = RoundPath(bar, height / 2))
             {
-                if (hot)
-                {
-                    // 彩色：整条轨道从左到右 绿→黄→橙→粉，走到哪段都是该有的颜色
-                    using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, width), height),
-                        Color.FromArgb((int)Math.Round(255 * barAlpha), 212, 122), Color.FromArgb((int)Math.Round(255 * barAlpha), 92, 122), 0f))
-                    {
-                        var blend = new ColorBlend();
-                        blend.Colors = new Color[]
-                        {
-                            Color.FromArgb((int)Math.Round(255 * barAlpha), 212, 122), Color.FromArgb((int)Math.Round(255 * barAlpha), 214, 61),
-                            Color.FromArgb((int)Math.Round(255 * barAlpha), 138, 61), Color.FromArgb((int)Math.Round(255 * barAlpha), 92, 122)
-                        };
-                        blend.Positions = new float[] { 0f, 0.42f, 0.74f, 1f };
-                        brush.InterpolationColors = blend;
-                        g.FillPath(brush, path);
-                    }
-                }
-                else
-                {
-                    using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), height),
-                        Fade(MixColor(status.accent, theme.bgBottom, 0.22), barAlpha), Fade(status.accent, barAlpha), 0f))
-                        g.FillPath(brush, path);
-                }
+                using (var brush = BarGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(1, height)),
+                    barStops, barPos, (int)Math.Round(255 * barAlpha), 0))
+                    g.FillPath(brush, path);
                 // 上面压一道高光，条子才有厚度
                 using (var brush = new LinearGradientBrush(new Rectangle(x, y, Math.Max(2, filled), Math.Max(2, height)),
                     Color.FromArgb((int)Math.Round((90) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), 90f))
@@ -2988,12 +2998,15 @@ namespace WorkCountdown
                         using (var fb = new LinearGradientBrush(flowRect,
                             Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White), 0f))
                         {
+                            int peak = (int)Math.Round(132 * barAlpha * opacity);
+                            float[] fp = { 0f, 0.08f, 0.18f, 0.30f, 0.42f, 0.50f, 0.58f, 0.70f, 0.82f, 0.92f, 1f };
+                            double[] fw = { 0, 0.025, 0.10, 0.26, 0.55, 1.0, 0.55, 0.26, 0.10, 0.025, 0 };
+                            var fcols = new Color[fw.Length];
+                            for (int i = 0; i < fw.Length; i++)
+                                fcols[i] = Color.FromArgb((int)Math.Round(peak * fw[i]), Color.White);
                             var fblend = new ColorBlend();
-                            fblend.Colors = new Color[] {
-                                Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White),
-                                Color.FromArgb((int)Math.Round((150) * barAlpha * opacity), Color.White),
-                                Color.FromArgb((int)Math.Round((0) * barAlpha), Color.White) };
-                            fblend.Positions = new float[] { 0f, 0.5f, 1f };
+                            fblend.Colors = fcols;
+                            fblend.Positions = fp;
                             fb.InterpolationColors = fblend;
                             g.FillRectangle(fb, flowRect);
                         }

@@ -2095,6 +2095,83 @@ class Check
             }
         }
 
+        // ---- 5h2. 进度条光效「自然均匀」（v5.0.1 视觉修复）：平滑衰减、左端不串色、光带无硬折角 ----
+        {
+            Func<Settings, double, bool, bool, Bitmap> shot = delegate(Settings cfg, double progress, bool hot, bool flow)
+            {
+                cfg.lark.enabled = false;
+                cfg.calendarEnabled = false;
+                cfg.ui.edge = "free";
+                cfg.ui.cardGlow = "none";
+                cfg.ui.reducedMotion = !flow;
+                using (var form = new WidgetForm(new SettingsStore(), cfg))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                    Set(form, "collapsed", false);
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(420, 282);
+                    Call(form, "Recompute");
+                    var st = Get(form, "status");
+                    st.GetType().GetProperty("progress").SetValue(st, progress, null);
+                    if (hot)
+                        st.GetType().GetProperty("targetIso").SetValue(st,
+                            DateTime.Now.AddMinutes(10).ToString("yyyy-MM-ddTHH:mm:ss"), null);
+                    Set(form, "flowPhase", flow ? 0.5 : 0.0);
+                    var bmp = new Bitmap(420, 282);
+                    using (var g = Graphics.FromImage(bmp))
+                        Call(form, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, 420, 282)));
+                    Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                    return bmp;
+                }
+            };
+            int barY = 153, barH = 6;
+
+            using (var nm = shot(new Settings(), 0.62, false, false))
+            {
+                Color bg = nm.GetPixel(150, barY - 30);
+                double inner = RelLum(nm.GetPixel(150, barY - 2)) - RelLum(bg);
+                double outer = RelLum(nm.GetPixel(150, Math.Max(0, barY - 13))) - RelLum(bg);
+                double prev = inner, maxStep = 0;
+                bool mono = true;
+                for (int d = 3; d <= 13; d++)
+                {
+                    double v = RelLum(nm.GetPixel(150, barY - d)) - RelLum(bg);
+                    if (v > prev + 0.003) mono = false;
+                    maxStep = Math.Max(maxStep, prev - v);
+                    prev = v;
+                }
+                Ok("进度条外发光由内向外平滑衰减（没有硬边）",
+                    inner > 0.02 && outer < inner * 0.30 && mono && maxStep < inner * 0.45,
+                    "内 " + (inner * 255).ToString("0.0") + "/255 外 " + (outer * 255).ToString("0.0")
+                    + "/255 单调=" + mono + " 最大跳变 " + (maxStep * 255).ToString("0.0"));
+            }
+
+            using (var hotShot = shot(new Settings(), 0.55, true, false))
+            {
+                Color left = hotShot.GetPixel(22, barY + barH / 2);
+                Ok("进度条热模式外发光左端不串右端粉色（渐变没有平铺）",
+                    left.R > left.B + 2, "左端光 " + fmt(left) + "（应偏黄绿，不能偏粉）");
+            }
+
+            using (var on = shot(new Settings(), 0.60, false, true))
+            using (var off = shot(new Settings(), 0.60, false, false))
+            {
+                double peak = 0, maxStep = 0, prevExtra = 0;
+                int peakAt = 0;
+                for (int x = 30; x <= 245; x++)
+                {
+                    double extra = RelLum(on.GetPixel(x, barY + barH / 2)) - RelLum(off.GetPixel(x, barY + barH / 2));
+                    if (extra > peak) { peak = extra; peakAt = x; }
+                    if (x > 30) maxStep = Math.Max(maxStep, Math.Abs(extra - prevExtra));
+                    prevExtra = extra;
+                }
+                Ok("进度条流光横向平滑（光带两头没有硬折角）",
+                    peak > 0.01 && maxStep < peak * 0.16,
+                    "峰值 " + (peak * 255).ToString("0.0") + "/255 @x=" + peakAt
+                    + " 最大跳变 " + (maxStep * 255).ToString("0.0"));
+            }
+        }
         // ---- 5i. 右键胶囊菜单：几何、主题配色、原地长开 ----
         {
             // v3.6.0：菜单从 4 颗加到 6 颗（多了「预览通知」「检查更新」），列高 = 6×40 + 5×8 = 280
