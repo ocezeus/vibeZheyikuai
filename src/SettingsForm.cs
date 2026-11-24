@@ -144,6 +144,9 @@ namespace WorkCountdown
         private CheckBox cbShowLunch;
         private CheckBox cbReducedMotion;
         private ComboBox cmbGlow;
+        /// <summary>目标达成动效：可选 id 与下拉项一一对应。</summary>
+        private ComboBox cmbGoal;
+        private string[] goalIds = new string[0];
         private Button btnEditTheme;
         private RadioButton rbBgSolid;
         private RadioButton rbBgGlass;
@@ -2141,7 +2144,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildLook(TabPage page)
         {
-            var g = CardBox(page, "外观与提醒", 8, 268, 492, 190);
+            var g = CardBox(page, "外观与提醒", 8, 268, 492, 224);
 
             g.Controls.Add(Lbl("不透明度", 14, 28, 58, 24));
             numOpacity = Num(94, 76, 28, 56, 30, 100);
@@ -2192,7 +2195,19 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             btnFonts.Click += delegate { ChooseFonts(); };
             g.Controls.Add(btnFonts);
 
-            g.Controls.Add(Hint("提醒的范围 / 扩散样式 / 配色按四类日程分开设，在「日程」页。", 14, 160, 466, 20));
+            // 目标达成庆祝：六版动效（01/05/06/07/08/10）
+            g.Controls.Add(Lbl("目标动效", 14, 164, 58, 24));
+            cmbGoal = new ComboBox();
+            cmbGoal.DropDownStyle = ComboBoxStyle.DropDownList;
+            cmbGoal.SetBounds(76, 162, 200, 24);
+            goalIds = GoalVariants.Ids();
+            var goalNames = new object[goalIds.Length];
+            for (int i = 0; i < goalIds.Length; i++) goalNames[i] = GoalVariants.NameOf(goalIds[i]);
+            cmbGoal.Items.AddRange(goalNames);
+            g.Controls.Add(cmbGoal);
+            g.Controls.Add(Hint("当天首次达标时播一次", 282, 164, 200, 22));
+
+            g.Controls.Add(Hint("提醒的范围 / 扩散样式 / 配色按四类日程分开设，在「日程」页。", 14, 194, 466, 20));
         }
 
         private void ChooseFonts()
@@ -2207,7 +2222,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
 
         private void BuildBackup(TabPage page)
         {
-            var g = CardBox(page, "配置备份", 8, 466, 492, 112);
+            var g = CardBox(page, "配置备份", 8, 500, 492, 112);
             g.Controls.Add(Hint("换电脑或给同事复用：导出一份，带过去再导入。", 14, 24, 466, 18));
 
             var btnExport = FlatButton("导出配置…", 14, 48, 108, 30);
@@ -2359,6 +2374,11 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             numReminderHold.Value = Math.Max(3, Math.Min(20, s.ui.reminderHoldSeconds));
             cmbGlow.SelectedIndex = s.ui.cardGlow == "corner" ? 1
                 : s.ui.cardGlow == "bar" ? 2 : s.ui.cardGlow == "all" ? 3 : 0;
+            if (cmbGoal != null)
+            {
+                int gi = Array.IndexOf(goalIds, GoalVariants.Normalize(s.ui.goalEffect));
+                cmbGoal.SelectedIndex = gi < 0 ? 0 : gi;
+            }
             if (rbBgSolid != null)
             {
                 bool glass = Frost.On(s.ui);
@@ -2478,6 +2498,8 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.reminderHoldSeconds = (int)numReminderHold.Value;
             string[] glowIds = new string[] { "classic", "corner", "bar", "all" };
             s.ui.cardGlow = glowIds[Math.Max(0, Math.Min(glowIds.Length - 1, cmbGlow.SelectedIndex))];
+            if (cmbGoal != null && goalIds != null && goalIds.Length > 0)
+                s.ui.goalEffect = goalIds[Math.Max(0, Math.Min(goalIds.Length - 1, cmbGoal.SelectedIndex))];
             if (rbBgGlass != null) s.ui.bgStyle = rbBgGlass.Checked ? Frost.Glass : Frost.Solid;
             s.ui.textFont = editTextFont ?? "";
             s.ui.numberFont = string.IsNullOrWhiteSpace(editNumberFont) ? "Consolas" : editNumberFont;

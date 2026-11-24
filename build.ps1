@@ -130,6 +130,15 @@ $sources = @(
     (Join-Path $src 'NotePanelForm.cs'),
     (Join-Path $src 'NoteRelay.cs'),
     (Join-Path $src 'CardGlowForm.cs'),
+    (Join-Path $src 'GoalCelebration.cs'),
+    (Join-Path $src 'GoalPaint.cs'),
+    (Join-Path $src 'GoalVariantGarden.cs'),
+    (Join-Path $src 'GoalVariantStardust.cs'),
+    (Join-Path $src 'GoalVariantRibbon.cs'),
+    (Join-Path $src 'GoalVariantPixel.cs'),
+    (Join-Path $src 'GoalVariantBrutal.cs'),
+    (Join-Path $src 'GoalVariantNeon.cs'),
+    (Join-Path $src 'CelebrationOverlayForm.cs'),
     (Join-Path $src 'SettingsForm.cs'),
     (Join-Path $src 'FirstRunForm.cs')
 )

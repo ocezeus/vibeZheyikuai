@@ -108,6 +108,35 @@ class Check
         return bmp;
     }
 
+    /// <summary>两张同尺寸图里「明显不一样」的像素占比（庆祝层有没有真的画上去）。</summary>
+    static double PixelDiff(Bitmap a, Bitmap b)
+    {
+        if (a == null || b == null || a.Width != b.Width || a.Height != b.Height) return 0;
+        int diff = 0, total = 0;
+        for (int y = 0; y < a.Height; y += 2)
+            for (int x = 0; x < a.Width; x += 2)
+            {
+                total++;
+                Color p = a.GetPixel(x, y), q = b.GetPixel(x, y);
+                if (Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B) > 18) diff++;
+            }
+        return total == 0 ? 0 : diff / (double)total;
+    }
+
+    /// <summary>位图指纹：同一套绘制应该稳定，不同版本不应该撞。</summary>
+    static long BitmapSum(Bitmap b)
+    {
+        long sum = 0;
+        for (int y = 0; y < b.Height; y += 3)
+            for (int x = 0; x < b.Width; x += 3)
+            {
+                Color c = b.GetPixel(x, y);
+                long v = (c.R << 16) | (c.G << 8) | c.B;
+                sum += v * ((x * 31 + y * 17) % 97 + 1);
+            }
+        return sum;
+    }
+
     /// <summary>矩形里的平均颜色（皮肤底色像素级验收用）。</summary>
     static Color AverageColor(Bitmap bmp, Rectangle r)
     {
@@ -2114,6 +2143,9 @@ class Check
                     Call(form, "Recompute");
                     var st = Get(form, "status");
                     st.GetType().GetProperty("progress").SetValue(st, progress, null);
+                    // 探针按 scale=1.5 出图，字号也跟着 1.5× 放大后，那颗大数字会盖住
+                    // 取样点（barY-30 那行）；这里只验进度条光效，把大数字清掉再画。
+                    st.GetType().GetProperty("big").SetValue(st, "", null);
                     if (hot)
                         st.GetType().GetProperty("targetIso").SetValue(st,
                             DateTime.Now.AddMinutes(10).ToString("yyyy-MM-ddTHH:mm:ss"), null);
@@ -2183,15 +2215,15 @@ class Check
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Theme) == 168
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Clock) == 130
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Schedule) == 222
-                && BubbleMenuForm.ExtraHDip(BubbleAction.Preview) == 208
+                && BubbleMenuForm.ExtraHDip(BubbleAction.Preview) == 258
                 && BubbleMenuForm.ExtraHDip(BubbleAction.Update) == 378
                 && BubbleMenuForm.ItemHDip(BubbleAction.Theme) == 208
                 && BubbleMenuForm.ItemHDip(BubbleAction.Clock) == 170
                 && BubbleMenuForm.ItemHDip(BubbleAction.Schedule) == 262
-                && BubbleMenuForm.ItemHDip(BubbleAction.Preview) == 248
+                && BubbleMenuForm.ItemHDip(BubbleAction.Preview) == 298
                 && BubbleMenuForm.ItemHDip(BubbleAction.Update) == 418,
                 BubbleMenuForm.PillWDip + "x" + BubbleMenuForm.PillHDip + " 列高 " + BubbleMenuForm.ColumnHDip
-                + " 长开 168/130/222/208/378（+40 头 = 208/170/262/248/418）");
+                + " 长开 168/130/222/258/378（+40 头 = 208/170/262/298/418）");
 
             var bs = new Settings();
             bs.lark.enabled = false;
@@ -2298,16 +2330,18 @@ class Check
                     var pKeys = new System.Collections.Generic.List<string>();
                     foreach (object h in (System.Collections.IEnumerable)Get(m, "hits"))
                         pKeys.Add((string)h.GetType().GetField("key").GetValue(h));
-                    bool pKeyOk = pKeys.Count == 6;
-                    for (int i = 0; pKeyOk && i < 6; i++)
+                    bool pKeyOk = pKeys.Count == 7;
+                    for (int i = 0; pKeyOk && i < 7; i++)
                         pKeyOk = pKeys[i] == "preview:" + BubbleMenuForm.PreviewKeys[i];
                     bool pChipOk = pItem.Width == s(246) && pItem.Height == s(40) + pExtra
                         && pChips[0].X == pItem.X + s(12) && pChips[0].Y == pItem.Y + s(62)
                         && pChips[0].Height == s(42)
                         && pChips[1].Y == pChips[0].Y && pChips[1].X == pChips[0].Right + s(8)
                         && pChips[2].X == pChips[0].X && pChips[2].Y == pChips[0].Y + s(50)
-                        && pChips[5].Y == pChips[2].Y + s(50) && pChips[5].Bottom <= pItem.Bottom;
-                    Ok("预览面板 2 列 × 3 行 6 个 chip，命中区和绘制位置一一对应",
+                        && pChips[5].Y == pChips[2].Y + s(50) && pChips[5].Bottom <= pItem.Bottom
+                        && pChips[6].X == pChips[4].X && pChips[6].Y == pChips[4].Y + s(50)
+                        && pChips[6].Bottom <= pItem.Bottom;
+                    Ok("预览面板 2 列 × 4 行 7 个 chip（含目标达成），命中区和绘制位置一一对应",
                         pKeyOk && pChipOk,
                         pKeys.Count + " 个命中区 / chip0=" + pChips[0] + " chip5=" + pChips[5]);
 
@@ -3099,7 +3133,7 @@ class Check
                 }
                 Ok("「主题配色」卡在 y=8（原「界面风格」位置），外观 / 备份卡整体上移",
                     Math.Abs(themeCardY - dip(8)) <= 1 && Math.Abs(themeCardH - dip(252)) <= 1
-                    && Math.Abs(lookCardY - dip(268)) <= 1 && Math.Abs(backupCardY - dip(466)) <= 1,
+                    && Math.Abs(lookCardY - dip(268)) <= 1 && Math.Abs(backupCardY - dip(500)) <= 1,
                     "主题 y=" + themeCardY + " h=" + themeCardH + " / 外观 y=" + lookCardY + " / 备份 y=" + backupCardY
                     + "（DPI×" + dpiK.ToString("0.##") + "）");
 
@@ -4616,6 +4650,213 @@ class Check
                 catch (Exception ex) { boom = ex; }
                 Ok("跨天 tick 不抛异常（生产构造路径的 sync 注入不能是 null）",
                     boom == null, boom == null ? "lastDay 从昨天跨到今天" : (boom.GetType().Name + ": " + boom.Message));
+            }
+        }
+
+        // ---- 5j. 目标达成庆祝：注册表 / 时间轴 / 一天一次 / 六个版本都能画 ----
+        {
+            string[] ids = GoalVariants.Ids();
+            Ok("目标达成动效 6 版都在（01/05/06/07/08/10）",
+                string.Join("/", ids) == "01/05/06/07/08/10", string.Join("/", ids));
+            Ok("未知动效 id 收敛到默认 05（null / 99 / 07）",
+                GoalVariants.Normalize(null) == "05" && GoalVariants.Normalize("99") == "05"
+                && GoalVariants.Normalize("07") == "07",
+                GoalVariants.Normalize(null) + "/" + GoalVariants.Normalize("99") + "/" + GoalVariants.Normalize("07"));
+            foreach (var one in ids)
+                Ok("动效 " + one + " 有显示名与出框声明",
+                    !string.IsNullOrEmpty(GoalVariants.NameOf(one)) && GoalVariants.Get(one) != null,
+                    GoalVariants.NameOf(one));
+            var s0 = new Settings();
+            Ok("设置默认：目标动效 05、今天还没庆祝过",
+                s0.ui.goalEffect == "05" && s0.ui.goalCelebratedDay == "",
+                s0.ui.goalEffect + "|" + s0.ui.goalCelebratedDay);
+            s0.ui.goalEffect = "nope";
+            s0.Normalize();
+            Ok("Normalize 把未知目标动效收回 05", s0.ui.goalEffect == "05", s0.ui.goalEffect);
+
+            // 时间轴：入场 1.2s / 停留 6s / 退场 0.8s
+            var gc = new GoalCelebration();
+            gc.Start("05", false, 6000);
+            double inMid = gc.InP(600), inEnd = gc.InP(1200);
+            double outStart = gc.OutP(7200), outMid = gc.OutP(7600), outEnd = gc.OutP(8000);
+            Ok("庆祝时间轴 入场 1.2s / 停留 6s / 退场 0.8s",
+                Math.Abs(inMid - 0.5) < 0.001 && inEnd == 1 && outStart == 0
+                && Math.Abs(outMid - 0.5) < 0.001 && outEnd == 1 && gc.Active,
+                inMid.ToString("0.00") + "/" + inEnd + "/" + outStart + "/" + outMid + "/" + outEnd);
+            GoalCelebration.FrozenMs = 7200;
+            bool atHoldEnd = gc.Tick(DateTime.Now) && gc.Exiting;
+            GoalCelebration.FrozenMs = 8000;
+            bool atEnd = !gc.Tick(DateTime.Now) && !gc.Active;
+            GoalCelebration.FrozenMs = -1;
+            Ok("庆祝到点自动退场、放完自动结束", atHoldEnd && atEnd,
+                "holdEnd=" + atHoldEnd + " end=" + atEnd);
+
+            // 静态帧：reducedMotion 时走 quiet 分支，到点直接结束，不做退场
+            var gq = new GoalCelebration();
+            gq.Start("05", true, 6000);
+            GoalCelebration.FrozenMs = 5000;
+            bool quietStill = gq.Tick(DateTime.Now) && gq.Quiet;
+            GoalCelebration.FrozenMs = 7300;
+            bool quietDone = !gq.Tick(DateTime.Now);
+            GoalCelebration.FrozenMs = -1;
+            Ok("reducedMotion 下只放静态帧（停留到位后直接结束、不做退场）", quietStill && quietDone,
+                "still=" + quietStill + " done=" + quietDone);
+
+            // 六个版本离屏各画一张：和「没有庆祝层」的同一帧比，卡面必须明显不一样
+            var diffByVersion = new System.Collections.Generic.List<string>();
+            var sumByVersion = new System.Collections.Generic.List<long>();
+            foreach (var id in ids)
+            {
+                var cfg = new Settings();
+                cfg.lark.enabled = false;
+                cfg.calendarEnabled = false;
+                cfg.ui.edge = "free";
+                cfg.ui.theme = "midnight";
+                cfg.ui.goalEffect = id;
+                using (var form = new WidgetForm(new SettingsStore(), cfg))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                    Set(form, "collapsed", false);
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(420, 282);
+                    Call(form, "Recompute");
+                    Set(form, "flowPhase", 0.5);
+                    var goal = (GoalCelebration)Get(form, "goal");
+                    using (var plain = RenderForm(form, 420, 282))
+                    {
+                        GoalCelebration.FrozenMs = 3200;
+                        goal.Start(id, false, 6000);
+                        using (var painted = RenderForm(form, 420, 282))
+                        {
+                            double diff = PixelDiff(plain, painted);
+                            diffByVersion.Add(id + "=" + (diff * 100).ToString("0"));
+                            sumByVersion.Add(BitmapSum(painted));
+                            Ok("动效 " + id + " 在展开卡上真的画出了东西（差异像素 >25%）",
+                                diff > 0.25, (diff * 100).ToString("0") + "% 像素不同");
+                        }
+                        goal.Stop();
+                        GoalCelebration.FrozenMs = -1;
+                    }
+                    Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                }
+            }
+            Ok("六个版本互不相同（都画成同一张就说明没实现）",
+                new System.Collections.Generic.HashSet<long>(sumByVersion).Count == sumByVersion.Count,
+                string.Join(" ", diffByVersion.ToArray()));
+
+            // 收起卡 224×68 也要有布局（不整张缩小的前提是能画、不是空白）
+            {
+                var cfg = new Settings();
+                cfg.lark.enabled = false;
+                cfg.calendarEnabled = false;
+                cfg.ui.edge = "free";
+                cfg.ui.goalEffect = "05";
+                using (var form = new WidgetForm(new SettingsStore(), cfg))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                    Set(form, "collapsed", true);
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(336, 102);
+                    Call(form, "Recompute");
+                    var goal = (GoalCelebration)Get(form, "goal");
+                    using (var plain = RenderForm(form, 336, 102))
+                    {
+                        GoalCelebration.FrozenMs = 3200;
+                        goal.Start("05", false, 6000);
+                        using (var painted = RenderForm(form, 336, 102))
+                        {
+                            double diff = PixelDiff(plain, painted);
+                            Ok("收起卡 224×68 也能播（紧凑版不是空白）", diff > 0.25,
+                                (diff * 100).ToString("0") + "% 像素不同");
+                        }
+                        goal.Stop();
+                        GoalCelebration.FrozenMs = -1;
+                    }
+                    Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                }
+            }
+
+            // 出框层：星屑的月牙/行星必须画到卡面矩形之外（否则就还是被窗口裁掉）
+            {
+                var variant = GoalVariants.Get("05");
+                int w = 420, h = 282, pad = 210;
+                var scene = new GoalScene();
+                scene.scale = 1.5f;
+                scene.W = w;
+                scene.H = h;
+                scene.t = 3.2;
+                scene.In = 1;
+                scene.Out = 0;
+                scene.outside = true;
+                using (var wide = new Bitmap(w + pad * 2, h + pad * 2))
+                {
+                    wide.SetResolution(144, 144);
+                    using (var g = Graphics.FromImage(wide))
+                    {
+                        g.Clear(Color.Transparent);
+                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                        g.TranslateTransform(pad, pad);
+                        scene.g = g;
+                        variant.PaintOutside(scene);
+                    }
+                    int outside = 0;
+                    for (int y = 0; y < wide.Height; y += 2)
+                        for (int x = 0; x < wide.Width; x += 2)
+                        {
+                            if (x >= pad && x < pad + w && y >= pad && y < pad + h) continue;
+                            if (wide.GetPixel(x, y).A > 24) outside++;
+                        }
+                    Ok("星屑的月牙/行星画在卡框外（出框层有内容）", outside > 200, outside + " 个卡外像素");
+                }
+            }
+
+            // 触发：当天首次达标 → 开播并记下当天；同一天不再播；第二天可以再播
+            {
+                var cfg = new Settings();
+                cfg.lark.enabled = false;
+                cfg.calendarEnabled = false;
+                cfg.ui.edge = "free";
+                cfg.ui.goalEffect = "05";
+                using (var form = new WidgetForm(new SettingsStore(), cfg))
+                {
+                    Set(form, "scale", 1.5f);
+                    Set(form, "snapshot", new AttendanceSnapshot { ok = true, clockIn = DateTime.Today.AddHours(9) });
+                    form.MinimumSize = Size.Empty;
+                    form.Size = new Size(420, 282);
+                    Call(form, "Recompute");
+                    var goal = (GoalCelebration)Get(form, "goal");
+                    var st = Get(form, "status");
+                    st.GetType().GetProperty("progress").SetValue(st, 1.0, null);
+                    Call(form, "MaybeQueueGoal", DateTime.Now);
+                    bool first = goal.Active;
+                    string day = cfg.ui.goalCelebratedDay;
+                    Ok("当天首次达标 → 播一次并记下日期",
+                        first && day == DateTime.Now.ToString("yyyy-MM-dd"), "播放=" + first + " 记录=" + day);
+                    Call(form, "EndGoal", true);
+                    Call(form, "MaybeQueueGoal", DateTime.Now);
+                    bool again = goal.Active;
+                    Ok("同一天不会再播第二次", !again, "再次播放=" + again);
+                    Call(form, "MaybeQueueGoal", DateTime.Now.AddDays(1));
+                    bool nextDay = goal.Active;
+                    Ok("跨天后又能播（只按日期去重）", nextDay, "次日播放=" + nextDay);
+                    Call(form, "EndGoal", true);
+
+                    // 提醒占着卡面时先让路：普通提醒期间不开播
+                    Set(form, "reminding", true);
+                    Set(form, "remindEvent", new ReminderEvent { id = "x", source = "lark", title = "周会" });
+                    cfg.ui.goalCelebratedDay = "";
+                    Call(form, "MaybeQueueGoal", DateTime.Now);
+                    bool blocked = !goal.Active && (bool)Get(form, "goalPending");
+                    Set(form, "reminding", false);
+                    Call(form, "TryStartGoal", DateTime.Now);
+                    bool started = goal.Active;
+                    Ok("普通提醒期间先排队、让开后再播", blocked && started,
+                        "排队=" + blocked + " 让开后播=" + started);
+                    Call(form, "EndGoal", true);
+                    Call(form, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));
+                }
             }
         }
 

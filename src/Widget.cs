@@ -65,6 +65,7 @@ namespace WorkCountdown
         private readonly System.Windows.Forms.Timer remindT;
         private readonly System.Windows.Forms.Timer flowT;
         private readonly System.Windows.Forms.Timer topT;
+        private readonly System.Windows.Forms.Timer goalT;
 
         // 分层窗口：整帧画在 32 位位图上，圆角由像素 alpha 收边（Region 剪出来的是硬锯齿边）
         private Bitmap frame;
@@ -158,6 +159,11 @@ namespace WorkCountdown
         private int noteBlinkAt;                  // 未读左上角快闪：这一轮两次快闪的起点（0 = 没在闪）
         private int noteBlinkLast;                // 上一次快闪的起点（每 5 秒一次）
         private CardGlowForm cardGlow;
+        /// <summary>目标达成庆祝（卡内动效 + 卡外出框层）。</summary>
+        private readonly GoalCelebration goal = new GoalCelebration();
+        private CelebrationOverlayForm goalOverlay;
+        /// <summary>已经达标、但提醒 / 抽屉还占着卡面，等它让开再播。</summary>
+        private bool goalPending;
         private NotifyIcon tray;
 
         // 检查更新（气泡菜单里的「检查更新」胶囊）：状态留在 Widget 上，
@@ -265,6 +271,7 @@ namespace WorkCountdown
                 Recompute();
                 CheckSticky();
                 AdvanceReminders(DateTime.Now);
+                TryStartGoal(DateTime.Now);
                 if (drawer != null) drawer.RefreshText();
                 MaybeBlinkUnread();
             };
@@ -321,6 +328,11 @@ namespace WorkCountdown
             tapeT = new System.Windows.Forms.Timer();
             tapeT.Interval = 50;
             tapeT.Tick += delegate { StepTapeFlow(); };
+
+            // 目标达成庆祝：入场 / 停留 / 退场都是自己算时钟，这里只负责按帧推进
+            goalT = new System.Windows.Forms.Timer();
+            goalT.Interval = 33;
+            goalT.Tick += delegate { StepGoal(); };
 
             apply.Apply(settings);
             BackColor = theme.bgBottom;
@@ -518,7 +530,7 @@ namespace WorkCountdown
             {
                 reminderTip.Dispose();
                 if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
-                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, olPoll, remindT, flowT, topT, tapeT })
+                foreach (var timer in new System.Windows.Forms.Timer[] { tick, poll, autoCollapse, animT, calPoll, olPoll, remindT, flowT, topT, tapeT, goalT })
                     if (timer != null) timer.Dispose();
                 foreach (var font in new Font[] { fontBig, fontBigText, fontStatus, fontTiny, fontSmall,
                     fontCollapsedNum, fontCollapsedLabel, fontCollapsedText, fontRemindBig, fontRemindSmall,
@@ -533,6 +545,7 @@ namespace WorkCountdown
                 CloseNotePanel();
                 if (noteRelay != null) { noteRelay.Dispose(); noteRelay = null; }
                 if (cardGlow != null) { cardGlow.CloseNow(); cardGlow = null; }
+                if (goalOverlay != null) { try { goalOverlay.CloseNow(); } catch { } goalOverlay.Dispose(); goalOverlay = null; }
                 if (sync != null) sync.Dispose();
                 if (menu != null) menu.Dispose();
             }
@@ -562,6 +575,7 @@ namespace WorkCountdown
                 ApplyRegion();
             }
             Invalidate();
+            MaybeQueueGoal(now);
         }
 
         private void RequestRefresh(bool manual)
@@ -2014,6 +2028,11 @@ namespace WorkCountdown
                 if (frame != null) frame.Dispose();
                 frame = new Bitmap(fw, fh, PixelFormat.Format32bppArgb);
             }
+            // 字号是 pt，GDI+ 按位图 DPI 换算成像素：位图 DPI 必须和几何用的 scale 对齐，
+            // 否则 150% 屏上字会小一号、出图探针也没法按任意 scale 复现。
+            // 生产环境里 96×scale 本来就等于屏幕 DPI，这条改动对实际画面是等价的。
+            frame.SetResolution(96f * (screenReminder ? (float)screenLayout : scale),
+                96f * (screenReminder ? (float)screenLayout : scale));
             using (var g = Graphics.FromImage(frame))
             {
                 g.Clear(Color.Transparent);
@@ -2091,6 +2110,9 @@ namespace WorkCountdown
                     DrawNoteRim(g, path);
                     DrawNoteCorner(g, path);
                 }
+                // 目标达成庆祝压在最上层：底色/文字/装饰都印在卡面里，只有出框部分交给独立透明层。
+                // 常驻「该下班啦」也在这几秒里让位——它不会因此消失，庆祝放完它还在。
+                if (goal.Active) PaintGoalLayer(g);
             }
         }
 
@@ -3232,6 +3254,13 @@ namespace WorkCountdown
                 return;
             }
 
+            // 目标达成庆祝：点一下卡片就提前收掉（收起状态下先走下面的「点开」逻辑）
+            if (goal.Active && !collapsed && Width > S(DesignCollapsedW) + S(8))
+            {
+                EndGoal(true);
+                return;
+            }
+
             // 判「现在是不是小卡片」看实际尺寸，不看 collapsed 字段：万一状态和窗口尺寸不同步，点一下自愈
             if (collapsed || Width <= S(DesignCollapsedW) + S(8))
             {
@@ -3720,6 +3749,152 @@ namespace WorkCountdown
         }
 
 
+        // ---------------- 目标达成庆祝（卡内动效 + 卡外出框层） ----------------
+
+        /// <summary>reducedMotion / 高对比度：只放一张静态帧，不闪、不抖、不爆。</summary>
+        private bool GoalQuiet { get { return settings.ui.reducedMotion || SystemInformation.HighContrast; } }
+
+        /// <summary>停留时长跟提醒最短停留共用（默认 6 秒，3–20 秒）。</summary>
+        private int GoalHoldMs { get { return Math.Max(3, Math.Min(20, settings.ui.reminderHoldSeconds)) * 1000; } }
+
+        /// <summary>正在庆祝（验收探针读它）。</summary>
+        internal bool GoalCelebrating { get { return goal.Active; } }
+
+        internal GoalCelebration GoalState { get { return goal; } }
+
+        private bool goalPreview;
+
+        /// <summary>
+        /// 当日首次达标就排队；真正开播在 TryStartGoal（得等别的提醒让开卡面）。
+        /// 达标日一落库，重启 / 重算都不会再播第二遍。
+        /// </summary>
+        private void MaybeQueueGoal(DateTime now)
+        {
+            if (status == null || goal.Active || goalPreview) return;
+            bool reached = status.progress >= 0.999 || status.headline == "已达标";
+            if (!reached) { goalPending = false; return; }
+            if (settings.ui.goalCelebratedDay == now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+            {
+                goalPending = false;
+                return;
+            }
+            goalPending = true;
+            TryStartGoal(now);
+        }
+
+        /// <summary>
+        /// 开播条件：排着队、卡面没被别的提醒 / 抽屉占着。常驻「该下班啦」不挡：
+        /// 它本来就会一直在，庆祝只压在它上面几秒，放完它自然还在。
+        /// </summary>
+        private void TryStartGoal(DateTime now)
+        {
+            if (!goalPending || goal.Active || status == null) return;
+            if (screenReminder || drawer != null) return;
+            if (reminding && remindEvent != null && remindEvent.source != "alert") return;
+            bool reached = status.progress >= 0.999 || status.headline == "已达标";
+            if (!reached) { goalPending = false; return; }
+            goalPending = false;
+            StartGoal(true, now);
+        }
+
+        /// <summary>开播。markDay = true 时把当天记进配置（预览不记）。</summary>
+        private void StartGoal(bool markDay, DateTime now)
+        {
+            if (markDay)
+            {
+                settings.ui.goalCelebratedDay = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                SaveSettingsQuietly("目标达成：记下今天");
+            }
+            goal.Start(settings.ui.goalEffect, GoalQuiet, GoalHoldMs);
+            goalT.Interval = GoalQuiet ? 120 : 33;
+            goalT.Start();
+            SyncGoalOverlay(0, 0, 0);
+            Invalidate();
+            store.Log("目标达成庆祝: " + GoalVariants.NameOf(goal.VariantId) + (GoalQuiet ? "（静态帧）" : ""));
+        }
+
+        private void StepGoal()
+        {
+            if (!goal.Active) { goalT.Stop(); return; }
+            DateTime now = DateTime.Now;
+            if (!goal.Tick(now)) { EndGoal(false); return; }
+            double ms = goal.ElapsedMs(now);
+            SyncGoalOverlay(ms, goal.InP(ms), goal.OutP(ms));
+            Invalidate();
+        }
+
+        /// <summary>结束庆祝：收掉出框层，回到普通卡片（或露出现在底下的提醒）。</summary>
+        private void EndGoal(bool byUser)
+        {
+            goalT.Stop();
+            bool was = goal.Active || goalOverlay != null || goalPreview;
+            goal.Stop();
+            goalPreview = false;
+            if (goalOverlay != null)
+            {
+                try { goalOverlay.CloseNow(); } catch { }
+                goalOverlay.Dispose();
+                goalOverlay = null;
+            }
+            if (was) Invalidate();
+            if (byUser) store.Log("目标达成庆祝: 手动关掉");
+            // 庆祝期间被让开的达标检查：下一轮 tick 会重新排队 / 开播
+        }
+
+        /// <summary>出框层跟着庆祝时钟走：没有出框装饰的版本直接不建窗。</summary>
+        private void SyncGoalOverlay(double ms, double inP, double outP)
+        {
+            IGoalVariant variant = GoalVariants.Get(goal.VariantId);
+            if (variant == null || !variant.hasOutside)
+            {
+                if (goalOverlay != null)
+                {
+                    try { goalOverlay.CloseNow(); } catch { }
+                    goalOverlay.Dispose();
+                    goalOverlay = null;
+                }
+                return;
+            }
+            if (goalOverlay == null || goalOverlay.IsDisposed)
+                goalOverlay = new CelebrationOverlayForm(this, scale);
+            double t = ms / 1000.0;
+            if (!goalOverlay.Visible) goalOverlay.Begin(goal.VariantId, goal.Quiet, collapsed, t, inP, outP);
+            else goalOverlay.Advance(t, inP, outP, collapsed);
+        }
+
+        /// <summary>卡内那一层：单独一张位图、按卡片圆角裁一刀，再整张压回卡片。</summary>
+        private void PaintGoalLayer(Graphics g)
+        {
+            IGoalVariant variant = GoalVariants.Get(goal.VariantId);
+            if (variant == null) return;
+            double ms = goal.ElapsedMs(DateTime.Now);
+            using (var layer = new Bitmap(Math.Max(1, Width), Math.Max(1, Height), PixelFormat.Format32bppArgb))
+            {
+                layer.SetResolution(g.DpiX, g.DpiY);
+                using (var lg = Graphics.FromImage(layer))
+                {
+                    // 半透明层：用灰阶抗锯齿，ClearType 在透明底上会镶彩边
+                    lg.SmoothingMode = SmoothingMode.AntiAlias;
+                    lg.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    lg.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    lg.Clear(Color.Transparent);
+                    using (var cardPath = CardPath()) lg.SetClip(cardPath, CombineMode.Intersect);
+                    var scene = new GoalScene();
+                    scene.g = lg;
+                    scene.W = Width;
+                    scene.H = Height;
+                    scene.scale = scale;
+                    scene.collapsed = collapsed;
+                    scene.quiet = goal.Quiet;
+                    scene.t = ms / 1000.0;
+                    scene.In = goal.InP(ms);
+                    scene.Out = goal.OutP(ms);
+                    variant.PaintInside(scene);
+                }
+                g.DrawImage(layer, 0, 0, Width, Height);
+            }
+        }
+
         // ---------------- 预览通知（气泡菜单「预览通知」） ----------------
 
         /// <summary>
@@ -3728,6 +3903,7 @@ namespace WorkCountdown
         /// </summary>
         private void PreviewNotification(string kind)
         {
+            if (kind == "goal") { PreviewGoal(); return; }
             if (reminding) DismissReminder();
             if (collapsed) SetCollapsed(false);
             DateTime now = DateTime.Now;
@@ -3786,6 +3962,18 @@ namespace WorkCountdown
             }
             store.Log("预览通知: " + kind);
             StartReminder(e);
+        }
+
+        /// <summary>右键「预览通知 → 目标达成」：就地播一遍（不改当天有没有庆祝过的记录）。</summary>
+        private void PreviewGoal()
+        {
+            if (reminding) DismissReminder();
+            CloseBubbleMenu();
+            if (collapsed) SetCollapsed(false);
+            goalPending = false;
+            if (goal.Active) EndGoal(false);
+            goalPreview = true;
+            StartGoal(false, DateTime.Now);
         }
 
         // ---------------- 检查更新（气泡菜单「检查更新」） ----------------

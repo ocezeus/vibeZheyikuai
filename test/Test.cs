@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -398,18 +398,18 @@ internal static class Test
             Check("长开额外高度 Theme/Clock/Schedule/Preview/Update",
                 BubbleMenuForm.ExtraHDip(BubbleAction.Theme) + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Clock)
                 + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Schedule) + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Preview)
-                + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Update), "168/130/222/208/378");
+                + "/" + BubbleMenuForm.ExtraHDip(BubbleAction.Update), "168/130/222/258/378");
             Check("长开后整颗高度 = 40 + 额外",
                 BubbleMenuForm.ItemHDip(BubbleAction.Theme) + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Clock)
                 + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Schedule) + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Preview)
-                + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Update), "208/170/262/248/418");
+                + "/" + BubbleMenuForm.ItemHDip(BubbleAction.Update), "208/170/262/298/418");
 
-            Check("预览通知 6 类 key", string.Join("/", BubbleMenuForm.PreviewKeys), "fixed/lunch/lark/outlook/local/off");
+            Check("预览通知 7 类 key（6 类提醒 + 目标达成）", string.Join("/", BubbleMenuForm.PreviewKeys), "fixed/lunch/lark/outlook/local/off/goal");
             Check("预览通知 名字 / 副标题 与 key 一一对应",
                 BubbleMenuForm.PreviewNames.Length + "/" + BubbleMenuForm.PreviewSubs.Length + "/"
-                + BubbleMenuForm.PreviewKeys.Length, "6/6/6");
+                + BubbleMenuForm.PreviewKeys.Length, "7/7/7");
             Check("预览通知名字", string.Join("/", BubbleMenuForm.PreviewNames),
-                "上班提醒/午休提醒/飞书会议/Outlook/普通日程/下班提醒");
+                "上班提醒/午休提醒/飞书会议/Outlook/普通日程/下班提醒/目标达成");
             Check("预览通知副标题", BubbleMenuForm.PreviewSubs[0] + "/" + BubbleMenuForm.PreviewSubs[5], "固定日程/打卡提醒");
             var previewKeys = new HashSet<string>();
             int dupPreview = 0;
@@ -421,8 +421,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "5.0.0/5.0.0");
-            Check("程序集版本是 5.0.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "5.0.0.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "5.1.0/5.1.0");
+            Check("程序集版本是 5.1.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "5.1.0.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");

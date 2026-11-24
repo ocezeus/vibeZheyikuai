@@ -6,9 +6,42 @@
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
 
-## 当前版本：v5.0.0
+## 当前版本：v5.1.0
 
-已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.0.0`（Release id 448605714，双资产齐全；装**机 FileVersion 5.0.0.0 / PID 37952（20:33:14）**；更新链路实测：当前 5.0.0 / 最新 5.0.0 / `IsNewer=false`。本轮只保留默认界面风格、主题文件化、设计规范文档；日常改动仍按下面的约定走）。
+已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.1.0`
+
+### 2026-11-24 · v5.1.0 · 目标达成庆祝：六版卡内动效 + 卡外出框层
+
+用户要做设计稿 `design/card-spread-notify-v4.html` 里的第 **1 / 5 / 6 / 7 / 8 / 10** 版动效（03 纸笺不做），并打包发版。
+
+**① 触发与生命周期（`src/Widget.cs` / `src/Models.cs`）**
+- 当日首次 `status.progress >= 0.999` 或 `headline == "已达标"` 时，在卡片内播一次庆祝；`ui.goalCelebratedDay` 记下日期并落盘，重启 / 重算都不再重播。
+- 提醒 / 抽屉 / 全屏提醒占着卡面时先排队（`goalPending`），让开后再播；常驻「该下班啦」不挡它——庆祝压在上面几秒，放完它自然还在。
+- 点一下卡片可提前收掉；右键「预览通知 → 目标达成」可反复验收（预览不写「今天已庆祝」）。
+- 时长：入场 1.2s + 停留 = `ui.reminderHoldSeconds`（默认 6s）+ 退场 0.8s；`reducedMotion` / 高对比度只画静态帧，到点直接结束。
+
+**② 六版动效（新增 8 个文件）**
+- `src/GoalCelebration.cs`：时间轴状态机 + 版本注册表（反射收集，新增版本不用改这里）+ 字体族解析（宋/楷/黑/等宽，按 DIP 取字号）。
+- `src/GoalPaint.cs`：GDI+ 工具箱（径向柔光、四角星、五角星、花、叶、月牙、爱心、像素块、点阵字、渐变字、辉光字、虚线椭圆、斜纹、圆角路径）。
+- `src/GoalVariantStardust.cs`（05 星屑）、`GoalVariantGarden.cs`（01 花园绽放）、`GoalVariantRibbon.cs`（06 丝带礼物）、`GoalVariantPixel.cs`（07 像素）、`GoalVariantBrutal.cs`（08 新粗野）、`GoalVariantNeon.cs`（10 霓虹灯牌）。
+- 每个版本都有展开卡 280×188 与收起卡 224×68 两套排版；文字/底色用 `CardPath` 裁在卡内，装饰越出卡框。
+- `src/CelebrationOverlayForm.cs`：卡外出框层。四边各留 140 DIP 的透明分层窗，`WS_EX_TRANSPARENT | NOACTIVATE | TOOLWINDOW`，点击穿透、不抢焦点，跟着卡片移动 / 缩放 / 置顶，插在卡片上一层。
+
+**③ 设置与菜单（`src/SettingsForm.cs` / `src/BubbleMenuForm.cs`）**
+- 设置 → 外观 → 新增「目标动效」下拉（六版任选，默认 05 星屑）；「外观与提醒」卡片加高 190→224 DIP，配置备份卡顺延到 y=500。
+- 右键胶囊「预览通知」从 6 类加到 7 类（多一个「目标达成」），面板加高 208→258 DIP。
+
+**④ 顺手修的一个 DPI 问题（`src/Widget.cs`）**
+- 卡片位图 `frame` 之前用系统默认 DPI，字号（pt）和几何（`S()`）换算依赖「屏幕 DPI 恰好等于 96×scale」；现在显式 `SetResolution(96×scale)`。生产环境等价，出图探针在任意 scale 下才和真实 DPI 一致（否则 2× 探针的字会小一号）。
+
+**⑤ 验证**
+- `.\test\build-tests.ps1`：**Test 664 / Check 414 全绿**（新增 15 条目标达成断言：六版注册、时间轴、静态帧、一天一次、提醒让路、六个版本都真的画了、收起卡、出框层有卡外像素）。
+- `test\GoalShot.cs` 新探针：`GoalShot.exe <版本> <秒> [collapsed] [quiet] [scale]` 出卡面 PNG + 带 140 DIP 出框留白的整图，六版定格图已与 `design/shots/v4-stills/*.png` 对照；`test\GoalLive.cs` 真窗口截屏（验证出框透明窗的 z 序与合成）。
+- `.\test\build-probes.ps1` 71 个探针入口全部编译通过。
+- 性能：1.5× 下每帧 `PaintInside + PaintOutside` 耗时 01 6.7ms / 05 5.2ms / 06 6.4ms / 07 4.4ms / 08 2.9ms / 10 11.5ms（星云与霓虹的静态层都预烘成位图，每帧只贴图）。
+
+
+
 > 2026-11-20 的「每天一次 NRE」修复已装机（未升版本号、未发 GitHub Release；发布与否等用户决定）。
 
 ### 2026-11-20 19:30 · 进度条光效重做：外发光平滑渐隐 + 前缘灯珠 + 流光平滑包络

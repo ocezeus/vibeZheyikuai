@@ -11,7 +11,7 @@ namespace WorkCountdown
     /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
     public static class AppInfo
     {
-        public const string Version = "5.0.0";
+        public const string Version = "5.1.0";
     }
 
     public class HolidayEntry
@@ -746,6 +746,10 @@ namespace WorkCountdown
         public string reminderSpread { get; set; }      // card | screen：提醒扩散范围
         public string reminderSpreadStyle { get; set; } // circle | bar | tape：提醒扩散样式（tape=全屏警戒带）
         public string cardGlow { get; set; }            // classic | corner | bar | all：卡片背景光效
+        /// <summary>目标达成庆祝用哪一版动效：01 / 05 / 06 / 07 / 08 / 10（见 GoalVariants）。</summary>
+        public string goalEffect { get; set; }
+        /// <summary>本次已经庆祝过的日期（yyyy-MM-dd）：同一天只播一次，重启不再重播。</summary>
+        public string goalCelebratedDay { get; set; }
         public string bgStyle { get; set; }             // solid | glass：主题背景风格（glass = 磨砂玻璃）
         public string lunchReminderStyle { get; set; }   // 午休提醒配色（ReminderStyles 的 id）
         public string eveningReminderStyle { get; set; } // 晚休提醒配色
@@ -777,6 +781,8 @@ namespace WorkCountdown
             reminderSpread = "card";
             reminderSpreadStyle = "circle";
             cardGlow = "classic";
+            goalEffect = GoalVariants.DefaultId;
+            goalCelebratedDay = "";
             bgStyle = "solid";
             lunchReminderStyle = "lan-yuming";
             eveningReminderStyle = "zi-jiegeng";
@@ -1497,6 +1503,9 @@ namespace WorkCountdown
             if (s.ui.cardGlow != "corner" && s.ui.cardGlow != "bar"
                 && s.ui.cardGlow != "all")
                 s.ui.cardGlow = "classic";
+            // 目标达成动效：未知 id（老配置没有 / 手改坏了）回到默认的 05 星屑
+            s.ui.goalEffect = GoalVariants.Normalize(s.ui.goalEffect);
+            if (s.ui.goalCelebratedDay == null) s.ui.goalCelebratedDay = "";
             if (s.ui.bgStyle != "glass") s.ui.bgStyle = "solid";
             s.ui.lunchReminderStyle = ReminderStyles.Normalize(s.ui.lunchReminderStyle, "lan-yuming");
             s.ui.eveningReminderStyle = ReminderStyles.Normalize(s.ui.eveningReminderStyle, "zi-jiegeng");

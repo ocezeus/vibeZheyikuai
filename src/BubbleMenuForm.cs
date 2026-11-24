@@ -47,7 +47,7 @@ namespace WorkCountdown
         public const int ThemeExtraDip = 168;
         public const int ClockExtraDip = 130;
         public const int ScheduleExtraDip = 222;
-        public const int PreviewExtraDip = 208;
+        public const int PreviewExtraDip = 258;
         // 4.0.0：更新记录改成「一句话摘要 + 展开完整要点」，视口比原来的 5 行固定列表高一些；
         // 再高会超过 150% 缩放下 1080p 的工作区（LayoutWindow 会整体上移但底部会被裁）。
         public const int UpdateExtraDip = 378;
@@ -75,9 +75,9 @@ namespace WorkCountdown
         public static readonly string[] Labels = new string[] { "新增日程", "修改主题", "触发上下班", "窗口置顶", "预览通知", "检查更新" };
 
         /// <summary>「预览通知」里可选的类型（key, 显示名, 副标题）。</summary>
-        public static readonly string[] PreviewKeys = new string[] { "fixed", "lunch", "lark", "outlook", "local", "off" };
-        public static readonly string[] PreviewNames = new string[] { "上班提醒", "午休提醒", "飞书会议", "Outlook", "普通日程", "下班提醒" };
-        public static readonly string[] PreviewSubs = new string[] { "固定日程", "休息时段", "飞书日历", "Outlook", "手动日程", "打卡提醒" };
+        public static readonly string[] PreviewKeys = new string[] { "fixed", "lunch", "lark", "outlook", "local", "off", "goal" };
+        public static readonly string[] PreviewNames = new string[] { "上班提醒", "午休提醒", "飞书会议", "Outlook", "普通日程", "下班提醒", "目标达成" };
+        public static readonly string[] PreviewSubs = new string[] { "固定日程", "休息时段", "飞书日历", "Outlook", "手动日程", "打卡提醒", "卡内庆祝" };
 
         private const int GwlExStyle = -20;
         private const int WsExTopMost = 0x00000008;
@@ -1194,7 +1194,7 @@ namespace WorkCountdown
                 DrawIcon(g, PreviewIcon(PreviewKeys[i]),
                     new RectangleF(chip.Right - S(24), chip.Y + S(13), S(14), S(14)), Alpha(Accent, a));
             }
-            DrawText(g, "预览只放一遍动画，不改日程、不弹托盘通知。", fRowSub, Alpha(Dim, a), x, r.Y + S(228));
+            DrawText(g, "预览只放一遍动画，不改日程、不弹托盘通知。", fRowSub, Alpha(Dim, a), x, r.Y + S(278));
         }
 
         /// <summary>预览类型的图标：会议类是日历，普通日程是铅笔，提醒类是铃铛。</summary>
