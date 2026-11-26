@@ -6,9 +6,42 @@
 > - **改完仍然编译 + 跑测试 + 装机**：`.\test\build-tests.ps1` 两套全绿，再用 `.\tools\install-dev.ps1` 替换正在跑的悬浮窗。
 > - 每次收尾都要把这一轮改动补进本文件，避免「改了但没人记得」。
 
-## 当前版本：v5.1.0
+## 当前版本：v5.2.0
 
-已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.1.0`
+已发版：`https://github.com/ocezeus/vibeZheyikuai/releases/tag/v5.2.0`
+
+### 2026-11-26 · v5.2.0 · 大字报 / 对话全铺开 / 圆点闪烁 / 每天 12:00 自动更新
+
+用户四条需求：① 聊天默认全部展示、不用滚轮选对话；② 新增所有人可见的公共房间「大字报」；③ 取消旧消息闪光，改成「距离下班」前的小圆点高亮闪烁；④ 增加每天中午 12:00 自动检查更新、有新版本静默升级。完成后打包发版。
+
+**① 对话列表全部铺开（`src/NotePanelForm.cs`）**
+- 面板高度改成按对话数量算：抽屉式一排 4 个、每排 +34 DIP（未选对话 124 → 8 个 158 → 12 个 192）；聊天 / 历史态不再缩回一排（聊天 282 + 每排 34、历史 476 + 每排 34）。双栏按行数长高（98 + 每行 40，8 个对话 418 DIP）。
+- `BodyTop` 跟着列表条带高度走；`RefreshData` 在对话数变化时对所有状态重新算高度；超过屏幕高度（抽屉按历史态、双栏按屏幕）才封顶，剩下的保留原来的滚轮兜底。
+- 删掉旧「最多两排 + 一屏 8 个」的分支；滚动提示只在真放不下时出现。
+
+**② 公共房间「大字报」（`src/Models.cs` / `src/NoteRelay.cs` / `src/NotePanelForm.cs` / `src/SettingsForm.cs` / `src/Widget.cs`）**
+- 固定对话码 `DZB01`、显示名「大字报」：`NoteSettings.Normalize()` 自动补到列表最前面（老配置第一次加载自动加，重复 Normalize 不会加第二个）；`RemoveContact` 直接拒绝删除，面板 / 设置页也不给删除和改名入口。
+- 中继在 CONNACK 和 `RefreshSubscriptions` 时都显式订阅大字报主题（和普通对话码同一套 `xzt/v1/room/<hex>`），人人可发可看；聊天头部显示「公共房间 · 所有使用者可见」，设置页标签写「公共房间」。
+
+**③ 小圆点高亮闪烁（`src/Widget.cs`）**
+- 删掉整卡贴边闪光（`NoteRimAlpha` / `RimKeyframes` / `DrawNoteRim`）和左上角快闪（`NoteCornerAlpha` / `CornerFlashAlpha` / `DrawNoteCorner`）。
+- 新增 `DotPulse(elapsedMs, spanMs)` 两下包络 + `DrawStatusDot`：收到纸条时圆点闪 1.3s（强），有未读时每 5 秒轻闪一轮（420ms，0.62 强度）；光晕 + 亮环 + 提亮 + 微放大，收起卡「● 距离下班」和展开卡「● 工作中」前面那颗都走同一套。减少动态效果 / 高对比度保持常亮。
+- `flowT` 的重画条件从 `NoteRimActive()` 改成 `NoteDotActive()`。
+
+**④ 每天 12:00 自动检查 + 静默升级（`src/Models.cs` / `src/Widget.cs` / `src/SettingsForm.cs` / `src/Updates.cs`）**
+- `UiSettings.autoUpdate`（默认开）+ `autoUpdateCheckedDay`；schema 升到 3，老配置（version < 3）Normalize 时补开一次，用户手动关掉后不会再被打开。
+- `Widget.MaybeAutoUpdate`：12:00 之后一天查一次（先把日期落盘再联网，断网 / 崩溃不重复）；后台检查 + 下载 + `VerifyDownloaded`，成功后等空闲（没开设置 / 小纸条 / 提醒 / 抽屉 / 全屏）静默 `LaunchUpdater` 重启，最多等 30 分钟；测试 / 探针（`WC_NO_SAVE=1` / `WC_NO_RELAY=1`）不联网。
+- 设置 → 外观页新增第四张卡「软件更新」（y=620）：勾选框「每天中午 12:00 自动检查更新，有新版本静默升级」+ 当前版本提示。
+
+**⑤ 版本与文档**
+- `AppInfo.Version` / `AssemblyInfo` 升 5.2.0；`UpdateChangelog` 新增 5.2.0 条目；本文件、`README.md`（小纸条 / 外观页 / 自动更新 / 截图 / 源码映射 / 验证段）同步更新；`package.ps1` / `tools/release.ps1` 默认版本改 5.2.0。
+- 截图重出：`note-drawer.png` / `note-columns.png`（含大字报、全部铺开）、新增 `note-dot.png`（收起卡圆点高亮），删除旧的 `note-flash.png`。
+
+**⑥ 验证**
+- `.\test\build-tests.ps1`：**Test 680 / Check 413 全绿**（新增：大字报自动加入 / 去重 / 排最前 / 删不掉、自动更新默认开与 schema 3 迁移、状态点两下包络与到达 1.3s、对话全部铺开 192 / 418 DIP、聊天态不再缩回、设置页四张卡与大字报「公共房间」行）。
+- 旧断言同步改：抽屉 10 个对话从「两排 / 158 DIP / 可滚」改成「三排 / 192 DIP / 全铺」；双栏 8 个从「5 行 + 滚」改成「418 DIP / 全铺」；设置外观页三卡改四卡；版本号 / schema 2 改 3；`NoteShot` 去掉滚轮步骤、加「大字报」出图；`FlashLiveProbe` 改用 `DotPulse`。
+- `.\test\build-probes.ps1`：71 个探针入口全部编译通过；`VisualCheck` 600 个渲染组合 PASS；外观页 / 小纸条 A+C / 圆点闪烁逐张看过。
+- 发版：`.\package.ps1 -Version 5.2.0` → GitHub Release `v5.2.0`（zip + 自动更新 exe 双资产）。
 
 ### 2026-11-24 · v5.1.0 · 目标达成庆祝：六版卡内动效 + 卡外出框层
 

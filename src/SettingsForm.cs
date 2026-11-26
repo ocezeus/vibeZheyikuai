@@ -143,6 +143,7 @@ namespace WorkCountdown
         private CheckBox cbAutoStart;
         private CheckBox cbShowLunch;
         private CheckBox cbReducedMotion;
+        private CheckBox cbAutoUpdate;
         private ComboBox cmbGlow;
         /// <summary>目标达成动效：可选 id 与下拉项一一对应。</summary>
         private ComboBox cmbGoal;
@@ -331,6 +332,7 @@ namespace WorkCountdown
             BuildThemes(p4);
             BuildLook(p4);
             BuildBackup(p4);
+            BuildUpdate(p4);
         }
 
         /// <summary>内容区滚轮：控件的滚轮消息会往上冒，统一在这里滚 contentHost（外观页/纸条页比可视高度长）。</summary>
@@ -1445,7 +1447,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
                     var m = th.messages[th.messages.Count - 1];
                     last = " · " + (m.text.Length > 12 ? m.text.Substring(0, 12) + "…" : m.text);
                 }
-                string tag = c.IsRoom ? "对话码 " + c.id : "ID " + c.id;
+                string tag = s.note.IsBulletin(c.id) ? "公共房间" : (c.IsRoom ? "对话码 " + c.id : "ID " + c.id);
                 string name = string.IsNullOrWhiteSpace(c.remark) ? (c.nick ?? "") : c.remark;
                 string line = string.IsNullOrWhiteSpace(name) ? tag : name + " · " + tag;
                 lstNoteContacts.Items.Add(line + last);
@@ -1483,6 +1485,12 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         {
             if (lstNoteContacts.SelectedIndex < 0 || lstNoteContacts.SelectedIndex >= editNoteContacts.Count) return;
             var c = editNoteContacts[lstNoteContacts.SelectedIndex];
+            if (s.note.IsBulletin(c.id))
+            {
+                MessageBox.Show(this, "「大字报」是所有人都能看到的公共房间，名字固定。", "改名字",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             using (var dlg = new NoteContactDialog("改名字", c.id, c.remark, false))
             {
                 if (dlg.ShowDialog(this) != DialogResult.OK) return;
@@ -1495,6 +1503,12 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
         {
             if (lstNoteContacts.SelectedIndex < 0 || lstNoteContacts.SelectedIndex >= editNoteContacts.Count) return;
             var c = editNoteContacts[lstNoteContacts.SelectedIndex];
+            if (s.note.IsBulletin(c.id))
+            {
+                MessageBox.Show(this, "「大字报」是公共房间，所有使用者都能看到，不能删除。", "删除对话",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
             if (MessageBox.Show(this, "删除对话「" + c.Display() + "」？本机这段对话（最多 8 条消息）也一起删掉。",
                 "删除对话", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             editNoteContacts.RemoveAt(lstNoteContacts.SelectedIndex);
@@ -2240,6 +2254,17 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             g.Controls.Add(Hint("导入后重启悬浮窗完全生效；飞书会话 ID 会一起带过来。", 14, 84, 466, 18));
         }
 
+        /// <summary>外观页最下面：每天 12:00 自动检查更新 + 静默升级的开关。</summary>
+        private void BuildUpdate(TabPage page)
+        {
+            var g = CardBox(page, "软件更新", 8, 620, 492, 96);
+            cbAutoUpdate = new CheckBox();
+            cbAutoUpdate.Text = "每天中午 12:00 自动检查更新，有新版本静默升级";
+            cbAutoUpdate.SetBounds(14, 26, 400, 22);
+            g.Controls.Add(cbAutoUpdate);
+            g.Controls.Add(Hint("升级时自动下载、替换并重启；设置和对话都保留。当前 v" + AppInfo.Version, 14, 52, 466, 20));
+        }
+
         private void ExportConfig()
         {
             using (var dlg = new SaveFileDialog())
@@ -2371,6 +2396,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             cbAutoStart.Checked = Startup.IsEnabled();
             cbShowLunch.Checked = s.ui.showLunch;
             cbReducedMotion.Checked = s.ui.reducedMotion;
+            if (cbAutoUpdate != null) cbAutoUpdate.Checked = s.ui.autoUpdate;
             numReminderHold.Value = Math.Max(3, Math.Min(20, s.ui.reminderHoldSeconds));
             cmbGlow.SelectedIndex = s.ui.cardGlow == "corner" ? 1
                 : s.ui.cardGlow == "bar" ? 2 : s.ui.cardGlow == "all" ? 3 : 0;
@@ -2495,6 +2521,7 @@ var n = CardBox(page, "说明", 8, 446, 492, 66);
             s.ui.alwaysOnTop = cbTopMost.Checked;
             s.ui.showLunch = cbShowLunch.Checked;
             s.ui.reducedMotion = cbReducedMotion.Checked;
+            if (cbAutoUpdate != null) s.ui.autoUpdate = cbAutoUpdate.Checked;
             s.ui.reminderHoldSeconds = (int)numReminderHold.Value;
             string[] glowIds = new string[] { "classic", "corner", "bar", "all" };
             s.ui.cardGlow = glowIds[Math.Max(0, Math.Min(glowIds.Length - 1, cmbGlow.SelectedIndex))];

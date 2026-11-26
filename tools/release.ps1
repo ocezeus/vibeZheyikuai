@@ -40,7 +40,7 @@
     本文件必须保持 UTF-8 BOM（PowerShell 5.1 靠 BOM 保住中文字符串）。
 #>
 param(
-    [string]$Version = '5.0.0',
+    [string]$Version = '5.2.0',
     [string]$Repo = 'ocezeus/vibeZheyikuai',
     [string]$Branch = 'main',
     [string]$Notes = '',

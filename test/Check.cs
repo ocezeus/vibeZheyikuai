@@ -3120,22 +3120,26 @@ class Check
                 var look = tabs.TabPages[3];
                 string cardTitles = "";
                 foreach (Control c in look.Controls) cardTitles += (cardTitles.Length == 0 ? "" : "/") + c.Text;
-                Ok("外观页 3 张卡：主题配色 / 外观与提醒 / 配置备份",
-                    look.Controls.Count == 3 && cardTitles == "主题配色/外观与提醒/配置备份",
+                Ok("外观页 4 张卡：主题配色 / 外观与提醒 / 配置备份 / 软件更新",
+                    look.Controls.Count == 4 && cardTitles == "主题配色/外观与提醒/配置备份/软件更新",
                     look.Controls.Count + " 张：" + cardTitles);
 
-                int themeCardY = -1, lookCardY = -1, backupCardY = -1, themeCardH = -1;
+                int themeCardY = -1, lookCardY = -1, backupCardY = -1, themeCardH = -1, updateCardY = -1;
                 foreach (Control c in look.Controls)
                 {
                     if (c.Text == "主题配色") { themeCardY = c.Top; themeCardH = c.Height; }
                     else if (c.Text == "外观与提醒") lookCardY = c.Top;
                     else if (c.Text == "配置备份") backupCardY = c.Top;
+                    else if (c.Text == "软件更新") updateCardY = c.Top;
                 }
                 Ok("「主题配色」卡在 y=8（原「界面风格」位置），外观 / 备份卡整体上移",
                     Math.Abs(themeCardY - dip(8)) <= 1 && Math.Abs(themeCardH - dip(252)) <= 1
                     && Math.Abs(lookCardY - dip(268)) <= 1 && Math.Abs(backupCardY - dip(500)) <= 1,
                     "主题 y=" + themeCardY + " h=" + themeCardH + " / 外观 y=" + lookCardY + " / 备份 y=" + backupCardY
                     + "（DPI×" + dpiK.ToString("0.##") + "）");
+                Ok("「软件更新」卡在备份卡下面（y=620），自动更新开关可见",
+                    Math.Abs(updateCardY - dip(620)) <= 1 && updateCardY > backupCardY,
+                    "update y=" + updateCardY + " backup=" + backupCardY);
 
                 Ok("没有「界面风格」：skinPicker / lblThemeLocked / SkinPicker 类型都不存在",
                     typeof(SettingsForm).GetField("skinPicker", F) == null
@@ -3632,10 +3636,10 @@ class Check
                     "note=" + noteRect + " salary=" + salaryRect);
                 Ok("有未读时会记着未读数",
                     s.note.TotalUnread() > 0, "unread=" + s.note.TotalUnread());
-                Set(form, "noteFlashAt", Environment.TickCount - 40);
-                double rim = (double)Call(form, "NoteRimAlpha");
+                Set(form, "noteFlashAt", Environment.TickCount - 300);
+                double pulse = (double)Call(form, "NoteDotAlpha");
                 Set(form, "noteFlashAt", 0);
-                Ok("收到未读后边框闪光会被触发", rim > 0.3, "alpha=" + rim.ToString("0.00"));
+                Ok("收到纸条后「距离下班」前的小圆点会高亮闪烁", pulse > 0.5, "alpha=" + pulse.ToString("0.00"));
             }
 
             var drawer = new Settings();
@@ -3782,10 +3786,13 @@ class Check
                         (int)Call(rp, "HistoryRowsTopPx") == rbody.Y + r16,
                         "rowsTop=" + Call(rp, "HistoryRowsTopPx") + " bodyY+16=" + (rbody.Y + r16));
                 }
-                Ok("未读快闪：5 秒间隔 / 420ms 两下",
+                Ok("未读轻闪：5 秒间隔 / 420ms 两下 / 到达时 1.3s 两下",
                     WidgetForm.NoteBlinkIntervalMs == 5000 && WidgetForm.NoteBlinkSpanMs == 420
-                    && WidgetForm.CornerFlashAlpha(60) > 0.5 && WidgetForm.CornerFlashAlpha(200) == 0
-                    && WidgetForm.CornerFlashAlpha(300) > 0.5 && WidgetForm.CornerFlashAlpha(600) == 0,
+                    && WidgetForm.NoteArrivalMs == 1300
+                    && WidgetForm.DotPulse(60, WidgetForm.NoteBlinkSpanMs) > 0.5
+                    && WidgetForm.DotPulse(200, WidgetForm.NoteBlinkSpanMs) == 0
+                    && WidgetForm.DotPulse(300, WidgetForm.NoteBlinkSpanMs) > 0.5
+                    && WidgetForm.DotPulse(600, WidgetForm.NoteBlinkSpanMs) == 0,
                     "interval=" + WidgetForm.NoteBlinkIntervalMs + " span=" + WidgetForm.NoteBlinkSpanMs);
             }
             // 编辑窗样式：圆角；改备注编辑窗保持普通输入框样式（用户澄清：要放大/居中的是联系人名字，不是编辑窗）
@@ -4005,11 +4012,15 @@ class Check
                     && ((NumericUpDown)Get(dlg, "numNotePort")).Value == 1883,
                     ((TextBox)Get(dlg, "tbNoteRelay")).Text + ":" + ((NumericUpDown)Get(dlg, "numNotePort")).Value);
                 var noteList = (ListBox)Get(dlg, "lstNoteContacts");
-                Ok("纸条页能列出对话（个人 ID + 对话码都在）", noteList.Items.Count == 2,
+                Ok("纸条页能列出对话（大字报 + 个人 ID + 对话码都在）", noteList.Items.Count == 3,
                     noteList.Items.Count + " 条");
-                bool roomRow = false;
+                bool bulletinRow = false, roomRow = false;
                 foreach (var item in noteList.Items)
+                {
+                    if (item.ToString().Contains("公共房间")) bulletinRow = true;
                     if (item.ToString().Contains("对话码 " + "项目组#1")) roomRow = true;
+                }
+                Ok("大字报在设置页显示成「公共房间」", bulletinRow, bulletinRow ? "ok" : "没找到大字报行");
                 Ok("对话码对话在设置页显示成「对话码 xxxxx」", roomRow, roomRow ? "ok" : "没找到对话码行");
             }
 
@@ -4198,7 +4209,7 @@ class Check
                     "bubble=" + Call(p, "BubbleText", noNick, true));
             }
 
-            // 需求 3 + v3.6.0：对话多了能滚（抽屉式联系人 > 4 个时铺两排、一屏 8 个）；右键出现删除按钮
+            // v5.2.0：对话列表全部铺开（数量越多面板越高），不用滚轮选对话；右键仍能删除
 
             // 3 个联系人：只铺一排，一屏 4 个、面板高还是 124 DIP
             var few = new Settings();
@@ -4220,7 +4231,7 @@ class Check
                     + " strip=" + strip3.Height + "（期望 " + (int)Math.Round(124f * sc) + " / " + (int)Math.Round(36f * sc) + "）");
             }
 
-            // 10 个联系人：铺两排、一屏 8 个；滚一格 / 滚到底 / 进聊天页缩回一排
+            // 10 个联系人：全部铺开成 3 排（12 个位），面板跟着长高，不用滚轮；聊天页也保持铺开
             var many = new Settings();
             many.lark.enabled = false;
             many.calendarEnabled = false;
@@ -4235,41 +4246,36 @@ class Check
                 Func<int, int> sPx = delegate(int d) { return (int)Math.Round(d * sc); };
                 var drawn = (System.Collections.IList)Get(p, "drawnContacts");
                 var strip10 = (Rectangle)Call(p, "ContactsRect");
-                Ok("抽屉式联系人 > 4 个时铺两排：一屏 8 个、面板高 158 DIP、对话条带 70 DIP",
-                    p.VisibleContactCount == 8 && drawn.Count == 8 && p.Height == sPx(158)
-                    && strip10.Height == sPx(70),
+                Ok("抽屉式对话全部铺开：10 个对话铺 3 排、面板高 192 DIP、条带 104 DIP（一屏 12 个位）",
+                    p.VisibleContactCount == 12 && drawn.Count == 10 && p.Height == sPx(192)
+                    && strip10.Height == sPx(104),
                     "visible=" + p.VisibleContactCount + " drawn=" + drawn.Count + " h=" + p.Height
-                    + " strip=" + strip10.Height + "（期望 " + sPx(158) + " / " + sPx(70) + "）");
+                    + " strip=" + strip10.Height + "（期望 " + sPx(192) + " / " + sPx(104) + "）");
 
                 var c0 = (Rectangle)Call(p, "ContactRectAt", 0);
                 var c1 = (Rectangle)Call(p, "ContactRectAt", 1);
                 var c4 = (Rectangle)Call(p, "ContactRectAt", 4);
                 var c7 = (Rectangle)Call(p, "ContactRectAt", 7);
-                Ok("两排按 4 列排：第 5 个回到第一列、纵向步进 34 DIP",
+                var c8 = (Rectangle)Call(p, "ContactRectAt", 8);
+                Ok("多排仍按 4 列排：第 5 / 9 个回到第一列、纵向步进 34 DIP",
                     c4.Left == c0.Left && c4.Top - c0.Top == sPx(34)
                     && c1.Top == c0.Top && c1.Left > c0.Right
-                    && c7.Left == c0.Left + 3 * (c1.Left - c0.Left) && c7.Top == c4.Top,
-                    "c0=" + c0 + " c4=" + c4 + " c7=" + c7);
+                    && c7.Left == c0.Left + 3 * (c1.Left - c0.Left) && c7.Top == c4.Top
+                    && c8.Left == c0.Left && c8.Top == c4.Top + sPx(34),
+                    "c0=" + c0 + " c4=" + c4 + " c7=" + c7 + " c8=" + c8);
 
-                Call(p, "ScrollContacts", 1);
-                Ok("滚一格：从第 2 个对话开始显示",
-                    p.ContactScroll == 1 && drawn.Count == 8 && ((NoteContact)drawn[0]).id == many.note.contacts[1].id,
-                    "scroll=" + p.ContactScroll + " first=" + (drawn.Count > 0 ? ((NoteContact)drawn[0]).id : "-"));
-                Call(p, "ScrollContacts", 99);
-                Ok("滚到底 clamp 到「最后 8 个」",
-                    p.ContactScroll == 2 && drawn.Count == 8
-                    && ((NoteContact)drawn[0]).id == many.note.contacts[2].id
-                    && ((NoteContact)drawn[7]).id == many.note.contacts[9].id,
-                    "scroll=" + p.ContactScroll + " first=" + (drawn.Count > 0 ? ((NoteContact)drawn[0]).id : "-"));
-                Call(p, "ScrollContacts", -99);
-                Ok("滚回顶部", p.ContactScroll == 0 && ((NoteContact)drawn[0]).id == many.note.contacts[0].id,
-                    "scroll=" + p.ContactScroll);
+                Call(p, "ScrollContacts", 5);
+                Ok("对话全部铺开时不需要滚轮（滚动窗口起点保持 0、10 个全在列表里）",
+                    p.ContactScroll == 0 && drawn.Count == 10
+                    && ((NoteContact)drawn[0]).id == many.note.contacts[0].id,
+                    "scroll=" + p.ContactScroll + " drawn=" + drawn.Count);
 
-                // 只在对列表页铺两排：进了聊天页缩回一排，别挤掉聊天区
+                // 聊天页也保持全部铺开：面板加高 (282 + 2×34 = 350 DIP)，不缩回一排
                 Call(p, "SelectContact", many.note.contacts[1].id, false);
-                Ok("进了聊天页联系人缩回一排（visible 8 → 4）",
-                    Get(p, "state").ToString() == "Chat" && p.VisibleContactCount == 4,
-                    "state=" + Get(p, "state") + " visible=" + p.VisibleContactCount);
+                Ok("进聊天页对话列表仍全部铺开（不再缩回一排），面板 350 DIP",
+                    Get(p, "state").ToString() == "Chat" && p.VisibleContactCount == 12
+                    && Math.Abs((float)Get(p, "heightTo") - sPx(350)) <= 1,
+                    "state=" + Get(p, "state") + " visible=" + p.VisibleContactCount + " heightTo=" + Get(p, "heightTo"));
 
                 string victim = many.note.contacts[0].id;
                 Call(p, "SelectContact", victim, true);
@@ -4306,18 +4312,14 @@ class Check
             for (int i = 0; i < 8; i++) manyCols.note.AddConversation((20000 + i * 1111).ToString(), "对话" + i);
             using (var p = new NotePanelForm(manyCols, Themes.Get("midnight"), card, true, null, null, null, null, null))
             {
+                float sc = (float)Get(p, "scale");
                 var drawn = (System.Collections.IList)Get(p, "drawnContacts");
                 int vis = p.VisibleContactCount;
-                Ok("双栏一屏放 5 行对话（给底部「＋ 新建对话」留位），多了能滚",
-                    vis == 5 && vis < manyCols.note.contacts.Count,
-                    "visible=" + vis + " total=" + manyCols.note.contacts.Count);
-                Call(p, "ScrollContacts", 1);
-                Ok("双栏也能滚（滚动窗口起点跟着动）", p.ContactScroll == 1, "scroll=" + p.ContactScroll);
-                Call(p, "ScrollContacts", 99);
-                Ok("双栏滚到底 clamp 到「最后一屏能看到第 8 个对话」",
-                    p.ContactScroll == 3 && drawn.Count == 5 && ((NoteContact)drawn[4]).id == manyCols.note.contacts[7].id,
-                    "scroll=" + p.ContactScroll + " last=" + (drawn.Count > 0 ? ((NoteContact)drawn[drawn.Count - 1]).id : "-"));
-                Call(p, "ScrollContacts", -99);
+                Ok("双栏按对话数量长高：8 个对话全部铺开（面板 418 DIP、不再一屏 5 行 + 滚动）",
+                    vis == 8 && drawn.Count == 8 && p.Height == (int)Math.Round(418f * sc),
+                    "visible=" + vis + " total=" + manyCols.note.contacts.Count + " h=" + p.Height);
+                Call(p, "ScrollContacts", 5);
+                Ok("双栏全部铺开时不需要滚轮（滚动窗口起点保持 0）", p.ContactScroll == 0, "scroll=" + p.ContactScroll);
                 bool addHit = false;
                 var pill = (Rectangle)Call(p, "ColumnsAddRect");
                 foreach (var h in (System.Collections.IEnumerable)Get(p, "hits"))

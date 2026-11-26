@@ -174,6 +174,14 @@ namespace WorkCountdown
         private UpdatePhase updatePhase = UpdatePhase.Idle;
         private string updateDetail = "";
         private int updatePercent;
+
+        // 每天 12:00 自动检查更新：后台检查 + 下载，成功后在空闲时静默替换并重启
+        private bool settingsOpen;
+        private bool autoUpdateBusy;
+        private string autoUpdateExe;
+        private string autoUpdateVersion;
+        private int autoUpdateRetryUntil;
+        private const int AutoUpdateHour = 12;
         private readonly ToolTip reminderTip = new ToolTip { InitialDelay = 800, ReshowDelay = 200, AutoPopDelay = 20000, ShowAlways = true };
 
         private Font fontBig;
@@ -274,6 +282,7 @@ namespace WorkCountdown
                 TryStartGoal(DateTime.Now);
                 if (drawer != null) drawer.RefreshText();
                 MaybeBlinkUnread();
+                MaybeAutoUpdate(DateTime.Now);
             };
 
             poll = new System.Windows.Forms.Timer();
@@ -309,7 +318,7 @@ namespace WorkCountdown
                 bool salaryTick = salaryOpen;
                 if (settings.ui.reducedMotion || SystemInformation.HighContrast)
                 {
-                    if (salaryTick || NoteRimActive()) Invalidate();
+                    if (salaryTick || NoteDotActive()) Invalidate();
                     return;
                 }
                 // 进度条上的流动亮带一直有：只在窗口可见、没在放提醒动画时按 18fps 重画
@@ -2107,8 +2116,6 @@ namespace WorkCountdown
                 if (!reminding)
                 {
                     DrawCardBorder(g, path);
-                    DrawNoteRim(g, path);
-                    DrawNoteCorner(g, path);
                 }
                 // 目标达成庆祝压在最上层：底色/文字/装饰都印在卡面里，只有出框部分交给独立透明层。
                 // 常驻「该下班啦」也在这几秒里让位——它不会因此消失，庆祝放完它还在。
@@ -2603,7 +2610,7 @@ namespace WorkCountdown
                 double a = p[1];
                 int dy = (int)Math.Round((1 - a) * S(6));
                 int head=S(HeadHDip);
-                using(var brush=new SolidBrush(Fade(status.accent, a))) g.FillEllipse(brush,pad,y+head/2-S(3)+dy,S(6),S(6));
+                DrawStatusDot(g, pad + S(3), y + head / 2f + dy, 3f, a);
                 Line(g,status.headline,fontStatus,muted,new RectangleF(pad+S(13),y+dy,w-S(13),head),a,false);
                 int iconSize=S(24); int iconY=y+(head-iconSize)/2+dy;
                 rectSalary=new Rectangle(Width-S(118),iconY,iconSize,iconSize);
@@ -3058,7 +3065,7 @@ namespace WorkCountdown
         {
             int pad=S(14); float w=Width-pad*2;
             Color muted=MixColor(theme.textMain,theme.bgBottom,MutedMix);
-            using(var brush=new SolidBrush(status.accent)) g.FillEllipse(brush,pad,S(15),S(5),S(5));
+            DrawStatusDot(g, pad + S(2.5f), S(17.5f), 2.5f, 1);
             Line(g,status.bigLabel,fontCollapsedLabel,muted,new RectangleF(pad+S(10),S(7),S(90),S(20)),1,false);
             string right=string.IsNullOrEmpty(status.targetText)?"":"下班 "+status.targetText;
             if(ShowLunchRow && status.lunchCounting && !string.IsNullOrEmpty(status.lunchValue))
@@ -3325,25 +3332,30 @@ namespace WorkCountdown
         {
             CloseBubbleMenu();
             autoCollapse.Stop();
-            using (var dlg = new SettingsForm(store, settings, tab))
+            settingsOpen = true;
+            try
             {
-                dlg.TopMost = true;
-                if (dlg.ShowDialog(this) == DialogResult.OK)
+                using (var dlg = new SettingsForm(store, settings, tab))
                 {
-                    apply.Apply(store.Load().Settings);
-                    RequestRefresh(false);
-                    RequestCalendar(false);
-                    RequestOutlook(false);
-                    var next = engine.NextEvent(settings, ScheduleSnapshot(), DateTime.Now);
-                    if (next != null)
+                    dlg.TopMost = true;
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
                     {
-                        DateTime startTime = Reminders.ParseStart(next);
-                        DateTime fireAt = startTime.AddMinutes(-Reminders.LeadOf(settings, next));
-                        ShowBalloon("已排好：" + next.title + " " + startTime.ToString("HH:mm") + " 开始，" +
-                            fireAt.ToString("HH:mm") + " 提醒");
+                        apply.Apply(store.Load().Settings);
+                        RequestRefresh(false);
+                        RequestCalendar(false);
+                        RequestOutlook(false);
+                        var next = engine.NextEvent(settings, ScheduleSnapshot(), DateTime.Now);
+                        if (next != null)
+                        {
+                            DateTime startTime = Reminders.ParseStart(next);
+                            DateTime fireAt = startTime.AddMinutes(-Reminders.LeadOf(settings, next));
+                            ShowBalloon("已排好：" + next.title + " " + startTime.ToString("HH:mm") + " 开始，" +
+                                fireAt.ToString("HH:mm") + " 提醒");
+                        }
                     }
                 }
             }
+            finally { settingsOpen = false; }
             ResetAutoCollapse();
         }
 
@@ -3523,6 +3535,7 @@ namespace WorkCountdown
         private void DeleteNoteContact(string id)
         {
             if (settings.note == null || string.IsNullOrEmpty(id)) return;
+            if (settings.note.IsBulletin(id)) return;      // 「大字报」是公共房间，不能删
             settings.note.RemoveContact(id);
             SaveSettingsQuietly("设置变化");
             Invalidate();
@@ -3532,6 +3545,7 @@ namespace WorkCountdown
         private void RenameNoteContact(string id, string remark)
         {
             if (settings.note == null || string.IsNullOrEmpty(id)) return;
+            if (settings.note.IsBulletin(id)) return;      // 「大字报」名字固定
             var c = settings.note.Contact(id);
             if (c == null) return;
             remark = (remark ?? "").Trim();
@@ -3621,66 +3635,57 @@ namespace WorkCountdown
             catch { }
         }
 
-        private static readonly double[] RimT = new double[] { 0, 0.08, 0.24, 0.40, 0.60, 0.75, 0.90, 1 };
-        private static readonly double[] RimA = new double[] { 0, 0.95, 0.12, 0.90, 0.10, 0.50, 0, 0 };
+        // ---------------- 纸条提醒：卡片状态点高亮闪烁 ----------------
+        // 以前收到纸条时整张卡片贴边闪光、未读时左上角快闪；用户要求改成「卡片上『距离下班』
+        // 前面那颗小圆点高亮闪烁」。这里只算包络，实际绘制在 DrawStatusDot。
 
-        private static double RimKeyframes(double p)
+        /// <summary>收到纸条时圆点闪两下的总时长。</summary>
+        internal const int NoteArrivalMs = 1300;
+        /// <summary>有未读时每隔多久轻闪一轮。</summary>
+        internal const int NoteBlinkIntervalMs = 5000;
+        /// <summary>轻闪一轮的时长（两下）。</summary>
+        internal const int NoteBlinkSpanMs = 420;
+
+        /// <summary>
+        /// 圆点「闪两下」的包络：elapsedMs 处的亮度（0..1，0 = 不亮）。
+        /// 前半程一下、后半程一下，中间留暗隙；每下用 sin 包络，快进快出。
+        /// </summary>
+        internal static double DotPulse(int elapsedMs, int spanMs)
         {
-            if (p <= 0) return 0;
-            if (p >= 1) return 0;
-            for (int i = 1; i < RimT.Length; i++)
-            {
-                if (p <= RimT[i])
-                {
-                    double span = RimT[i] - RimT[i - 1];
-                    if (span <= 0) return RimA[i];
-                    double k = (p - RimT[i - 1]) / span;
-                    return RimA[i - 1] + (RimA[i] - RimA[i - 1]) * k;
-                }
-            }
-            return 0;
+            if (elapsedMs < 0 || spanMs <= 0 || elapsedMs >= spanMs) return 0;
+            double u = elapsedMs / (double)spanMs;
+            return Math.Max(PulseAt(u, 0.0, 0.46), PulseAt(u, 0.54, 1.0));
         }
 
-        /// <summary>收到时的整圈贴边闪光（亮两次，1300ms）；未读的每 5 秒快闪改到左上角（DrawNoteCorner）。</summary>
-        private double NoteRimAlpha()
+        private static double PulseAt(double u, double start, double end)
         {
+            if (u <= start || u >= end) return 0;
+            return Math.Sin((u - start) / (end - start) * Math.PI);
+        }
+
+        /// <summary>
+        /// 当前圆点的闪烁强度：刚收到纸条时亮一下（强），有未读时每 5 秒轻闪一轮。
+        /// 减少动态效果 / 高对比度下不闪（圆点保持常亮）。
+        /// </summary>
+        private double NoteDotAlpha()
+        {
+            if (settings.ui.reducedMotion || SystemInformation.HighContrast) return 0;
             int now = Environment.TickCount;
             double a = 0;
             if (noteFlashAt != 0)
             {
                 int el = now - noteFlashAt;
-                if (el >= 0 && el < 1300) a = RimKeyframes(el / 1300.0);
+                if (el >= 0 && el < NoteArrivalMs) a = DotPulse(el, NoteArrivalMs);
+            }
+            if (NoteUnread && noteBlinkAt != 0)
+            {
+                int el = now - noteBlinkAt;
+                if (el >= 0 && el < NoteBlinkSpanMs) a = Math.Max(a, 0.62 * DotPulse(el, NoteBlinkSpanMs));
             }
             return Math.Max(0, Math.Min(1, a));
         }
 
-        // ---------------- 未读：左上角每 5 秒快闪两下 ----------------
-        internal const int NoteBlinkIntervalMs = 5000;   // 每 5 秒
-        internal const int NoteBlinkSpanMs = 420;        // 一轮两次快闪共占 ~420ms
-
-        /// <summary>快闪包络：elapsedMs 处的亮度（0 = 不亮）。两下：0-150ms、250-400ms，中间有暗隙。</summary>
-        internal static double CornerFlashAlpha(int elapsedMs)
-        {
-            if (elapsedMs < 0 || elapsedMs >= NoteBlinkSpanMs) return 0;
-            return Math.Max(FlashPulse(elapsedMs, 0, 150), FlashPulse(elapsedMs, 250, 150));
-        }
-
-        private static double FlashPulse(int elapsedMs, int startMs, int durMs)
-        {
-            double u = (elapsedMs - startMs) / (double)Math.Max(1, durMs);
-            if (u <= 0 || u >= 1) return 0;
-            return Math.Sin(u * Math.PI);            // 快进快出，像闪两下
-        }
-
-        /// <summary>当前角落快闪的强度（0..1）；减少动态效果 / 高对比度 / 没有未读时为 0。</summary>
-        private double NoteCornerAlpha()
-        {
-            if (!NoteUnread || settings.ui.reducedMotion || SystemInformation.HighContrast) return 0;
-            if (noteBlinkAt == 0) return 0;
-            return CornerFlashAlpha(Environment.TickCount - noteBlinkAt);
-        }
-
-        /// <summary>每 5 秒安排一次左上角快闪（1 秒的 tick 里调用；不用额外定时器）。</summary>
+        /// <summary>每 5 秒安排一次未读轻闪（1 秒的 tick 里调用；不用额外定时器）。</summary>
         private void MaybeBlinkUnread()
         {
             if (!NoteUnread || settings.ui.reducedMotion || SystemInformation.HighContrast) return;
@@ -3689,64 +3694,36 @@ namespace WorkCountdown
             {
                 noteBlinkLast = now;
                 noteBlinkAt = now;
-                Invalidate();                         // flowT 会因为 NoteRimActive() 在闪的这 420ms 里持续重画
+                Invalidate();                         // flowT 会因为 NoteDotActive() 在闪的这 420ms 里持续重画
             }
         }
 
         /// <summary>
-        /// 左上角快闪：沿圆角左上角画一段亮带（顶部 + 左侧各延伸一小段），加一团柔光。
-        /// 收起态 / 展开态共用，圆角跟着卡片走；只画在卡片里面，不会超出窗口。
+        /// 卡片上的状态点：收起卡「● 距离下班」、展开卡「● 工作中」前面那一颗。
+        /// 平时是主题色实心圆；有纸条到达 / 未读时整颗高亮闪烁（柔光晕 + 一圈亮环 + 提亮 + 微放大）。
+        /// 只画在卡片里面，不会超出窗口。
         /// </summary>
-        private void DrawNoteCorner(Graphics g, GraphicsPath cardPath)
+        private void DrawStatusDot(Graphics g, float cx, float cy, float radiusDip, double a)
         {
-            double a = NoteCornerAlpha();
-            if (a < 0.02) return;
-            var saved = g.Save();
-            g.SetClip(cardPath, CombineMode.Intersect);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            int inset = S(1);
-            int r = S(collapsed ? 13 : 17);
-            float ext = (float)Math.Min((double)S(20), (double)(Width * 0.14f));
-            using (var gp = new GraphicsPath())
+            float r = Math.Max(1.2f, S(radiusDip));
+            double pulse = NoteDotAlpha();
+            if (pulse > 0.02)
             {
-                gp.AddArc(new Rectangle(inset, inset, r * 2, r * 2), 180, 90);
-                gp.StartFigure();
-                gp.AddLine(inset, inset + r, inset, (int)(inset + r + ext));
-                gp.StartFigure();
-                gp.AddLine(inset + r, inset, (int)(inset + r + ext), inset);
-                for (int i = 3; i >= 1; i--)
-                    using (var pen = new Pen(Color.FromArgb((int)(a * 26 / i), theme.accent), Math.Max(2f, S(2) * i)))
-                    { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, gp); }
-                using (var pen = new Pen(Color.FromArgb((int)(a * 235), theme.accent), Math.Max(1.6f, S(2.2f))))
-                { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, gp); }
-                using (var pen = new Pen(Color.FromArgb((int)(a * 140), Color.White), Math.Max(1f, S(1))))
-                { pen.LineJoin = LineJoin.Round; g.DrawPath(pen, gp); }
+                float halo = r * 5.4f;
+                DrawGlowEllipse(g, new RectangleF(cx - halo, cy - halo, halo * 2, halo * 2), new PointF(cx, cy),
+                    theme.accent, 0.62 * pulse * a);
+                using (var pen = new Pen(Color.FromArgb((int)Math.Round(190 * pulse * a), theme.accent),
+                    Math.Max(1f, S(1.2f))))
+                    g.DrawEllipse(pen, cx - r * 2.2f, cy - r * 2.2f, r * 4.4f, r * 4.4f);
             }
-            // 角上一团柔光，让「闪两下」在深色/浅色主题上都看得见
-            DrawGlowEllipse(g, new RectangleF(-S(12), -S(12), S(64), S(64)), new PointF(S(2), S(2)), theme.accent, 0.40 * a);
-            g.Restore(saved);
+            float rr = r * (float)(1 + 0.30 * pulse);
+            Color core = MixColor(theme.accent, Color.White, 0.62 * pulse);
+            using (var br = new SolidBrush(Color.FromArgb((int)Math.Round(255 * Math.Max(0, Math.Min(1, a))), core)))
+                g.FillEllipse(br, cx - rr, cy - rr, rr * 2, rr * 2);
         }
 
-        private bool NoteRimActive() { return NoteRimAlpha() > 0.02 || NoteCornerAlpha() > 0.02; }
-
-        private void DrawNoteRim(Graphics g, GraphicsPath cardPath)
-        {
-            double a = NoteRimAlpha();
-            if (a < 0.02) return;
-            var rim = new Rectangle(S(1), S(1), Math.Max(2, Width - S(2)), Math.Max(2, Height - S(2)));
-            // 贴边闪光跟着卡片的圆角走：保持原来的 13 / 17 DIP（比卡片小 1 DIP）
-            int rimRadius = collapsed ? 13 : 17;
-            using (var path = RoundPath(rim, S(rimRadius)))
-            {
-                for (int i = 3; i >= 1; i--)
-                    using (var pen = new Pen(Color.FromArgb((int)(a * 24 / i), theme.accent), Math.Max(2f, S(2) * i)))
-                        g.DrawPath(pen, path);
-                using (var pen = new Pen(Color.FromArgb((int)(a * 225), theme.accent), Math.Max(1.5f, scale * 2f)))
-                    g.DrawPath(pen, path);
-                using (var pen = new Pen(Color.FromArgb((int)(a * 80), Color.White), Math.Max(1f, scale)))
-                    g.DrawPath(pen, path);
-            }
-        }
+        /// <summary>卡片上的圆点这一帧要不要动画重画。</summary>
+        private bool NoteDotActive() { return NoteDotAlpha() > 0.02; }
 
 
         // ---------------- 目标达成庆祝（卡内动效 + 卡外出框层） ----------------
@@ -4099,6 +4076,107 @@ namespace WorkCountdown
                 ApplyUpdateStateToBubble();
                 Invalidate();
                 store.Log("自动更新失败: " + ex.Message);
+            }
+        }
+
+        // ---------------- 每天 12:00 自动检查 + 静默升级 ----------------
+
+        /// <summary>
+        /// 每天中午 12:00 之后自动查一次新版本（一天只查一次，日期落盘）；有新版本就后台下载、
+        /// 校验，然后在空闲时静默替换并重启——不弹确认、不打断正在填的设置。
+        /// 检查失败 / 没有自动更新包只写日志，不打扰用户。
+        /// </summary>
+        private void MaybeAutoUpdate(DateTime now)
+        {
+            if (settings.ui == null || !settings.ui.autoUpdate) return;
+            // 测试 / 出图探针（WC_NO_SAVE=1 / WC_NO_RELAY=1）不联网、不改配置
+            if (RelayDisabledByEnvironment()) return;
+            if (!string.IsNullOrEmpty(autoUpdateExe))
+            {
+                TryApplyAutoUpdate();
+                return;
+            }
+            if (autoUpdateBusy || updateBusy) return;
+            if (now.Hour < AutoUpdateHour) return;
+            string today = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            if (string.Equals(settings.ui.autoUpdateCheckedDay, today, StringComparison.Ordinal)) return;
+            // 先记「今天查过」再联网：断网 / 崩溃也不会每分钟重试
+            settings.ui.autoUpdateCheckedDay = today;
+            SaveSettingsQuietly("自动更新检查");
+            store.Log("自动更新: 每天 12:00 检查（当前 v" + AppInfo.Version + "）");
+            autoUpdateBusy = true;
+            var th = new Thread(delegate()
+            {
+                string exe = null;
+                string version = null;
+                string error = null;
+                try
+                {
+                    UpdateRelease rel = UpdateService.Check();
+                    if (rel != null && UpdateService.IsNewer(rel.version, AppInfo.Version))
+                    {
+                        if (!rel.HasAsset) error = "v" + rel.version + " 没有自动更新包";
+                        else
+                        {
+                            string path = UpdateService.Download(rel, null);
+                            string message;
+                            if (!UpdateService.VerifyDownloaded(path, rel, out message))
+                                throw new InvalidOperationException(message);
+                            exe = path;
+                            version = rel.version;
+                        }
+                    }
+                }
+                catch (Exception e) { error = e.Message; }
+                finally { autoUpdateBusy = false; }
+                if (exe == null)
+                {
+                    store.Log("自动更新: 本次没有升级（" +
+                        (error == null ? "已是最新 v" + AppInfo.Version : error) + "）");
+                    return;
+                }
+                autoUpdateVersion = version;
+                autoUpdateExe = exe;
+                autoUpdateRetryUntil = Environment.TickCount + 30 * 60 * 1000;
+                store.Log("自动更新: v" + version + " 已下载，等空闲时静默升级");
+                TryPostApplyAutoUpdate();
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
+        private void TryPostApplyAutoUpdate()
+        {
+            if (!IsHandleCreated || IsDisposed) return;
+            try { BeginInvoke((MethodInvoker)TryApplyAutoUpdate); } catch { }
+        }
+
+        /// <summary>
+        /// 空闲时静默应用：正在填设置 / 看小纸条 / 播提醒时先让开，最多等 30 分钟；
+        /// 时间到了还没空档就照常升级（配置每次变化都已落盘，重启不丢东西）。
+        /// </summary>
+        private void TryApplyAutoUpdate()
+        {
+            string exe = autoUpdateExe;
+            if (string.IsNullOrEmpty(exe) || !File.Exists(exe))
+            {
+                autoUpdateExe = null;
+                return;
+            }
+            bool busyNow = settingsOpen || notePanel != null || bubbleMenu != null
+                || reminding || drawer != null || screenReminder;
+            if (busyNow && Environment.TickCount - autoUpdateRetryUntil < 0) return;
+            try
+            {
+                store.Log("自动更新: 静默升级到 v" + autoUpdateVersion + "，重启");
+                UpdateService.LaunchUpdater(exe);
+                autoUpdateExe = null;
+                Close();
+            }
+            catch (Exception e)
+            {
+                autoUpdateExe = null;
+                store.Log("自动更新失败: " + e.Message);
             }
         }
 

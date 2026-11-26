@@ -1031,7 +1031,7 @@ class NoteVerifyProbe
         return n;
     }
 
-    // ---------------------------------------------------------------- R3：滚动
+    // ---------------------------------------------------------------- R3：对话全部铺开（v5.2 起不用滚）
 
     static void CheckScroll()
     {
@@ -1049,48 +1049,32 @@ class NoteVerifyProbe
 
                 int scroll0 = GetInt(p, "ContactScroll", -1);
                 var drawn = DrawnContacts(p);
-                int expectVis = style == "columns" ? 5 : 4;   // 双栏正常态 5 行（298 DIP 高）/ 抽屉横排 4 个
-                Ok("R3-02 [" + style + "] 初始 scroll=0、只画一屏（" + expectVis + " 行，不是 8 个全画）",
-                    scroll0 == 0 && visCount == expectVis && drawn.Count == expectVis,
-                    "scroll=" + scroll0 + " VisibleContactCount=" + visCount + " 期望 " + expectVis
-                    + " drawn=" + drawn.Count + " ids=[" + Ids(drawn) + "]");
+                Ok("R3-02 [" + style + "] 8 个对话全部铺开（visible=" + visCount + "、全画 8 个、面板自动加高）",
+                    scroll0 == 0 && visCount >= 8 && drawn.Count == 8,
+                    "scroll=" + scroll0 + " VisibleContactCount=" + visCount
+                    + " drawn=" + drawn.Count + " h=" + p.Height + " ids=[" + Ids(drawn) + "]");
 
-                var firstBefore = drawn.Count > 0 ? drawn[0].id : null;
-                bool hasScrollCall = TryInvoke(p, "ScrollContacts", 1);
-                var drawn1 = DrawnContacts(p);
-                int scroll1 = GetInt(p, "ContactScroll", -1);
-                string firstAfter = drawn1.Count > 0 ? drawn1[0].id : null;
-                Ok("R3-03 [" + style + "] ScrollContacts(+1) 窗口真的动了",
-                    hasScrollCall && firstBefore != firstAfter,
-                    "hasMethod=" + hasScrollCall + " scroll=" + scroll1 + " first=" + firstBefore + "->" + firstAfter);
+                using (var bmp = RenderPanel(p)) Save(bmp, Path.Combine("shots", "note-" + style + "-all.png"));
 
-                // 滚轮一格
-                int beforeWheel = GetInt(p, "ContactScroll", -1);
+                TryInvoke(p, "ScrollContacts", 1);
+                Ok("R3-03 [" + style + "] 全部铺开时不再需要滚动（scroll 保持 0、8 个还都在）",
+                    GetInt(p, "ContactScroll", -1) == 0 && DrawnContacts(p).Count == 8,
+                    "scroll=" + GetInt(p, "ContactScroll", -1) + " drawn=" + DrawnContacts(p).Count);
+
                 InvokeWheel(p, -120);
-                int afterWheel = GetInt(p, "ContactScroll", -1);
                 InvokeWheel(p, 120);
-                int backWheel = GetInt(p, "ContactScroll", -1);
-                Ok("R3-04 [" + style + "] 滚轮一格 = scroll ±1",
-                    afterWheel == beforeWheel + 1 && backWheel == beforeWheel,
-                    "before=" + beforeWheel + " wheelDown=" + afterWheel + " wheelUp=" + backWheel);
+                Ok("R3-04 [" + style + "] 滚轮也不会把对话滚走",
+                    GetInt(p, "ContactScroll", -1) == 0,
+                    "scroll=" + GetInt(p, "ContactScroll", -1));
 
-                // clamp
-                TryInvoke(p, "ScrollContacts", 999);
-                int maxScroll = GetInt(p, "ContactScroll", -1);
-                var drawnMax = DrawnContacts(p);
-                string lastId = drawnMax.Count > 0 ? drawnMax[drawnMax.Count - 1].id : null;
-                bool sawLast = false;
-                foreach (var c in drawnMax) if (c.id == "10008") sawLast = true;
-                using (var bmp = RenderPanel(p)) Save(bmp, Path.Combine("shots", "note-" + style + "-scroll-max.png"));
-                TryInvoke(p, "ScrollContacts", -999);
-                int minScroll = GetInt(p, "ContactScroll", -1);
-                var drawnMin = DrawnContacts(p);
-                bool sawFirst = false;
-                foreach (var c in drawnMin) if (c.id == "10001") sawFirst = true;
-                int total = s.note.contacts.Count;
-                Ok("R3-05 [" + style + "] 滚动边界 clamp：不越界、末屏能看到最后一个对话",
-                    maxScroll >= 0 && maxScroll <= Math.Max(0, total - 1) && sawLast && minScroll == 0 && sawFirst,
-                    "max=" + maxScroll + " lastId=" + lastId + " sawLast=" + sawLast + " min=" + minScroll + " sawFirst=" + sawFirst);
+                bool sawLast = false, sawFirst = false;
+                foreach (var c in DrawnContacts(p))
+                {
+                    if (c.id == "10008") sawLast = true;
+                    if (c.id == "10001") sawFirst = true;
+                }
+                Ok("R3-05 [" + style + "] 第一个和最后一个对话都在列表里，不用滚到最后才看得到",
+                    sawFirst && sawLast, "sawFirst=" + sawFirst + " sawLast=" + sawLast);
             }
         }
     }
@@ -1137,14 +1121,13 @@ class NoteVerifyProbe
                 var drawn = DrawnContacts(p);
                 bool visible = false;
                 foreach (var c in drawn) if (c.id == "10008") visible = true;
-                int max = Math.Max(0, s.note.contacts.Count - GetInt(p, "VisibleContactCount", 4));
-                Ok("R3-16 [" + style + "] 选中窗口外的对话会自动滚到可见（EnsureContactVisible）",
-                    scroll == max && visible,
-                    "scroll=" + scroll + " max=" + max + " drawn=[" + Ids(drawn) + "] 见10008=" + visible);
+                Ok("R3-16 [" + style + "] 选中最后一个对话不用滚（一直都在列表里）",
+                    scroll == 0 && visible,
+                    "scroll=" + scroll + " drawn=[" + Ids(drawn) + "] 见10008=" + visible);
 
                 TryCall(p, "SelectContact", "10001", false);
                 int back = GetInt(p, "ContactScroll", -1);
-                Ok("R3-16b [" + style + "] 再选中第一个对话会滚回顶部", back == 0, "scroll=" + back);
+                Ok("R3-16b [" + style + "] 再选中第一个对话也还在原地（scroll 保持 0）", back == 0, "scroll=" + back);
             }
         }
     }
@@ -1153,16 +1136,16 @@ class NoteVerifyProbe
 
     static void CheckColumnsRows()
     {
-        // 正常态 298 DIP → 5 行；历史态 512 DIP → 10 行（Lead 2026-11-13 16:23 调整）
+        // v5.2：按对话数量长高 —— 8 个对话 → 418 DIP；历史态保底 512 DIP
         var s = FreshSettings("columns");
         AddContacts(s, 8);
         using (var p = MakePanel(s, "huang-liuli", new Rectangle(600, 200, 470, 298)))
         {
             int vis = GetInt(p, "VisibleContactCount", -1);
             var drawn = DrawnContacts(p);
-            Ok("R3-17 双栏正常态一屏 5 行（150% 下 5 个对话胶囊 + 底部新建对话）",
-                vis == 5 && drawn.Count == 5, "VisibleContactCount=" + vis + " drawn=" + drawn.Count + " ids=[" + Ids(drawn) + "]");
-            using (var bmp = RenderPanel(p)) Save(bmp, Path.Combine("shots", "note-columns-contacts-5rows.png"));
+            Ok("R3-17 双栏正常态按对话数量长高：8 个对话全部铺开（418 DIP、不用滚）",
+                vis == 8 && drawn.Count == 8, "VisibleContactCount=" + vis + " drawn=" + drawn.Count + " ids=[" + Ids(drawn) + "] h=" + p.Height);
+            using (var bmp = RenderPanel(p)) Save(bmp, Path.Combine("shots", "note-columns-all.png"));
 
             var stateType = typeof(NotePanelForm).GetNestedType("PanelState", BindingFlags.NonPublic);
             TryCall(p, "SetState", Enum.Parse(stateType, "History"), true);

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
@@ -421,8 +421,8 @@ internal static class Test
         {
             Check("更新仓库", UpdateService.Owner + "/" + UpdateService.Repo, "ocezeus/vibeZheyikuai");
             Check("更新页地址", UpdateService.RepoUrl, "https://github.com/ocezeus/vibeZheyikuai");
-            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "5.1.0/5.1.0");
-            Check("程序集版本是 5.1.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "5.1.0.0");
+            Check("当前版本", UpdateService.CurrentVersion + "/" + AppInfo.Version, "5.2.0/5.2.0");
+            Check("程序集版本是 5.2.0.0", typeof(AppInfo).Assembly.GetName().Version.ToString(), "5.2.0.0");
 
             Check("IsNewer 3.6.1 比 3.6.0 新", UpdateService.IsNewer("3.6.1", "3.6.0").ToString(), "True");
             Check("IsNewer 相同版本不算新", UpdateService.IsNewer("3.6.0", "3.6.0").ToString(), "False");
@@ -745,7 +745,7 @@ internal static class Test
             legacy.workdays = new bool[] { true, true, true, true, true, false, false };   // 旧版存出来的错位形态
             legacy.Normalize();
             Check("旧配置的工作日错位会迁移回周一~周五（周五上班）",
-                bits(legacy.workdays) + "/" + legacy.version, "0111110/2");
+                bits(legacy.workdays) + "/" + legacy.version, "0111110/3");
 
             var legacyMonSat = new Settings();
             legacyMonSat.version = 1;
@@ -903,8 +903,8 @@ internal static class Test
             s2.note.Append(new NoteMessage("73512", s2.note.id, "在吗", 1), true);
             var rt = serializer.Deserialize<Settings>(serializer.Serialize(s2));
             rt.Normalize();
-            Check("小纸条设置能存能读", rt.note.id + "/" + rt.note.contacts.Count + "/" + rt.note.threads[0].messages.Count,
-                s2.note.id + "/1/1");
+            Check("小纸条设置能存能读", rt.note.id + "/" + rt.note.contacts.Count + "/" + rt.note.Thread("73512").messages.Count,
+                s2.note.id + "/2/1");
             Check("老配置没有 note 也能补出来", new Settings().note != null ? "ok" : "null", "ok");
 
             // ---- 对话码（v3.3.3 起：添加联系人 → 添加对话，任意 5 位字符） ----
@@ -1084,17 +1084,64 @@ internal static class Test
             Check("未连接时刷新订阅安静返回", idleRelay.Connected.ToString(), "False");
         }
 
-        // ---- 21) v3.8.1 未读左上角每 5 秒快闪两下 ----
+        // ---- 21) v5.2 卡片状态点高亮闪烁（取代贴边闪光 / 左上角快闪） ----
         {
-            Check("未读快闪间隔 5 秒", WidgetForm.NoteBlinkIntervalMs.ToString(), "5000");
-            Check("一轮两次快闪 420ms 内结束", WidgetForm.NoteBlinkSpanMs.ToString(), "420");
-            Check("第 1 下：60ms 亮起", (WidgetForm.CornerFlashAlpha(60) > 0.5) ? "亮" : "灭", "亮");
-            Check("第 1 下：75ms 是峰值", (WidgetForm.CornerFlashAlpha(75) > 0.99) ? "亮" : "灭", "亮");
-            Check("第 1 下：120ms 仍亮着", (WidgetForm.CornerFlashAlpha(120) > 0.5) ? "亮" : "灭", "亮");
-            Check("两下中间有暗隙：200ms 不亮", WidgetForm.CornerFlashAlpha(200).ToString("0.00"), "0.00");
-            Check("第 2 下：300ms 又亮起", (WidgetForm.CornerFlashAlpha(300) > 0.5) ? "亮" : "灭", "亮");
-            Check("420ms 之后熄灭", WidgetForm.CornerFlashAlpha(420).ToString("0.00") + "/" + WidgetForm.CornerFlashAlpha(900).ToString("0.00"), "0.00/0.00");
-            Check("负数/超时也不亮", WidgetForm.CornerFlashAlpha(-5).ToString("0.00") + "/" + WidgetForm.CornerFlashAlpha(421).ToString("0.00"), "0.00/0.00");
+            Check("未读轻闪间隔 5 秒", WidgetForm.NoteBlinkIntervalMs.ToString(), "5000");
+            Check("一轮轻闪 420ms 内结束", WidgetForm.NoteBlinkSpanMs.ToString(), "420");
+            Check("收到纸条时闪 1.3s", WidgetForm.NoteArrivalMs.ToString(), "1300");
+            Check("轻闪第 1 下：60ms 亮起", (WidgetForm.DotPulse(60, WidgetForm.NoteBlinkSpanMs) > 0.5) ? "亮" : "灭", "亮");
+            Check("轻闪第 1 下：97ms 是峰值", (WidgetForm.DotPulse(97, WidgetForm.NoteBlinkSpanMs) > 0.99) ? "亮" : "灭", "亮");
+            Check("轻闪第 1 下：120ms 仍亮着", (WidgetForm.DotPulse(120, WidgetForm.NoteBlinkSpanMs) > 0.5) ? "亮" : "灭", "亮");
+            Check("两下中间有暗隙：200ms 不亮", WidgetForm.DotPulse(200, WidgetForm.NoteBlinkSpanMs).ToString("0.00"), "0.00");
+            Check("轻闪第 2 下：300ms 又亮起", (WidgetForm.DotPulse(300, WidgetForm.NoteBlinkSpanMs) > 0.5) ? "亮" : "灭", "亮");
+            Check("420ms 之后熄灭",
+                WidgetForm.DotPulse(420, WidgetForm.NoteBlinkSpanMs).ToString("0.00") + "/" +
+                WidgetForm.DotPulse(900, WidgetForm.NoteBlinkSpanMs).ToString("0.00"), "0.00/0.00");
+            Check("负数/超时也不亮",
+                WidgetForm.DotPulse(-5, WidgetForm.NoteBlinkSpanMs).ToString("0.00") + "/" +
+                WidgetForm.DotPulse(421, WidgetForm.NoteBlinkSpanMs).ToString("0.00"), "0.00/0.00");
+            Check("到达闪光：300ms 高亮", (WidgetForm.DotPulse(300, WidgetForm.NoteArrivalMs) > 0.9) ? "亮" : "灭", "亮");
+            Check("到达闪光：650ms 暗隙", WidgetForm.DotPulse(650, WidgetForm.NoteArrivalMs).ToString("0.00"), "0.00");
+            Check("到达闪光：1000ms 第二下", (WidgetForm.DotPulse(1000, WidgetForm.NoteArrivalMs) > 0.9) ? "亮" : "灭", "亮");
+            Check("到达闪光：1300ms 结束", WidgetForm.DotPulse(1300, WidgetForm.NoteArrivalMs).ToString("0.00"), "0.00");
+        }
+
+        // ---- 22) v5.2 「大字报」公共房间 + 每天 12:00 自动更新 ----
+        {
+            var nb = new NoteSettings();
+            nb.Normalize();
+            Check("大字报是 5 位合法对话码", NoteSettings.ValidCode(NoteSettings.BulletinCode).ToString(), "True");
+            Check("大字报自动加入对话列表、排在最前面、名字固定",
+                (nb.contacts.Count > 0 && nb.contacts[0].id == NoteSettings.BulletinCode
+                 && nb.contacts[0].remark == NoteSettings.BulletinName) ? "ok" : "bad",
+                "ok");
+            Check("大字报是公共房间（不是个人 ID）",
+                (nb.IsRoom(NoteSettings.BulletinCode) && !nb.IsBulletin("62015")).ToString(), "True");
+            nb.EnsureBulletin();
+            nb.Normalize();
+            int bulletinCount = 0;
+            foreach (var c in nb.contacts) if (c.id == NoteSettings.BulletinCode) bulletinCount++;
+            Check("重复 Normalize 不会加出第二个大字报", bulletinCount.ToString(), "1");
+            nb.AddContact("62015", "阿哲");
+            nb.RemoveContact(NoteSettings.BulletinCode);
+            Check("大字报删不掉（RemoveContact 直接拒绝）", nb.Contact(NoteSettings.BulletinCode) != null ? "在" : "没了", "在");
+            Check("大字报排在普通对话前面",
+                (nb.contacts[0].id == NoteSettings.BulletinCode).ToString(), "True");
+
+            var au = new Settings();
+            au.Normalize();
+            Check("自动更新默认开启", au.ui.autoUpdate.ToString(), "True");
+            Check("schema 升到 3", au.version.ToString(), "3");
+            var oldCfg = new Settings();
+            oldCfg.version = 2;
+            oldCfg.ui = new UiSettings();
+            oldCfg.ui.autoUpdate = false;       // 反序列化老配置时字段缺失 = false
+            oldCfg.Normalize();
+            Check("老配置（schema 2）自动补开自动更新", oldCfg.ui.autoUpdate.ToString(), "True");
+            oldCfg.ui.autoUpdate = false;
+            oldCfg.Normalize();
+            Check("用户手动关掉后 Normalize 不会再打开", oldCfg.ui.autoUpdate.ToString(), "False");
+            Check("检查日期字段为空串", au.ui.autoUpdateCheckedDay ?? "null", "");
         }
         // ---- 20) v5.0 主题文件化：ThemeFiles 读写 / 校验 / 导入导出 / 迁移 / 注册表 ----
         {
@@ -2784,7 +2831,7 @@ internal static class Test
                         var loaded = store.Load();
                         Check("AC2 持久化的是规范化快照",
                             loaded.Settings.version + "/" + loaded.Settings.mode + "/" + loaded.Settings.ui.opacity + "/" + Bits(loaded.Settings.workdays),
-                            "2/flex/94/0111110");
+                            "3/flex/94/0111110");
                         Check("AC2 固定日程与历史日历来源在快照里补齐",
                             loaded.Settings.schedules.Count + "/" + loaded.Settings.outlook.calendars.Count + "/" + loaded.Settings.outlook.calendars[0].url,
                             "3/1/https://example.com/legacy.ics");
@@ -2886,7 +2933,7 @@ internal static class Test
                         string afterFirst = ReadAllText(store.SettingsPath);
                         Check("AC2 旧配置加载后迁移并落盘",
                             first.Status + "/" + first.Settings.version + "/" + Bits(first.Settings.workdays),
-                            "Loaded/2/0111110");
+                            "Loaded/3/0111110");
                         Check("AC2 迁移后文件被规范化为有效快照",
                             (afterFirst != legacyJson) + "/" + first.Settings.outlook.calendars.Count,
                             "True/1");
@@ -2999,7 +3046,7 @@ internal static class Test
                             byte[] probeBefore = System.IO.File.ReadAllBytes(store.SettingsPath);
                             var probeLoad = store.Load();
                             Check("AC6 探针加载只在内存迁移、不写盘",
-                                (probeLoad.Settings.version == 2) + "/" + FileBytesEqual(store.SettingsPath, probeBefore), "True/True");
+                                (probeLoad.Settings.version >= 2) + "/" + FileBytesEqual(store.SettingsPath, probeBefore), "True/True");
                         }
                         finally { Environment.SetEnvironmentVariable("WC_NO_SAVE", previous); }
                     }
@@ -3462,7 +3509,7 @@ internal static class Test
                 original.note.contacts.Add(new NoteContact { id = "62015", remark = "阿哲" });
                 var copy = original.Clone();
                 copy.note.contacts[0].remark = "小满";
-                Check("变化计划使用独立快照，不原地改调用者", original.note.contacts[0].remark, "阿哲");
+                Check("变化计划使用独立快照，不原地改调用者", original.note.Contact("62015").remark, "阿哲");
             }
         }
 

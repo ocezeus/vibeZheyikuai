@@ -182,6 +182,7 @@ namespace WorkCountdown
                 lock (subLock) { subscribed.Clear(); subPacketId = 0; }
                 SubscribeTopic(InboxTopic(Cfg.id));
                 SubscribeRooms();
+                SubscribeBulletin();
                 SubscribeContactPresence();
                 Send(PublishPacket(PresenceTopic(Cfg.id), PresenceJson(Cfg.id, Cfg.nickname), true));
                 StartKeepAlive();
@@ -291,8 +292,18 @@ namespace WorkCountdown
         {
             if (!connected) return;
             SubscribeRooms();
+            SubscribeBulletin();
             SubscribeContactPresence();
             try { Send(PublishPacket(PresenceTopic(Cfg.id), PresenceJson(Cfg.id, Cfg.nickname), true)); } catch { }
+        }
+
+        /// <summary>
+        /// 公共房间「大字报」：不管本机对话列表长什么样都订阅（Normalize 会把它补进 contacts，
+        /// 这里再显式订一次，保证老配置 / 手改坏的情况下也收得到）。
+        /// </summary>
+        private void SubscribeBulletin()
+        {
+            SubscribeTopic(RoomTopic(NoteSettings.BulletinCode));
         }
 
         private void SubscribeRooms()

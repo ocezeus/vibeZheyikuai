@@ -11,7 +11,7 @@ namespace WorkCountdown
     /// <summary>程序版本：界面标题、关于文案和打包脚本都从这里取。</summary>
     public static class AppInfo
     {
-        public const string Version = "5.1.0";
+        public const string Version = "5.2.0";
     }
 
     public class HolidayEntry
@@ -756,6 +756,10 @@ namespace WorkCountdown
         public string offReminderStyle { get; set; }     // 下班提醒配色
         public string textFont { get; set; }             // 中文字体族，空 = 跟随默认（苹方 / Noto / 雅黑）
         public string numberFont { get; set; }           // 数字字体族，默认 Consolas
+        /// <summary>每天 12:00 自动检查更新，有新版本就静默升级（默认开）。</summary>
+        public bool autoUpdate { get; set; }
+        /// <summary>自动更新上一次检查的日期（yyyy-MM-dd）：一天只查一次。</summary>
+        public string autoUpdateCheckedDay { get; set; }
 
         // 四类日程各自的通知样式：固定 / 飞书会议 / 普通 / Outlook
         public ReminderStyleDef styleFixed { get; set; }
@@ -793,6 +797,8 @@ namespace WorkCountdown
             styleOutlook = new ReminderStyleDef("card", "circle", ReminderStyles.Follow);
             textFont = "";
             numberFont = "Consolas";
+            autoUpdate = true;
+            autoUpdateCheckedDay = "";
         }
     }
 
@@ -890,6 +896,13 @@ namespace WorkCountdown
         public const int MaxNick = 12;
         public const int CodeLen = 5;
 
+        /// <summary>
+        /// 公共房间「大字报」的内部对话码：所有使用者默认都有一份、排在最前面，不能删；
+        /// 发布主题和普通对话码一样（xzt/v1/room/&lt;hex&gt;），所以人人可发、人人可见。
+        /// </summary>
+        public const string BulletinCode = "DZB01";
+        public const string BulletinName = "大字报";
+
         public string id { get; set; }              // 本机 5 位 ID
         public string nickname { get; set; }        // 本机昵称（对方添加我 / 群聊里直接看到）
         public string style { get; set; }           // drawer（A 抽屉式）| columns（C 极简双栏）
@@ -959,6 +972,37 @@ namespace WorkCountdown
             return ValidCode(code) && !ValidId(code);
         }
 
+        /// <summary>是不是公共房间「大字报」：自动加入、不能删、不能改名。</summary>
+        public bool IsBulletin(string contactId)
+        {
+            return string.Equals(NormalizeCode(contactId), BulletinCode, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// 保证「大字报」这个公共房间永远在列表里、排最前面、名字固定。
+        /// 老配置第一次加载时自动补上（之后随配置落盘），新配置首次 Normalize 也会有。
+        /// </summary>
+        public void EnsureBulletin()
+        {
+            if (contacts == null) contacts = new List<NoteContact>();
+            NoteContact c = Contact(BulletinCode);
+            if (c == null)
+            {
+                c = new NoteContact();
+                c.id = BulletinCode;
+                c.nick = "";
+                contacts.Insert(0, c);
+            }
+            c.remark = BulletinName;
+            int idx = contacts.IndexOf(c);
+            if (idx > 0)
+            {
+                contacts.RemoveAt(idx);
+                contacts.Insert(0, c);
+            }
+            Thread(BulletinCode);
+        }
+
         public void Normalize()
         {
             if (!ValidId(id)) id = GenerateId();
@@ -1004,6 +1048,8 @@ namespace WorkCountdown
                 c.nick = "";
                 contacts.Add(c);
             }
+            // 公共房间「大字报」：所有使用者默认都有，排最前面，名字固定
+            EnsureBulletin();
         }
 
         public NoteContact Contact(string contactId)
@@ -1099,6 +1145,8 @@ namespace WorkCountdown
 
         public void RemoveContact(string contactId)
         {
+            // 「大字报」是公共房间：谁都在、谁都能看，不允许从本机删掉
+            if (IsBulletin(contactId)) return;
             contacts.RemoveAll(delegate(NoteContact c) { return c.id == contactId; });
             threads.RemoveAll(delegate(NoteThread t) { return t.contact == contactId; });
         }
@@ -1476,6 +1524,14 @@ namespace WorkCountdown
             if (s.lark == null) s.lark = new LarkSettings();
             if (string.IsNullOrWhiteSpace(s.lark.chatId)) s.lark.enabled = false;   // 没会话就没得读
             if (s.ui == null) s.ui = new UiSettings();
+            // schema 3（v5.2）：新增「每天 12:00 自动检查并静默升级」，默认开。
+            // 老配置里没有这个字段，反序列化出来是 false，这里补一次；之后按用户选择存。
+            if (s.version < 3)
+            {
+                s.ui.autoUpdate = true;
+                s.version = 3;
+            }
+            if (s.ui.autoUpdateCheckedDay == null) s.ui.autoUpdateCheckedDay = "";
             if (string.IsNullOrWhiteSpace(s.lark.command)) s.lark.command = "lark-cli";
             if (s.lark.pollMinutes < 1) s.lark.pollMinutes = 5;
             if (s.ui.opacity < 30) s.ui.opacity = 94;

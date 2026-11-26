@@ -74,18 +74,20 @@ class NoteShot
         s.note.Append(new NoteMessage("93183", "项目组#1", "周会材料我放群文件了", now - 700, "阿哲"), true);
         s.note.Append(new NoteMessage("48372", "项目组#1", "收到，我先看下", now - 500), false);
         s.note.Append(new NoteMessage("11788", "项目组#1", "我下午补一页数据", now - 180, "小满"), true);
+        // 「大字报」公共房间：所有人都能看到（Normalize 会自动加进来并排最前面）
+        s.note.Append(new NoteMessage("93183", NoteSettings.BulletinCode, "周五下午三点全员会，别迟到", now - 400, "阿哲"), true);
+        s.note.Append(new NoteMessage("11788", NoteSettings.BulletinCode, "收到", now - 200, "小满"), true);
+        s.Normalize();
 
         var card = new Rectangle(840, 90, 420, 282);
         using (var p = new NotePanelForm(s, Themes.Get(themeId), card, true, null, null, null, null, null))
         {
             Render(p, Path.Combine(dir, "note-" + style + "-contacts.png"));
 
-            // 对话多了：滚一格 + 右键弹出「删除」按钮
-            Call(p, "ScrollContacts", 1);
+            // v5.2：对话全部铺开，不需要滚；右键直接在列表上弹「删除」按钮
             Call(p, "ShowDelete", s.note.contacts[1].id);
-            Render(p, Path.Combine(dir, "note-" + style + "-scroll-delete.png"));
+            Render(p, Path.Combine(dir, "note-" + style + "-delete.png"));
             Call(p, "HideDelete");
-            Call(p, "ScrollContacts", -99);
 
             Call(p, "SelectContact", "62015", false);
             Set(p, "heightNow", (float)Get(p, "heightTo"));   // 抽屉式未选对话是收窄的，选完要等长高（离屏没有定时器，直接落位）
@@ -108,9 +110,15 @@ class NoteShot
             Set(p, "heightNow", (float)Get(p, "heightTo"));
             Set(p, "stateAt", Environment.TickCount - 800);
             Render(p, Path.Combine(dir, "note-" + style + "-room.png"));
+
+            // v5.2 公共房间「大字报」：所有人默认都有、人人都能发
+            Call(p, "SelectContact", NoteSettings.BulletinCode, false);
+            Set(p, "heightNow", (float)Get(p, "heightTo"));
+            Set(p, "stateAt", Environment.TickCount - 800);
+            Render(p, Path.Combine(dir, "note-" + style + "-bulletin.png"));
         }
 
-        // 卡片贴边闪光（离屏渲染 Widget）
+        // 卡片状态点高亮闪烁（离屏渲染 Widget）
         using (var w = new WidgetForm(new SettingsStore(), s))
         {
             Set(w, "scale", 1.5f);
@@ -118,13 +126,13 @@ class NoteShot
             w.Size = new Size(420, 282);
             Call(w, "Recompute");
             Call(w, "FinishAnimNow");
-            Set(w, "noteFlashAt", Environment.TickCount - 40);
+            Set(w, "noteFlashAt", Environment.TickCount - 300);
             using (var bmp = new Bitmap(w.Width, w.Height))
             {
                 bmp.SetResolution(144, 144);
                 using (var g = Graphics.FromImage(bmp))
                     Call(w, "OnPaint", new PaintEventArgs(g, new Rectangle(0, 0, w.Width, w.Height)));
-                bmp.Save(Path.Combine(dir, "note-widget-flash.png"), ImageFormat.Png);
+                bmp.Save(Path.Combine(dir, "note-widget-dot.png"), ImageFormat.Png);
             }
             Set(w, "noteFlashAt", 0);
             Call(w, "OnFormClosing", new FormClosingEventArgs(CloseReason.None, false));

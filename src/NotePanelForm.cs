@@ -184,11 +184,11 @@ namespace WorkCountdown
             // 之前 u = card.Width / 420f 把设计稿当成「卡片 420 宽」再缩到 280，字号只剩 6.25pt，150% 下看不清。
             u = scale;
 
-            winWidth = S(columns ? ColumnsWDip : DrawerWDip);
-            int panelH = S(columns ? ColumnsHDip : (state == PanelState.Contacts ? DrawerContactsPanelHDip : DrawerHDip));
             Screen scr = Screen.FromRectangle(card);
             Rectangle wa = scr.WorkingArea;
             workArea = wa;
+            winWidth = S(columns ? ColumnsWDip : DrawerWDip);
+            int panelH = S(PanelHDip);
             int roomRight = wa.Right - card.Right;
             int roomLeft = card.Left - wa.Left;
             bool fitsRight = roomRight >= winWidth + S(14);
@@ -288,24 +288,62 @@ namespace WorkCountdown
         public int VisibleContactCount { get { return columns ? ColumnsVisibleCount() : DrawerVisibleContacts * DrawerRows; } }
 
         /// <summary>
-        /// 抽屉式联系人显示几排：只在「对话列表页」（还没选对话）且联系人多于一排时铺两排，
-        /// 一屏能看 8 个；进了聊天 / 历史页还是只留一排，别挤掉聊天区。
+        /// 抽屉式铺几排：按对话总数全部铺开（4 个一排），不再固定最多两排。
+        /// 屏幕实在放不下时按「历史态也不超出屏幕」封顶，剩下的才退回滚轮。
         /// </summary>
         private int DrawerRows
         {
             get
             {
                 if (columns) return 1;
-                if (state != PanelState.Contacts) return 1;
-                return note.contacts.Count > DrawerVisibleContacts ? 2 : 1;
+                int n = Math.Max(0, note.contacts.Count);
+                int need = Math.Max(1, (n + DrawerVisibleContacts - 1) / DrawerVisibleContacts);
+                int maxRows = 1 + Math.Max(0, (WorkAreaDipHeight - 8 - DrawerHistoryHDip) / DrawerRowStepDip);
+                return Math.Min(need, maxRows);
             }
         }
 
-        /// <summary>抽屉式对话列表「条带」高度（DIP）：一排 36，两排 36 + 34。</summary>
+        /// <summary>工作区高度（DIP）：用来决定对话最多铺几排，保证面板不超出屏幕。</summary>
+        private int WorkAreaDipHeight
+        {
+            get { return (int)Math.Floor(workArea.Height / (double)u); }
+        }
+
+        /// <summary>抽屉式对话列表「条带」高度（DIP）：一排 36，每多一排 +34。</summary>
         private int DrawerContactsStripHDip { get { return 36 + (DrawerRows - 1) * DrawerRowStepDip; } }
 
-        /// <summary>抽屉式未选对话时整块面板的高度（DIP）：一排 124（标题 + 对话 + 一句提示），两排 +34。</summary>
+        /// <summary>抽屉式未选对话时整块面板的高度（DIP）：一排 124（标题 + 对话 + 一句提示），多一排 +34。</summary>
         private int DrawerContactsPanelHDip { get { return DrawerContactsHDip + (DrawerRows - 1) * DrawerRowStepDip; } }
+
+        /// <summary>
+        /// 当前状态下的面板高度（DIP）：对话列表按数量全部铺开；聊天 / 历史态保留原来的正文高度，
+        /// 对话列表多出来的排数整体加高面板，不用滚轮也能看到、点到所有对话。
+        /// </summary>
+        private int PanelHDip
+        {
+            get
+            {
+                if (state == PanelState.Add) return columns ? ColumnsHDip : DrawerHDip;
+                if (columns)
+                {
+                    // 52 标题 + 8 上边距 + 每行 40 + 38 底部「＋ 新建对话」+ 8 边距
+                    int rows = Math.Max(1, Math.Min(note.contacts.Count, MaxColumnRows));
+                    int need = 98 + rows * ContactRowStrideDip;
+                    int baseH = state == PanelState.History ? ColumnsHistoryHDip : ColumnsHDip;
+                    return Math.Max(baseH, need);
+                }
+                int extra = (DrawerRows - 1) * DrawerRowStepDip;
+                int baseDrawer = state == PanelState.Contacts ? DrawerContactsHDip
+                    : state == PanelState.History ? DrawerHistoryHDip : DrawerHDip;
+                return baseDrawer + extra;
+            }
+        }
+
+        /// <summary>双栏左栏最多铺几行：再高就超出屏幕，剩下的退回滚轮。</summary>
+        private int MaxColumnRows
+        {
+            get { return Math.Max(1, (WorkAreaDipHeight - 8 - 98) / Math.Max(1, ContactRowStrideDip)); }
+        }
 
         /// <summary>设计像素 → 实际像素：按卡片宽度等比，和卡片字号比例一致。</summary>
         private int S(float px) { return (int)Math.Round(px * u); }
@@ -403,11 +441,12 @@ namespace WorkCountdown
         public void RefreshData()
         {
             if (IsDisposed) return;
-            // 对话数量跨过「一排 / 两排」的分界（新对话来了 / 删掉了）时，列表页高度跟着变
-            if (state == PanelState.Contacts && !heightAnimating)
+            // 对话数量变化（新建 / 收到陌生人纸条 / 删除）时，列表高度跟着变：
+            // 所有状态都按「当前对话数」重新算高度，列表始终全部铺开。
+            if (!heightAnimating)
             {
-                int target = S(columns ? ColumnsHDip : DrawerContactsPanelHDip);
-                if (Math.Abs(target - heightTo) > 1) SetState(PanelState.Contacts, false);
+                float target = S(PanelHDip);
+                if (Math.Abs(target - heightTo) > 1) SetState(state, state == PanelState.History);
             }
             if (historyScroll > HistoryMaxScroll()) historyScroll = HistoryMaxScroll();
             BuildHits();
@@ -497,9 +536,9 @@ namespace WorkCountdown
             stateAt = Environment.TickCount;
             sentAt = 0;
             sentPrevCount = 0;
-            int normalH = S(columns ? ColumnsHDip : (state == PanelState.Contacts ? DrawerContactsPanelHDip : DrawerHDip));
-            int historyH = S(columns ? ColumnsHistoryHDip : DrawerHistoryHDip);
-            float target = historyHeight ? historyH : normalH;
+            // 高度按「当前状态 + 对话数量」算：列表全部铺开，聊天 / 历史保留原来的正文高度。
+            // historyHeight 参数保留给旧调用方，高度已经由 state 本身决定。
+            float target = S(PanelHDip);
             if (Math.Abs(target - heightNow) > 1)
             {
                 heightFrom = heightNow;
@@ -523,7 +562,7 @@ namespace WorkCountdown
 
         // ---------------------------------------------------------------- 布局
 
-        private int BodyTop() { return S(columns ? 52 : 100); }
+        private int BodyTop() { return columns ? S(52) : S(56 + DrawerContactsStripHDip + 8); }
         private Rectangle HeaderRect() { return new Rectangle(S(PadDip), S(14), winWidth - S(PadDip) * 2, S(34)); }
         private Rectangle ContactsRect()
         {
@@ -686,6 +725,8 @@ namespace WorkCountdown
         public void ShowDelete(string id)
         {
             if (string.IsNullOrEmpty(id) || note.Contact(id) == null) return;
+            // 「大字报」是所有人都能看的公共房间，不提供删除
+            if (note.IsBulletin(id)) return;
             deleteId = id;
             BuildHits();
             Invalidate();
@@ -703,6 +744,14 @@ namespace WorkCountdown
         public void DeleteConversation(string id)
         {
             if (string.IsNullOrEmpty(id)) return;
+            if (note.IsBulletin(id))
+            {
+                status = "「大字报」是公共房间，不能删除";
+                statusAt = Environment.TickCount;
+                BuildHits();
+                Invalidate();
+                return;
+            }
             var c = note.Contact(id);
             string name = c == null ? id : c.Display();
             note.RemoveContact(id);
@@ -970,6 +1019,13 @@ namespace WorkCountdown
         {
             NoteContact c = note.Contact(id);
             if (c == null) return;
+            if (note.IsBulletin(id))
+            {
+                status = "「大字报」是公共房间，名字固定";
+                statusAt = Environment.TickCount;
+                Invalidate();
+                return;
+            }
             if (fieldEditor != null && !fieldEditor.IsDisposed) CloseFieldEditor();
             int idx = -1;
             for (int i = 0; i < drawnContacts.Count; i++)
@@ -1539,6 +1595,7 @@ namespace WorkCountdown
                 // ID / 对话码跟着名字走：备注最多 8 个字，以前固定 +92 会被长名字压住
                 bool named = c != null && !string.IsNullOrWhiteSpace(c.remark);
                 string sub = !room ? "ID " + selectedId
+                    : note.IsBulletin(selectedId) ? "公共房间 · 所有使用者可见"
                     : (named ? "对话码 " + selectedId : "同码的人都在这里");
                 DrawText(g, sub, fTiny, Alpha(Dim, at),
                     body.X + Measure(g, name, fName) + S(10), body.Y + S(7));
@@ -1550,7 +1607,8 @@ namespace WorkCountdown
                 var rc = note.Contact(selectedId);
                 string nm = rc == null ? "对话 " + selectedId : rc.Display();
                 DrawText(g, Fit(g, nm, fName, body.Width - S(120)), fName, Alpha(Ink, at), body.X, body.Y + S(7));
-                DrawText(g, "对话码 " + selectedId, fTiny, Alpha(Dim, at),
+                DrawText(g, note.IsBulletin(selectedId) ? "公共房间 · 所有使用者可见" : "对话码 " + selectedId,
+                    fTiny, Alpha(Dim, at),
                     body.X + Measure(g, Fit(g, nm, fName, body.Width - S(120)), fName) + S(10), body.Y + S(7));
                 top += S(22);
             }

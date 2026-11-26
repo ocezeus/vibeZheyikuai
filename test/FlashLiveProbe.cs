@@ -68,7 +68,7 @@ class FlashLiveProbe
                 {
                     int blinkAt = (int)Field(form, "noteBlinkAt");
                     int now = Environment.TickCount;
-                    double alpha = WidgetForm.CornerFlashAlpha(now - blinkAt);
+                    double alpha = WidgetForm.DotPulse(now - blinkAt, WidgetForm.NoteBlinkSpanMs);
                     string mark = "";
                     if (blinkAt != lastBlink) { mark = "  <-- BLINK"; lastBlink = blinkAt; }
                     Console.WriteLine(string.Format("{0,6} ms  noteBlinkAt={1}  alpha={2:0.00}{3}", sw.ElapsedMilliseconds, blinkAt, alpha, mark));
